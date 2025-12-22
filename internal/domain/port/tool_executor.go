@@ -1,7 +1,7 @@
 package port
 
 import (
-	"code-editing-agent/test/domain/entity"
+	"code-editing-agent/internal/domain/entity"
 	"context"
 )
 
