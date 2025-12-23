@@ -269,7 +269,7 @@ func TestProcessAssistantResponse(t *testing.T) {
 		}
 		service.aiProvider = aiProvider
 
-		response, err := service.ProcessAssistantResponse(ctx, sessionID)
+		response, toolCalls, err := service.ProcessAssistantResponse(ctx, sessionID)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -281,6 +281,9 @@ func TestProcessAssistantResponse(t *testing.T) {
 		}
 		if response.Content != "Here are the files in the current directory..." {
 			t.Errorf("unexpected response content")
+		}
+		if len(toolCalls) != 0 {
+			t.Errorf("expected no tool calls but got %d", len(toolCalls))
 		}
 
 		// Check processing state
@@ -303,17 +306,30 @@ func TestProcessAssistantResponse(t *testing.T) {
 			Content: `{"type": "tool_use", "id": "tool_123", "name": "list_files", "input": {"path": "."}}`,
 		}
 
+		toolCalls := []port.ToolCallInfo{
+			{
+				ToolID:    "tool_123",
+				ToolName:  "list_files",
+				Input:     map[string]interface{}{"path": "."},
+				InputJSON: `{"path":"."}`,
+			},
+		}
+
 		aiProvider := &mockAIProvider{
-			response: toolResponse,
+			response:  toolResponse,
+			toolCalls: toolCalls,
 		}
 		service.aiProvider = aiProvider
 
-		response, err := service.ProcessAssistantResponse(ctx, sessionID)
+		response, returnedToolCalls, err := service.ProcessAssistantResponse(ctx, sessionID)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 		if response == nil {
 			t.Errorf("expected response but got nil")
+		}
+		if len(returnedToolCalls) == 0 {
+			t.Errorf("expected tool calls but got none")
 		}
 
 		// Check processing state - should be true when tools are involved
@@ -329,7 +345,7 @@ func TestProcessAssistantResponse(t *testing.T) {
 		}
 		service.aiProvider = aiProvider
 
-		_, err := service.ProcessAssistantResponse(ctx, sessionID)
+		_, _, err := service.ProcessAssistantResponse(ctx, sessionID)
 
 		if err == nil {
 			t.Errorf("expected error from AI provider")
@@ -340,7 +356,7 @@ func TestProcessAssistantResponse(t *testing.T) {
 	})
 
 	t.Run("invalid session", func(t *testing.T) {
-		_, err := service.ProcessAssistantResponse(ctx, "invalid-session")
+		_, _, err := service.ProcessAssistantResponse(ctx, "invalid-session")
 
 		if err == nil {
 			t.Errorf("expected error for invalid session")
@@ -570,26 +586,27 @@ func TestProcessingState(t *testing.T) {
 // --- Mock Implementations for Testing ---
 
 type mockAIProvider struct {
-	response *entity.Message
-	err      error
-	model    string
+	response  *entity.Message
+	toolCalls []port.ToolCallInfo
+	err       error
+	model     string
 }
 
 func (m *mockAIProvider) SendMessage(
 	ctx context.Context,
 	messages []port.MessageParam,
 	tools []port.ToolParam,
-) (*entity.Message, error) {
+) (*entity.Message, []port.ToolCallInfo, error) {
 	if m.err != nil {
-		return nil, m.err
+		return nil, nil, m.err
 	}
 	if m.response == nil {
 		return &entity.Message{
 			Role:    entity.RoleAssistant,
 			Content: "Mock response",
-		}, nil
+		}, nil, nil
 	}
-	return m.response, nil
+	return m.response, m.toolCalls, nil
 }
 
 func (m *mockAIProvider) GenerateToolSchema() port.ToolInputSchemaParam {

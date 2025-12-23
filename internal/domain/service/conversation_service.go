@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"strings"
 )
 
 var (
@@ -96,16 +95,16 @@ func (cs *ConversationService) AddUserMessage(ctx context.Context, sessionID, co
 func (cs *ConversationService) ProcessAssistantResponse(
 	ctx context.Context,
 	sessionID string,
-) (*entity.Message, error) {
+) (*entity.Message, []port.ToolCallInfo, error) {
 	select {
 	case <-ctx.Done():
-		return nil, context.Canceled
+		return nil, nil, context.Canceled
 	default:
 	}
 
 	conversation, exists := cs.conversations[sessionID]
 	if !exists {
-		return nil, ErrConversationNotFound
+		return nil, nil, ErrConversationNotFound
 	}
 
 	// Get conversation history for AI provider
@@ -121,7 +120,7 @@ func (cs *ConversationService) ProcessAssistantResponse(
 	// Get available tools
 	tools, err := cs.toolExecutor.ListTools()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	toolParams := make([]port.ToolParam, len(tools))
@@ -134,25 +133,25 @@ func (cs *ConversationService) ProcessAssistantResponse(
 	}
 
 	// Send to AI provider
-	response, err := cs.aiProvider.SendMessage(ctx, messageParams, toolParams)
+	response, toolCalls, err := cs.aiProvider.SendMessage(ctx, messageParams, toolParams)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Add response to conversation
 	err = conversation.AddMessage(*response)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Check if response contains tool usage
-	if cs.containsToolUse(response.Content) {
+	if len(toolCalls) > 0 {
 		cs.processing[sessionID] = true
 	} else {
 		cs.processing[sessionID] = false
 	}
 
-	return response, nil
+	return response, toolCalls, nil
 }
 
 // ExecuteToolsInResponse executes all tools requested in an assistant response.
@@ -266,11 +265,6 @@ func generateSessionID() string {
 type ToolRequest struct {
 	Name  string      `json:"name"`
 	Input interface{} `json:"input"`
-}
-
-// containsToolUse checks if the content contains tool usage requests.
-func (cs *ConversationService) containsToolUse(content string) bool {
-	return strings.Contains(content, `"type": "tool_use"`) || strings.Contains(content, `"tool_use"`)
 }
 
 // parseToolRequests parses tool requests from AI response content.

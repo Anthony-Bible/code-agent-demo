@@ -170,7 +170,7 @@ func (uc *MessageProcessUseCase) processAssistantMessage(
 	sessionID string,
 ) (*dto.AssistantMessage, []dto.ToolCallInfo, error) {
 	// Get AI response via domain service
-	response, err := uc.conversationService.ProcessAssistantResponse(ctx, sessionID)
+	response, portToolCalls, err := uc.conversationService.ProcessAssistantResponse(ctx, sessionID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("AI provider error: %w", err)
 	}
@@ -178,30 +178,29 @@ func (uc *MessageProcessUseCase) processAssistantMessage(
 	// Convert to DTO
 	assistantMsg := dto.NewAssistantMessageFromEntity(response)
 
-	// Extract tool use requests from response
-	toolCalls := uc.extractToolCalls(response.Content)
+	// Convert port.ToolCallInfo to dto.ToolCallInfo
+	toolCalls := uc.convertToolCalls(portToolCalls)
 
 	return assistantMsg, toolCalls, nil
 }
 
-// extractToolCalls parses the assistant message content to find tool use requests.
-// It looks for tool_use blocks in the content and extracts tool information.
-//
-// Parameters:
-//   - content: The assistant message content
-//
-// Returns:
-//   - []dto.ToolCallInfo: List of tool calls found in the content
-func (uc *MessageProcessUseCase) extractToolCalls(content string) []dto.ToolCallInfo {
-	// Check if content contains tool use indicators
-	if !containsToolUse(content) {
+// convertToolCalls converts port level ToolCallInfo to DTO level ToolCallInfo.
+func (uc *MessageProcessUseCase) convertToolCalls(portCalls []port.ToolCallInfo) []dto.ToolCallInfo {
+	if len(portCalls) == 0 {
 		return nil
 	}
 
-	// Parse tool requests from the content
-	// This uses the domain service's parsing logic
-	// We'll look for patterns like tool_use{tool_name} or JSON tool specifications
-	return parseToolCallInfo(content)
+	dtoCalls := make([]dto.ToolCallInfo, len(portCalls))
+	for i, call := range portCalls {
+		dtoCalls[i] = dto.ToolCallInfo{
+			ToolID:       call.ToolID,
+			ToolName:     call.ToolName,
+			Input:        call.Input,
+			InputJSON:    call.InputJSON,
+			CallPriority: i,
+		}
+	}
+	return dtoCalls
 }
 
 // StartNewSession starts a new chat session.
@@ -309,91 +308,4 @@ func (uc *MessageProcessUseCase) GetConversationState(
 	}
 
 	return dto.NewConversationState(sessionID, conv, isProcessing), nil
-}
-
-// Helper functions
-
-// containsToolUse checks if the content contains tool use indicators.
-func containsToolUse(content string) bool {
-	return containsSubstrings(content,
-		`"type": "tool_use"`,
-		`"tool_use"`,
-		`tool_use{`,
-	)
-}
-
-// containsSubstrings checks if any of the given substrings are in the content.
-func containsSubstrings(content string, substrings ...string) bool {
-	for _, sub := range substrings {
-		if len(content) >= len(sub) {
-			for i := 0; i <= len(content)-len(sub); i++ {
-				if content[i:i+len(sub)] == sub {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
-// parseToolCallInfo parses tool call information from content.
-// This is a simplified implementation that looks for tool_use{tool_name} patterns.
-func parseToolCallInfo(content string) []dto.ToolCallInfo {
-	var toolCalls []dto.ToolCallInfo
-
-	// Look for tool_use{tool_name} pattern
-	// This is a simplified parser - in production, you'd use proper JSON parsing
-	toolPattern := "tool_use{"
-	start := 0
-
-	for {
-		idx := findSubstring(content, toolPattern, start)
-		if idx == -1 {
-			break
-		}
-
-		// Extract tool name
-		toolNameStart := idx + len(toolPattern)
-		toolNameEnd := findChar(content, '}', toolNameStart)
-		if toolNameEnd != -1 {
-			toolName := content[toolNameStart:toolNameEnd]
-			toolCalls = append(toolCalls, dto.ToolCallInfo{
-				ToolID:       toolName,
-				ToolName:     toolName,
-				Input:        nil,
-				InputJSON:    "",
-				CallPriority: len(toolCalls),
-			})
-		}
-
-		start = idx + 1
-	}
-
-	return toolCalls
-}
-
-// findSubstring finds the first occurrence of a substring after a start position.
-func findSubstring(s, sub string, start int) int {
-	if len(s) < len(sub)+start {
-		return -1
-	}
-	for i := start; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
-}
-
-// findChar finds the first occurrence of a character after a start position.
-func findChar(s string, c byte, start int) int {
-	if len(s) <= start {
-		return -1
-	}
-	for i := start; i < len(s); i++ {
-		if s[i] == c {
-			return i
-		}
-	}
-	return -1
 }

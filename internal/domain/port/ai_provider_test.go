@@ -19,8 +19,8 @@ func (m *mockAIProvider) SendMessage(
 	ctx context.Context,
 	messages []MessageParam,
 	tools []ToolParam,
-) (*entity.Message, error) {
-	return nil, nil
+) (*entity.Message, []ToolCallInfo, error) {
+	return nil, nil, nil
 }
 
 func (m *mockAIProvider) GenerateToolSchema() ToolInputSchemaParam {

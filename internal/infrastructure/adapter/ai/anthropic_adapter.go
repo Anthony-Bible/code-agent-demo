@@ -18,6 +18,7 @@ import (
 	"code-editing-agent/internal/domain/entity"
 	"code-editing-agent/internal/domain/port"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -76,18 +77,19 @@ func NewAnthropicAdapter(model string) port.AIProvider {
 //
 // Returns:
 //   - *entity.Message: The AI's response including any tool use blocks
+//   - []port.ToolCallInfo: Information about tools requested by the AI
 //   - error: An error if the request fails or validation fails
 func (a *AnthropicAdapter) SendMessage(
 	ctx context.Context,
 	messages []port.MessageParam,
 	tools []port.ToolParam,
-) (*entity.Message, error) {
+) (*entity.Message, []port.ToolCallInfo, error) {
 	// Validate inputs
 	if len(messages) == 0 {
-		return nil, ErrEmptyMessages
+		return nil, nil, ErrEmptyMessages
 	}
 	if a.model == "" {
-		return nil, ErrModelNotSet
+		return nil, nil, ErrModelNotSet
 	}
 
 	// Convert port messages to Anthropic SDK messages
@@ -105,10 +107,10 @@ func (a *AnthropicAdapter) SendMessage(
 		Tools:     anthropicTools,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to send message: %w", err)
+		return nil, nil, fmt.Errorf("failed to send message: %w", err)
 	}
 
-	// Convert response to domain Message
+	// Convert response to domain Message and extract tool info
 	return a.convertResponse(response)
 }
 
@@ -207,9 +209,10 @@ func (a *AnthropicAdapter) convertTools(tools []port.ToolParam) []anthropic.Tool
 // convertResponse converts an Anthropic API response to a domain Message entity.
 // It extracts text content and tool use blocks from the response and constructs
 // a simplified content string for the domain Message.
-func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity.Message, error) {
+func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity.Message, []port.ToolCallInfo, error) {
 	// Build the content string from all content blocks
 	var contentBuilder strings.Builder
+	toolCalls := []port.ToolCallInfo{}
 	toolInfo := []string{}
 
 	for _, content := range response.Content {
@@ -217,7 +220,24 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 		case "text":
 			contentBuilder.WriteString(content.Text)
 		case "tool_use":
-			toolInfo = append(toolInfo, fmt.Sprintf("tool_use{%s}", content.Name))
+			// Extract tool ID, name, and input
+			toolID := content.ID
+			toolName := content.Name
+			inputMap := make(map[string]interface{})
+
+			// Convert Input JSON to map
+			if len(content.Input) > 0 {
+				if err := json.Unmarshal(content.Input, &inputMap); err == nil {
+					inputJSON := string(content.Input)
+					toolCalls = append(toolCalls, port.ToolCallInfo{
+						ToolID:    toolID,
+						ToolName:  toolName,
+						Input:     inputMap,
+						InputJSON: inputJSON,
+					})
+					toolInfo = append(toolInfo, fmt.Sprintf("tool_use{%s}", toolName))
+				}
+			}
 		case "thinking":
 			// Thinking blocks are optional
 		}
@@ -239,8 +259,8 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 	// Create the message
 	msg, err := entity.NewMessage(entity.RoleAssistant, content)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create message: %w", err)
+		return nil, nil, fmt.Errorf("failed to create message: %w", err)
 	}
 
-	return msg, nil
+	return msg, toolCalls, nil
 }
