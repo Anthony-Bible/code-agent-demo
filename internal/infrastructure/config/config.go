@@ -86,14 +86,3 @@ func LoadConfig() *Config {
 
 	return cfg
 }
-
-// BindFlags binds CLI flags to viper configuration keys.
-// This is a placeholder - actual binding is done in the cobra command's init() function
-// by calling viper.BindPFlag directly with the flag.
-func BindFlags() {
-	// This is a placeholder - actual bindings are done in the cmd package
-	// Example:
-	// viper.BindPFlag("model", rootCmd.Flags().Lookup("model"))
-	// viper.BindPFlag("workingDir", rootCmd.Flags().Lookup("dir"))
-	// viper.BindPFlag("maxTokens", rootCmd.Flags().Lookup("max-tokens"))
-}

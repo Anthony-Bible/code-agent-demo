@@ -39,11 +39,11 @@ func runChat(cmd *cobra.Command, args []string) error {
 	uiAdapter := container.UIAdapter()
 
 	// Create a new session
-	sessionID := generateSessionID()
-	_, err = chatService.StartSession(ctx, "")
+	startResp, err := chatService.StartSession(ctx, "")
 	if err != nil {
 		return fmt.Errorf("failed to start chat session: %w", err)
 	}
+	sessionID := startResp.SessionID
 
 	// Main chat loop
 	for {
@@ -77,9 +77,4 @@ func runChat(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Error processing message: %v\n", err)
 		}
 	}
-}
-
-// generateSessionID creates a simple session identifier
-func generateSessionID() string {
-	return fmt.Sprintf("session-%d", 1)
 }
