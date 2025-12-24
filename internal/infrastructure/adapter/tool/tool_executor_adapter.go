@@ -264,7 +264,8 @@ func (a *ExecutorAdapter) executeListFiles(input json.RawMessage) (string, error
 		dir = in.Path
 	}
 
-	files, err := a.fileManager.ListFiles(dir, true)
+	// Exclude .git directories by default for cleaner AI output
+	files, err := a.fileManager.ListFiles(dir, true, false)
 	if err != nil {
 		return "", fmt.Errorf("failed to list files: %w", err)
 	}

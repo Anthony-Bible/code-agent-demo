@@ -24,7 +24,8 @@ type FileManager interface {
 
 	// ListFiles lists files and directories in the given path.
 	// If recursive is true, it will include subdirectories.
-	ListFiles(path string, recursive bool) ([]string, error)
+	// If includeGit is true, .git directories will be included; otherwise they are excluded.
+	ListFiles(path string, recursive bool, includeGit bool) ([]string, error)
 
 	// FileExists checks if a file or directory exists at the given path.
 	FileExists(path string) (bool, error)

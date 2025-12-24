@@ -130,7 +130,7 @@ func TestLocalFileManager_ListFiles(t *testing.T) {
 		os.Mkdir(filepath.Join(tempDir, "subdir1"), 0o755)
 		os.Mkdir(filepath.Join(tempDir, "subdir2"), 0o755)
 
-		files, err := fm.ListFiles(tempDir, false)
+		files, err := fm.ListFiles(tempDir, false, false)
 		assert.NoError(t, err)
 		assert.Len(t, files, 4)
 
@@ -156,7 +156,7 @@ func TestLocalFileManager_ListFiles(t *testing.T) {
 		os.Mkdir(filepath.Join(tempDir, "subdir2"), 0o755)
 		os.WriteFile(filepath.Join(tempDir, "subdir2", "file.md"), []byte("# README"), 0o644)
 
-		files, err := fm.ListFiles(tempDir, true)
+		files, err := fm.ListFiles(tempDir, true, false)
 		assert.NoError(t, err)
 		assert.Len(t, files, 6)
 
@@ -177,9 +177,147 @@ func TestLocalFileManager_ListFiles(t *testing.T) {
 		fm := file.NewLocalFileManager(tempDir)
 
 		path := filepath.Join(tempDir, "..", "etc")
-		_, err := fm.ListFiles(path, false)
+		_, err := fm.ListFiles(path, false, false)
 		assert.Error(t, err)
 		assert.Equal(t, "invalid path", err.Error())
+	})
+
+	t.Run("excludes .git directory by default (non-recursive)", func(t *testing.T) {
+		tempDir := t.TempDir()
+		fm := file.NewLocalFileManager(tempDir)
+
+		// Create .git directory and other files
+		os.Mkdir(filepath.Join(tempDir, ".git"), 0o755)
+		os.WriteFile(filepath.Join(tempDir, ".git", "config"), []byte("[core]\n"), 0o644)
+		os.WriteFile(filepath.Join(tempDir, "file1.txt"), []byte("content1"), 0o644)
+
+		files, err := fm.ListFiles(tempDir, false, false)
+		assert.NoError(t, err)
+		assert.Len(t, files, 1)
+		assert.Equal(t, "file1.txt", files[0])
+	})
+
+	t.Run("includes .git directory when explicitly requested (non-recursive)", func(t *testing.T) {
+		tempDir := t.TempDir()
+		fm := file.NewLocalFileManager(tempDir)
+
+		// Create .git directory and other files
+		os.Mkdir(filepath.Join(tempDir, ".git"), 0o755)
+		os.WriteFile(filepath.Join(tempDir, ".git", "config"), []byte("[core]\n"), 0o644)
+		os.WriteFile(filepath.Join(tempDir, "file1.txt"), []byte("content1"), 0o644)
+
+		files, err := fm.ListFiles(tempDir, false, true)
+		assert.NoError(t, err)
+		assert.Len(t, files, 2)
+
+		fileMap := make(map[string]bool)
+		for _, f := range files {
+			fileMap[f] = true
+		}
+		assert.True(t, fileMap[".git"])
+		assert.True(t, fileMap["file1.txt"])
+	})
+
+	t.Run("excludes .git directory recursively", func(t *testing.T) {
+		tempDir := t.TempDir()
+		fm := file.NewLocalFileManager(tempDir)
+
+		// Create .git directory with content
+		gitDir := filepath.Join(tempDir, ".git")
+		os.Mkdir(gitDir, 0o755)
+		os.WriteFile(filepath.Join(gitDir, "config"), []byte("[core]\n"), 0o644)
+		os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644)
+		os.Mkdir(filepath.Join(gitDir, "objects"), 0o755)
+		os.Mkdir(filepath.Join(gitDir, "refs"), 0o755)
+		os.WriteFile(filepath.Join(gitDir, "refs", "heads"), []byte(""), 0o644)
+
+		// Create other files at root
+		os.WriteFile(filepath.Join(tempDir, "file1.txt"), []byte("content1"), 0o644)
+		os.WriteFile(filepath.Join(tempDir, "file2.go"), []byte("package main"), 0o644)
+
+		// Create subdirectory with files
+		subdir := filepath.Join(tempDir, "subdir")
+		os.Mkdir(subdir, 0o755)
+		os.WriteFile(filepath.Join(subdir, "nested.txt"), []byte("nested content"), 0o644)
+
+		files, err := fm.ListFiles(tempDir, true, false)
+		assert.NoError(t, err)
+		assert.Len(t, files, 4)
+
+		fileMap := make(map[string]bool)
+		for _, f := range files {
+			assert.NotContains(t, f, ".git", "Expected .git directory to be excluded")
+			fileMap[f] = true
+		}
+		// Verify non-git files are included
+		assert.True(t, fileMap["file1.txt"])
+		assert.True(t, fileMap["file2.go"])
+		assert.True(t, fileMap["subdir"])
+		assert.True(t, fileMap["subdir/nested.txt"])
+	})
+
+	t.Run("includes .git directory when explicitly requested (recursive)", func(t *testing.T) {
+		tempDir := t.TempDir()
+		fm := file.NewLocalFileManager(tempDir)
+
+		// Create .git directory with content
+		gitDir := filepath.Join(tempDir, ".git")
+		os.Mkdir(gitDir, 0o755)
+		os.WriteFile(filepath.Join(gitDir, "config"), []byte("[core]\n"), 0o644)
+		os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644)
+		os.Mkdir(filepath.Join(gitDir, "objects"), 0o755)
+		os.Mkdir(filepath.Join(gitDir, "refs"), 0o755)
+
+		// Create other files
+		os.WriteFile(filepath.Join(tempDir, "file1.txt"), []byte("content1"), 0o644)
+
+		files, err := fm.ListFiles(tempDir, true, true)
+		assert.NoError(t, err)
+
+		fileMap := make(map[string]bool)
+		for _, f := range files {
+			fileMap[f] = true
+		}
+		// Verify .git and its contents are included
+		assert.True(t, fileMap[".git"])
+		assert.True(t, fileMap[".git/config"])
+		assert.True(t, fileMap[".git/HEAD"])
+		assert.True(t, fileMap[".git/objects"])
+		assert.True(t, fileMap[".git/refs"])
+		// Verify other files are still included
+		assert.True(t, fileMap["file1.txt"])
+	})
+
+	t.Run("excludes nested .git directories recursively", func(t *testing.T) {
+		tempDir := t.TempDir()
+		fm := file.NewLocalFileManager(tempDir)
+
+		// Create nested structure with .git in subdirectories
+		git1 := filepath.Join(tempDir, "module1", ".git")
+		git2 := filepath.Join(tempDir, "module2", "nested", ".git")
+		os.MkdirAll(git1, 0o755)
+		os.MkdirAll(git2, 0o755)
+		os.WriteFile(filepath.Join(git1, "config"), []byte("[core]\n"), 0o644)
+		os.WriteFile(filepath.Join(git2, "config"), []byte("[core]\n"), 0o644)
+
+		// Create non-git files
+		os.WriteFile(filepath.Join(tempDir, "module1", "main.go"), []byte("package main"), 0o644)
+		os.WriteFile(filepath.Join(tempDir, "module2", "nested", "app.go"), []byte("package app"), 0o644)
+
+		files, err := fm.ListFiles(tempDir, true, false)
+		assert.NoError(t, err)
+
+		// Verify no .git paths are included
+		for _, f := range files {
+			assert.NotContains(t, f, ".git", "Expected no .git paths, got: "+f)
+		}
+		// Verify non-git files are included
+		fileMap := make(map[string]bool)
+		for _, f := range files {
+			fileMap[f] = true
+		}
+		assert.True(t, fileMap["module1/main.go"])
+		assert.True(t, fileMap["module2/nested/app.go"])
 	})
 }
 

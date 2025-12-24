@@ -327,7 +327,7 @@ func (fm *LocalFileManager) WriteFile(path string, content string) error {
 }
 
 // ListFiles lists files and directories in the given path.
-func (fm *LocalFileManager) ListFiles(path string, recursive bool) ([]string, error) {
+func (fm *LocalFileManager) ListFiles(path string, recursive bool, includeGit bool) ([]string, error) {
 	if err := fm.validatePath(path); err != nil {
 		return nil, ErrInvalidPath
 	}
@@ -341,14 +341,14 @@ func (fm *LocalFileManager) ListFiles(path string, recursive bool) ([]string, er
 	}
 
 	if recursive {
-		return fm.listFilesRecursive(path)
+		return fm.listFilesRecursive(path, includeGit)
 	}
 
-	return fm.listFilesNonRecursive(path)
+	return fm.listFilesNonRecursive(path, includeGit)
 }
 
 // listFilesRecursive handles recursive file listing.
-func (fm *LocalFileManager) listFilesRecursive(path string) ([]string, error) {
+func (fm *LocalFileManager) listFilesRecursive(path string, includeGit bool) ([]string, error) {
 	var files []string
 
 	err := filepath.Walk(path, func(walkPath string, _ fs.FileInfo, walkErr error) error {
@@ -359,6 +359,11 @@ func (fm *LocalFileManager) listFilesRecursive(path string) ([]string, error) {
 		// Skip the root path
 		if walkPath == path {
 			return nil
+		}
+
+		// Skip .git directories unless explicitly included
+		if !includeGit && filepath.Base(walkPath) == ".git" {
+			return fs.SkipDir
 		}
 
 		// Convert to relative path
@@ -378,7 +383,7 @@ func (fm *LocalFileManager) listFilesRecursive(path string) ([]string, error) {
 }
 
 // listFilesNonRecursive handles non-recursive file listing.
-func (fm *LocalFileManager) listFilesNonRecursive(path string) ([]string, error) {
+func (fm *LocalFileManager) listFilesNonRecursive(path string, includeGit bool) ([]string, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return nil, err
@@ -386,6 +391,10 @@ func (fm *LocalFileManager) listFilesNonRecursive(path string) ([]string, error)
 
 	files := make([]string, 0, len(entries))
 	for _, entry := range entries {
+		// Skip .git directories unless explicitly included
+		if !includeGit && entry.Name() == ".git" {
+			continue
+		}
 		files = append(files, filepath.ToSlash(entry.Name()))
 	}
 

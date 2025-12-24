@@ -42,15 +42,13 @@ write, edit, and understand code through an interactive chat interface.
 
 It uses the Claude AI to provide intelligent code suggestions,
 refactoring options, and explanations.`,
-	PreRunE: func(cmd *cobra.Command, args []string) error {
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		_ = args // args unused but required by cobra
 		// Load configuration
 		cfg = config.LoadConfig()
 
 		// Store config in command context and package variable
 		cmd.SetContext(contextWithConfig(cmd.Context(), cfg))
-
-		// Display welcome message
-		fmt.Println(cfg.WelcomeMessage)
 
 		return nil
 	},
