@@ -91,6 +91,31 @@ func (cs *ConversationService) AddUserMessage(ctx context.Context, sessionID, co
 	return message, nil
 }
 
+// AddToolResultMessage adds tool execution results to the conversation.
+func (cs *ConversationService) AddToolResultMessage(
+	ctx context.Context,
+	sessionID string,
+	toolResults []entity.ToolResult,
+) error {
+	select {
+	case <-ctx.Done():
+		return context.Canceled
+	default:
+	}
+
+	conversation, exists := cs.conversations[sessionID]
+	if !exists {
+		return ErrConversationNotFound
+	}
+
+	message, err := entity.NewToolResultMessage(entity.RoleUser, toolResults)
+	if err != nil {
+		return err
+	}
+
+	return conversation.AddMessage(*message)
+}
+
 // ProcessAssistantResponse processes an AI assistant response, handling tools and text.
 func (cs *ConversationService) ProcessAssistantResponse(
 	ctx context.Context,
