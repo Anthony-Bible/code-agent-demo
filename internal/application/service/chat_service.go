@@ -374,7 +374,7 @@ func (cs *ChatService) continueAfterToolExecution(
 		AssistantMsg: contResp.AssistantMsg,
 		HasTools:     contResp.HasTools,
 		IsFinished:   contResp.IsFinished,
-		ToolCalls:    []dto.ToolCallInfo{},
+		ToolCalls:    contResp.ToolCalls,
 	}, nil
 }
 

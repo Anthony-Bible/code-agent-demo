@@ -92,8 +92,14 @@ type LocalFileManager struct {
 // Returns:
 //   - port.FileManager: An implementation of the FileManager interface ready for use
 func NewLocalFileManager(baseDir string) port.FileManager {
+	// Convert baseDir to absolute path for proper boundary checking
+	absBaseDir, err := filepath.Abs(baseDir)
+	if err != nil {
+		// Fall back to original if abs fails (shouldn't happen in normal operation)
+		absBaseDir = baseDir
+	}
 	return &LocalFileManager{
-		baseDir: baseDir,
+		baseDir: absBaseDir,
 	}
 }
 
@@ -236,18 +242,6 @@ func (fm *LocalFileManager) checkIsDirectory(path string) error {
 	if err != nil {
 		return err
 	}
-	if info.IsDir() {
-		return ErrIsDirectory
-	}
-	return nil
-}
-
-// checkIsNotDirectory checks if a path is not a directory and returns appropriate error.
-func (fm *LocalFileManager) checkIsNotDirectory(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
 	if !info.IsDir() {
 		return ErrNotDirectory
 	}
@@ -342,7 +336,7 @@ func (fm *LocalFileManager) ListFiles(path string, recursive bool) ([]string, er
 	defer fm.mu.RUnlock()
 
 	// Check if path exists and is a directory
-	if err := fm.checkIsNotDirectory(path); err != nil {
+	if err := fm.checkIsDirectory(path); err != nil {
 		return nil, err
 	}
 

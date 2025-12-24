@@ -86,6 +86,7 @@ type ContinueChatResponse struct {
 	SessionID    string            `json:"session_id"`    // The conversation session ID
 	AssistantMsg *AssistantMessage `json:"assistant_msg"` // The AI's response
 	HasTools     bool              `json:"has_tools"`     // Whether the response contains tool calls
+	ToolCalls    []ToolCallInfo    `json:"tool_calls"`    // Information about tools that were requested
 	IsFinished   bool              `json:"is_finished"`   // Whether the response is complete
 }
 

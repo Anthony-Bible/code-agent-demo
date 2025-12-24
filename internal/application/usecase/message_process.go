@@ -138,7 +138,7 @@ func (uc *MessageProcessUseCase) ContinueChat(
 	}
 
 	// Process the assistant response
-	assistantMsg, _, err := uc.processAssistantMessage(ctx, sessionID)
+	assistantMsg, toolCalls, err := uc.processAssistantMessage(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process assistant message: %w", err)
 	}
@@ -150,6 +150,7 @@ func (uc *MessageProcessUseCase) ContinueChat(
 		SessionID:    sessionID,
 		AssistantMsg: assistantMsg,
 		HasTools:     isProcessing,
+		ToolCalls:    toolCalls,
 		IsFinished:   !isProcessing,
 	}, nil
 }
