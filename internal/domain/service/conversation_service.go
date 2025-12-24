@@ -136,9 +136,37 @@ func (cs *ConversationService) ProcessAssistantResponse(
 	messages := conversation.GetMessages()
 	messageParams := make([]port.MessageParam, len(messages))
 	for i, msg := range messages {
+		// Convert ToolCalls from entity to port
+		var toolCallParams []port.ToolCallParam
+		if len(msg.ToolCalls) > 0 {
+			toolCallParams = make([]port.ToolCallParam, len(msg.ToolCalls))
+			for j, tc := range msg.ToolCalls {
+				toolCallParams[j] = port.ToolCallParam{
+					ToolID:   tc.ToolID,
+					ToolName: tc.ToolName,
+					Input:    tc.Input,
+				}
+			}
+		}
+
+		// Convert ToolResults from entity to port
+		var toolResultParams []port.ToolResultParam
+		if len(msg.ToolResults) > 0 {
+			toolResultParams = make([]port.ToolResultParam, len(msg.ToolResults))
+			for j, tr := range msg.ToolResults {
+				toolResultParams[j] = port.ToolResultParam{
+					ToolID:  tr.ToolID,
+					Result:  tr.Result,
+					IsError: tr.IsError,
+				}
+			}
+		}
+
 		messageParams[i] = port.MessageParam{
-			Role:    msg.Role,
-			Content: msg.Content,
+			Role:        msg.Role,
+			Content:     msg.Content,
+			ToolCalls:   toolCallParams,
+			ToolResults: toolResultParams,
 		}
 	}
 
