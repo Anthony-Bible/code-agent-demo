@@ -235,6 +235,7 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 	// Build the content string from all content blocks
 	var contentBuilder strings.Builder
 	toolCalls := []port.ToolCallInfo{}
+	entityToolCalls := []entity.ToolCall{}
 
 	for _, content := range response.Content {
 		switch content.Type {
@@ -256,6 +257,12 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 						Input:     inputMap,
 						InputJSON: inputJSON,
 					})
+					// Populate entity tool calls for storage in Message
+					entityToolCalls = append(entityToolCalls, entity.ToolCall{
+						ToolID:   toolID,
+						ToolName: toolName,
+						Input:    inputMap,
+					})
 				}
 			}
 		case "thinking":
@@ -272,6 +279,11 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 	msg, err := entity.NewMessage(entity.RoleAssistant, content)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create message: %w", err)
+	}
+
+	// Store tool calls in the message entity so they persist in conversation history
+	if len(entityToolCalls) > 0 {
+		msg.ToolCalls = entityToolCalls
 	}
 
 	return msg, toolCalls, nil
