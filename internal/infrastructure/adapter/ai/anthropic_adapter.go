@@ -213,7 +213,6 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 	// Build the content string from all content blocks
 	var contentBuilder strings.Builder
 	toolCalls := []port.ToolCallInfo{}
-	toolInfo := []string{}
 
 	for _, content := range response.Content {
 		switch content.Type {
@@ -235,20 +234,11 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 						Input:     inputMap,
 						InputJSON: inputJSON,
 					})
-					toolInfo = append(toolInfo, fmt.Sprintf("tool_use{%s}", toolName))
 				}
 			}
 		case "thinking":
 			// Thinking blocks are optional
 		}
-	}
-
-	// If there were tools, add tool info to content
-	if len(toolInfo) > 0 {
-		if contentBuilder.Len() > 0 {
-			contentBuilder.WriteString("\n")
-		}
-		contentBuilder.WriteString(strings.Join(toolInfo, ", "))
 	}
 
 	content := contentBuilder.String()
