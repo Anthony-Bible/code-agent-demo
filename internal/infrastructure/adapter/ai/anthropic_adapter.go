@@ -167,14 +167,36 @@ func (a *AnthropicAdapter) GetModel() string {
 }
 
 // convertMessages converts port MessageParam slice to Anthropic SDK MessageParam slice.
+// It handles tool use blocks for assistant messages and tool result blocks for user messages.
 func (a *AnthropicAdapter) convertMessages(messages []port.MessageParam) []anthropic.MessageParam {
 	result := make([]anthropic.MessageParam, len(messages))
 	for i, msg := range messages {
-		if msg.Role == entity.RoleAssistant {
-			result[i] = anthropic.NewAssistantMessage(anthropic.NewTextBlock(msg.Content))
-		} else {
-			// Default to user message for roles like "user" and "system"
-			result[i] = anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content))
+		switch {
+		case msg.Role == entity.RoleUser && len(msg.ToolResults) > 0:
+			// Build tool result blocks for user messages
+			resultBlocks := make([]anthropic.ContentBlockParamUnion, len(msg.ToolResults))
+			for j, tr := range msg.ToolResults {
+				resultBlocks[j] = anthropic.NewToolResultBlock(tr.ToolID, tr.Result, tr.IsError)
+			}
+			result[i] = anthropic.NewUserMessage(resultBlocks...)
+		case msg.Role == entity.RoleAssistant && len(msg.ToolCalls) > 0:
+			// Build assistant message with tool use blocks
+			blocks := []anthropic.ContentBlockParamUnion{}
+			if msg.Content != "" {
+				blocks = append(blocks, anthropic.NewTextBlock(msg.Content))
+			}
+			for _, tc := range msg.ToolCalls {
+				blocks = append(blocks, anthropic.NewToolUseBlock(tc.ToolID, tc.Input, tc.ToolName))
+			}
+			result[i] = anthropic.NewAssistantMessage(blocks...)
+		default:
+			// Simple text message (backward compatible)
+			if msg.Role == entity.RoleAssistant {
+				result[i] = anthropic.NewAssistantMessage(anthropic.NewTextBlock(msg.Content))
+			} else {
+				// Default to user message for roles like "user" and "system"
+				result[i] = anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content))
+			}
 		}
 	}
 	return result
