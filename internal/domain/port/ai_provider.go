@@ -7,8 +7,24 @@ import (
 
 // MessageParam represents a parameter for sending messages to AI providers.
 type MessageParam struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role        string            `json:"role"`
+	Content     string            `json:"content"`
+	ToolCalls   []ToolCallParam   `json:"tool_calls,omitempty"`
+	ToolResults []ToolResultParam `json:"tool_results,omitempty"`
+}
+
+// ToolCallParam represents a tool use block in a message parameter.
+type ToolCallParam struct {
+	ToolID   string                 `json:"tool_id"`
+	ToolName string                 `json:"tool_name"`
+	Input    map[string]interface{} `json:"input"`
+}
+
+// ToolResultParam represents a tool result block in a message parameter.
+type ToolResultParam struct {
+	ToolID  string `json:"tool_id"`
+	Result  string `json:"result"`
+	IsError bool   `json:"is_error"`
 }
 
 // ToolParam represents a tool parameter for AI providers.
