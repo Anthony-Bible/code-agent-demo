@@ -320,30 +320,27 @@ func (cs *ChatService) addToolResultsToConversation(
 ) error {
 	// Match each ToolExecutionResponse to its corresponding ToolCallInfo
 	// to get the ToolID (required for Anthropic to match tool results)
+	// Tools are executed in order, so toolResults[i] matches toolCalls[i]
 	entityToolResults := make([]entity.ToolResult, 0, len(toolResults))
 
-	for _, result := range toolResults {
-		// Find the matching tool call to get the ToolID
-		var toolID string
-		for _, tc := range toolCalls {
-			if tc.ToolName == result.ToolName {
-				toolID = tc.ToolID
-				break
-			}
+	for i := range toolResults {
+		// Bounds check to ensure we don't panic on mismatched arrays
+		if i >= len(toolCalls) {
+			return fmt.Errorf("tool result at index %d has no corresponding tool call (got %d results, %d calls)",
+				i, len(toolResults), len(toolCalls))
 		}
 
-		// If no tool ID found, we can't match this result properly
-		if toolID == "" {
-			// Try to use tool name as fallback with a prefix
-			toolID = "tool_" + result.ToolName
-		}
+		// Use index-based matching - toolResults[i] matches toolCalls[i]
+		// This is more reliable than name-based matching, which fails when
+		// multiple calls to the same tool are made with different parameters
+		toolCall := toolCalls[i]
 
 		// Convert DTO result to entity ToolResult
 		// IsError is true if there's an error message
 		toolResult := entity.ToolResult{
-			ToolID:  toolID,
-			Result:  result.Result,
-			IsError: result.Error != "",
+			ToolID:  toolCall.ToolID,
+			Result:  toolResults[i].Result,
+			IsError: toolResults[i].Error != "",
 		}
 
 		entityToolResults = append(entityToolResults, toolResult)
