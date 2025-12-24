@@ -30,6 +30,7 @@ var (
 type ChatService struct {
 	messageProcessUseCase *usecase.MessageProcessUseCase
 	toolExecutionUseCase  *usecase.ToolExecutionUseCase
+	conversationService   *service.ConversationService
 	userInterface         port.UserInterface
 	aiProvider            port.AIProvider
 	toolExecutor          port.ToolExecutor
@@ -76,9 +77,13 @@ func NewChatService(
 		return nil, errors.New("file manager is required")
 	}
 
+	// Extract conversation service from message process use case
+	convService := msgProcUC.GetConversationService()
+
 	return &ChatService{
 		messageProcessUseCase: msgProcUC,
 		toolExecutionUseCase:  toolExecUC,
+		conversationService:   convService,
 		userInterface:         ui,
 		aiProvider:            ai,
 		toolExecutor:          toolExec,
@@ -136,6 +141,7 @@ func NewChatServiceFromDomain(
 	return &ChatService{
 		messageProcessUseCase: msgProcUC,
 		toolExecutionUseCase:  toolExecUC,
+		conversationService:   convService,
 		userInterface:         ui,
 		aiProvider:            ai,
 		toolExecutor:          toolExec,
@@ -246,6 +252,12 @@ func (cs *ChatService) handleToolRequestCycle(
 		// Display the tool results
 		cs.displayToolResults(batchResp.Results, currentResp.ToolCalls)
 
+		// Add tool results to conversation so AI can see them
+		err = cs.addToolResultsToConversation(ctx, sessionID, batchResp.Results, currentResp.ToolCalls)
+		if err != nil {
+			return nil, err
+		}
+
 		// Continue the chat and get next response
 		currentResp, err = cs.continueAfterToolExecution(ctx, sessionID)
 		if err != nil {
@@ -296,6 +308,53 @@ func (cs *ChatService) findInputJSONForTool(toolName string, toolCalls []dto.Too
 		}
 	}
 	return "{}"
+}
+
+// addToolResultsToConversation converts DTO tool results to entity ToolResults
+// and adds them to the conversation as a tool result message.
+func (cs *ChatService) addToolResultsToConversation(
+	ctx context.Context,
+	sessionID string,
+	toolResults []dto.ToolExecutionResponse,
+	toolCalls []dto.ToolCallInfo,
+) error {
+	// Match each ToolExecutionResponse to its corresponding ToolCallInfo
+	// to get the ToolID (required for Anthropic to match tool results)
+	entityToolResults := make([]entity.ToolResult, 0, len(toolResults))
+
+	for _, result := range toolResults {
+		// Find the matching tool call to get the ToolID
+		var toolID string
+		for _, tc := range toolCalls {
+			if tc.ToolName == result.ToolName {
+				toolID = tc.ToolID
+				break
+			}
+		}
+
+		// If no tool ID found, we can't match this result properly
+		if toolID == "" {
+			// Try to use tool name as fallback with a prefix
+			toolID = "tool_" + result.ToolName
+		}
+
+		// Convert DTO result to entity ToolResult
+		// IsError is true if there's an error message
+		toolResult := entity.ToolResult{
+			ToolID:  toolID,
+			Result:  result.Result,
+			IsError: result.Error != "",
+		}
+
+		entityToolResults = append(entityToolResults, toolResult)
+	}
+
+	// Call ConversationService to add the tool result message to the conversation
+	if cs.conversationService == nil {
+		return errors.New("conversation service is not initialized")
+	}
+
+	return cs.conversationService.AddToolResultMessage(ctx, sessionID, entityToolResults)
 }
 
 // continueAfterToolExecution continues the chat after tool execution.

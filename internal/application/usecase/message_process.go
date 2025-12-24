@@ -309,3 +309,9 @@ func (uc *MessageProcessUseCase) GetConversationState(
 
 	return dto.NewConversationState(sessionID, conv, isProcessing), nil
 }
+
+// GetConversationService returns the underlying conversation service.
+// This is used by services that need direct access to manage conversation state.
+func (uc *MessageProcessUseCase) GetConversationService() *service.ConversationService {
+	return uc.conversationService
+}
