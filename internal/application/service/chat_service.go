@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 )
 
 var (
@@ -258,8 +259,14 @@ func (cs *ChatService) handleToolRequestCycle(
 			return nil, err
 		}
 
+		// Create a fresh context for the AI continuation call with a timeout
+		// This isolates the AI call from the root signal context
+		aiTimeout := 2 * time.Minute
+		aiCtx, aiCancel := context.WithTimeout(context.Background(), aiTimeout)
+		defer aiCancel()
+
 		// Continue the chat and get next response
-		currentResp, err = cs.continueAfterToolExecution(ctx, sessionID)
+		currentResp, err = cs.continueAfterToolExecution(aiCtx, sessionID)
 		if err != nil {
 			return nil, err
 		}

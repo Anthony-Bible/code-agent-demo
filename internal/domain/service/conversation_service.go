@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 )
 
 var (
@@ -123,7 +124,7 @@ func (cs *ConversationService) ProcessAssistantResponse(
 ) (*entity.Message, []port.ToolCallInfo, error) {
 	select {
 	case <-ctx.Done():
-		return nil, nil, context.Canceled
+		return nil, nil, fmt.Errorf("context cancelled before AI call: %w", ctx.Err())
 	default:
 	}
 

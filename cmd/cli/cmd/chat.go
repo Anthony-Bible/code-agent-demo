@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"code-editing-agent/internal/infrastructure/config"
+	"context"
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -73,8 +75,14 @@ func runChat(cmd *cobra.Command, args []string) error {
 		// Send message and get response
 		_, err = chatService.SendMessage(ctx, sessionID, userInput)
 		if err != nil {
-			// Display error but continue (service handles display internally)
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error processing message: %v\n", err)
+			// Check for context cancellation specifically
+			if errors.Is(err, context.Canceled) {
+				fmt.Fprintf(cmd.ErrOrStderr(), "\nOperation cancelled. Type 'exit' to quit or continue.\n")
+			} else {
+				errMsg := fmt.Sprintf("Error processing message: %v", err)
+				_ = uiAdapter.DisplayError(fmt.Errorf("%s", errMsg))
+				fmt.Fprintf(cmd.ErrOrStderr(), "%s\n", errMsg)
+			}
 		}
 	}
 }

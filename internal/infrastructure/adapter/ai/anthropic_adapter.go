@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/shared/constant"
 )
 
 var (
@@ -206,26 +207,58 @@ func (a *AnthropicAdapter) convertMessages(messages []port.MessageParam) []anthr
 func (a *AnthropicAdapter) convertTools(tools []port.ToolParam) []anthropic.ToolUnionParam {
 	result := make([]anthropic.ToolUnionParam, len(tools))
 	for i, tool := range tools {
-		// Build properties map for the input schema
-		properties := make(map[string]interface{})
-
-		if tool.InputSchema != nil {
-			for key, val := range tool.InputSchema {
-				properties[key] = val
-			}
-		}
-
 		result[i] = anthropic.ToolUnionParam{
-			OfTool: &anthropic.ToolParam{
-				Name:        tool.Name,
-				Description: anthropic.String(tool.Description),
-				InputSchema: anthropic.ToolInputSchemaParam{
-					Properties: properties,
-				},
-			},
+			OfTool: a.buildToolParam(tool),
 		}
 	}
 	return result
+}
+
+// buildToolParam constructs an anthropic.ToolParam from a port.ToolParam.
+func (a *AnthropicAdapter) buildToolParam(tool port.ToolParam) *anthropic.ToolParam {
+	param := &anthropic.ToolParam{
+		Name:        tool.Name,
+		Description: anthropic.String(tool.Description),
+	}
+
+	if tool.InputSchema != nil {
+		param.InputSchema = a.convertInputSchema(tool.InputSchema)
+	}
+
+	return param
+}
+
+// convertInputSchema converts a port ToolInputSchemaParam to an anthropic ToolInputSchemaParam.
+func (a *AnthropicAdapter) convertInputSchema(schema port.ToolInputSchemaParam) anthropic.ToolInputSchemaParam {
+	return anthropic.ToolInputSchemaParam{
+		Type:       constant.Object(extractStringField(schema, "type")),
+		Properties: extractMapField(schema, "properties"),
+		Required:   extractStringSliceField(schema, "required"),
+	}
+}
+
+// extractStringField extracts a string value from a schema map, returning empty string if not found.
+func extractStringField(schema port.ToolInputSchemaParam, key string) string {
+	if value, ok := schema[key].(string); ok {
+		return value
+	}
+	return ""
+}
+
+// extractMapField extracts a map value from a schema map, returning nil if not found.
+func extractMapField(schema port.ToolInputSchemaParam, key string) map[string]interface{} {
+	if value, ok := schema[key].(map[string]interface{}); ok {
+		return value
+	}
+	return nil
+}
+
+// extractStringSliceField extracts a string slice from a schema map, returning nil if not found.
+func extractStringSliceField(schema port.ToolInputSchemaParam, key string) []string {
+	if value, ok := schema[key].([]string); ok {
+		return value
+	}
+	return nil
 }
 
 // convertResponse converts an Anthropic API response to a domain Message entity.

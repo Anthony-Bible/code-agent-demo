@@ -173,6 +173,10 @@ func (uc *MessageProcessUseCase) processAssistantMessage(
 	// Get AI response via domain service
 	response, portToolCalls, err := uc.conversationService.ProcessAssistantResponse(ctx, sessionID)
 	if err != nil {
+		// Check if it's a context cancellation error and provide clearer messaging
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, nil, fmt.Errorf("request cancelled: AI request was interrupted (context: %w)", err)
+		}
 		return nil, nil, fmt.Errorf("AI provider error: %w", err)
 	}
 
