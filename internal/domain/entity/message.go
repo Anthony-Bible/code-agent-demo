@@ -14,27 +14,47 @@ const (
 )
 
 var (
-	ErrEmptyRole      = errors.New("role cannot be empty")
-	ErrEmptyContent   = errors.New("content cannot be empty")
-	ErrInvalidRole    = errors.New("invalid role")
-	ErrZeroTimestamp  = errors.New("timestamp cannot be zero")
-	ErrInvalidContent = errors.New("content cannot be whitespace only")
+	ErrEmptyRole       = errors.New("role cannot be empty")
+	ErrEmptyContent    = errors.New("content cannot be empty")
+	ErrInvalidRole     = errors.New("invalid role")
+	ErrZeroTimestamp   = errors.New("timestamp cannot be zero")
+	ErrInvalidContent  = errors.New("content cannot be whitespace only")
+	ErrNoContentOrTool = errors.New("message must have either content or tool calls/results")
 )
+
+// ToolCall represents a tool use block in an assistant message.
+type ToolCall struct {
+	ToolID   string                 `json:"tool_id"`
+	ToolName string                 `json:"tool_name"`
+	Input    map[string]interface{} `json:"input"`
+}
+
+// ToolResult represents a tool result block in a user message.
+type ToolResult struct {
+	ToolID  string `json:"tool_id"`
+	Result  string `json:"result"`
+	IsError bool   `json:"is_error"`
+}
 
 // Message represents a chat message with role, content, and timestamp.
 // It is an immutable entity that represents a single message in a conversation.
 type Message struct {
-	Role      string    `json:"role"`      // The role of the message sender (user, assistant, or system)
-	Content   string    `json:"content"`   // The actual content of the message
-	Timestamp time.Time `json:"timestamp"` // When the message was created
+	Role        string       `json:"role"`                   // The role of the message sender (user, assistant, or system)
+	Content     string       `json:"content"`                // The actual content of the message
+	Timestamp   time.Time    `json:"timestamp"`              // When the message was created
+	ToolCalls   []ToolCall   `json:"tool_calls,omitempty"`   // Tool calls from assistant messages
+	ToolResults []ToolResult `json:"tool_results,omitempty"` // Tool results from user messages
 }
 
 // NewMessage creates a new message with the given role and content.
 // The timestamp is automatically set to the current time.
+// Content can be empty if the message contains tool calls or results.
 func NewMessage(role, content string) (*Message, error) {
 	if role == "" {
 		return nil, ErrEmptyRole
 	}
+	// For backwards compatibility, if content is empty for a non-tool message, return error
+	// The tool fields will be added separately after creation via a different method
 	if content == "" {
 		return nil, ErrEmptyContent
 	}
@@ -46,10 +66,61 @@ func NewMessage(role, content string) (*Message, error) {
 	}
 
 	return &Message{
-		Role:      role,
-		Content:   content,
-		Timestamp: time.Now(),
+		Role:        role,
+		Content:     content,
+		Timestamp:   time.Now(),
+		ToolCalls:   nil,
+		ToolResults: nil,
 	}, nil
+}
+
+// NewToolCallMessage creates a new message with tool calls.
+// Content can be empty since the message contains tool calls.
+func NewToolCallMessage(role string, toolCalls []ToolCall) (*Message, error) {
+	if role == "" {
+		return nil, ErrEmptyRole
+	}
+	if role != RoleUser && role != RoleAssistant && role != RoleSystem {
+		return nil, ErrInvalidRole
+	}
+	if len(toolCalls) == 0 {
+		return nil, ErrNoContentOrTool
+	}
+
+	return &Message{
+		Role:        role,
+		Content:     "",
+		Timestamp:   time.Now(),
+		ToolCalls:   toolCalls,
+		ToolResults: nil,
+	}, nil
+}
+
+// NewToolResultMessage creates a new message with tool results.
+// Content can be empty since the message contains tool results.
+func NewToolResultMessage(role string, toolResults []ToolResult) (*Message, error) {
+	if role == "" {
+		return nil, ErrEmptyRole
+	}
+	if role != RoleUser && role != RoleAssistant && role != RoleSystem {
+		return nil, ErrInvalidRole
+	}
+	if len(toolResults) == 0 {
+		return nil, ErrNoContentOrTool
+	}
+
+	return &Message{
+		Role:        role,
+		Content:     "",
+		Timestamp:   time.Now(),
+		ToolCalls:   nil,
+		ToolResults: toolResults,
+	}, nil
+}
+
+// hasToolContent returns true if the message has either tool calls or tool results.
+func (m *Message) hasToolContent() bool {
+	return len(m.ToolCalls) > 0 || len(m.ToolResults) > 0
 }
 
 // IsUser returns true if the message is from a user.
@@ -69,15 +140,22 @@ func (m *Message) IsSystem() bool {
 
 // Validate checks if the message is valid.
 // It returns an error if any required field is empty or invalid.
+// A message must have either content or tool calls/results.
 func (m *Message) Validate() error {
 	if m.Role == "" {
 		return ErrEmptyRole
 	}
-	if m.Content == "" {
+	// Allow empty content if the message has tool calls or results
+	if m.Content == "" && !m.hasToolContent() {
 		return ErrEmptyContent
 	}
-	if strings.TrimSpace(m.Content) == "" {
+	// Check for whitespace-only content if no tool content
+	if m.Content != "" && strings.TrimSpace(m.Content) == "" && !m.hasToolContent() {
 		return ErrInvalidContent
+	}
+	// Ensure at least one of content or tool content is present
+	if m.Content == "" && strings.TrimSpace(m.Content) == "" && !m.hasToolContent() {
+		return ErrNoContentOrTool
 	}
 	if m.Role != RoleUser && m.Role != RoleAssistant && m.Role != RoleSystem {
 		return ErrInvalidRole
