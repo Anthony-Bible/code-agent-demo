@@ -21,7 +21,7 @@ func (m *mockFileManager) WriteFile(path string, content string) error {
 	return nil
 }
 
-func (m *mockFileManager) ListFiles(path string, recursive bool) ([]string, error) {
+func (m *mockFileManager) ListFiles(path string, recursive bool, includeGit bool) ([]string, error) {
 	return nil, nil
 }
 

@@ -61,7 +61,7 @@ func TestLocalFileManager_ReadFile(t *testing.T) {
 		path := filepath.Join(tempDir, "..", "etc", "passwd")
 		_, err := fm.ReadFile(path)
 		assert.Error(t, err)
-		assert.Equal(t, "invalid path", err.Error())
+		assert.Contains(t, err.Error(), "path traversal attempt detected")
 	})
 }
 
@@ -114,8 +114,8 @@ func TestLocalFileManager_WriteFile(t *testing.T) {
 
 		path := filepath.Join(tempDir, "..", "etc", "malicious.txt")
 		err := fm.WriteFile(path, "malicious content")
-		assert.Error(t, err)
-		assert.Equal(t, "invalid path", err.Error())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "path traversal attempt detected")
 	})
 }
 
@@ -179,7 +179,7 @@ func TestLocalFileManager_ListFiles(t *testing.T) {
 		path := filepath.Join(tempDir, "..", "etc")
 		_, err := fm.ListFiles(path, false, false)
 		assert.Error(t, err)
-		assert.Equal(t, "invalid path", err.Error())
+		require.Contains(t, err.Error(), "path traversal attempt detected")
 	})
 
 	t.Run("excludes .git directory by default (non-recursive)", func(t *testing.T) {
@@ -352,7 +352,7 @@ func TestLocalFileManager_FileExists(t *testing.T) {
 		path := filepath.Join(tempDir, "..", "etc", "passwd")
 		_, err := fm.FileExists(path)
 		assert.Error(t, err)
-		assert.Equal(t, "invalid path", err.Error())
+		require.Contains(t, err.Error(), "path traversal attempt detected")
 	})
 }
 
@@ -390,7 +390,7 @@ func TestLocalFileManager_CreateDirectory(t *testing.T) {
 		path := filepath.Join(tempDir, "..", "etc", "malicious")
 		err := fm.CreateDirectory(path)
 		assert.Error(t, err)
-		assert.Equal(t, "invalid path", err.Error())
+		require.Contains(t, err.Error(), "path traversal attempt detected")
 	})
 }
 
@@ -432,7 +432,7 @@ func TestLocalFileManager_DeleteFile(t *testing.T) {
 		path := filepath.Join(tempDir, "..", "etc", "passwd")
 		err := fm.DeleteFile(path)
 		assert.Error(t, err)
-		assert.Equal(t, "invalid path", err.Error())
+		require.Contains(t, err.Error(), "path traversal attempt detected")
 	})
 }
 
@@ -480,7 +480,7 @@ func TestLocalFileManager_GetFileInfo(t *testing.T) {
 		path := filepath.Join(tempDir, "..", "etc", "passwd")
 		_, err := fm.GetFileInfo(path)
 		assert.Error(t, err)
-		assert.Equal(t, "invalid path", err.Error())
+		require.Contains(t, err.Error(), "path traversal attempt detected")
 	})
 }
 
@@ -562,13 +562,11 @@ func TestLocalFileManager_SecurityValidation(t *testing.T) {
 			if !tt.expectedValid {
 				// ReadFile should fail
 				_, err := fm.ReadFile(tt.path)
-				assert.Error(t, err)
-				assert.Equal(t, "invalid path", err.Error())
+				require.Error(t, err)
 
 				// WriteFile should fail
 				err = fm.WriteFile(tt.path, "content")
-				assert.Error(t, err)
-				assert.Equal(t, "invalid path", err.Error())
+				require.Error(t, err)
 			}
 		})
 	}

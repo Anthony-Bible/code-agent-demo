@@ -107,11 +107,11 @@ func NewLocalFileManager(baseDir string) port.FileManager {
 // It prevents path traversal attacks and ensures the path stays within the base directory.
 func (fm *LocalFileManager) validatePath(path string) error {
 	if err := fm.validatePathFormat(path); err != nil {
-		return ErrInvalidPath
+		return err
 	}
 
 	if err := fm.validatePathBounds(path); err != nil {
-		return ErrInvalidPath
+		return err
 	}
 
 	return nil
@@ -263,7 +263,7 @@ func (fm *LocalFileManager) checkIsDirectory(path string) error {
 //   - error: An error if the file doesn't exist, is a directory, or security validation fails
 func (fm *LocalFileManager) ReadFile(path string) (string, error) {
 	if err := fm.validatePath(path); err != nil {
-		return "", ErrInvalidPath
+		return "", err
 	}
 
 	fm.mu.RLock()
@@ -301,7 +301,7 @@ func (fm *LocalFileManager) ReadFile(path string) (string, error) {
 //   - error: An error if the path is a directory, security validation fails, or write fails
 func (fm *LocalFileManager) WriteFile(path string, content string) error {
 	if err := fm.validatePath(path); err != nil {
-		return ErrInvalidPath
+		return err
 	}
 
 	fm.mu.Lock()
@@ -329,7 +329,7 @@ func (fm *LocalFileManager) WriteFile(path string, content string) error {
 // ListFiles lists files and directories in the given path.
 func (fm *LocalFileManager) ListFiles(path string, recursive bool, includeGit bool) ([]string, error) {
 	if err := fm.validatePath(path); err != nil {
-		return nil, ErrInvalidPath
+		return nil, err
 	}
 
 	fm.mu.RLock()
@@ -404,7 +404,7 @@ func (fm *LocalFileManager) listFilesNonRecursive(path string, includeGit bool) 
 // FileExists checks if a file or directory exists at the given path.
 func (fm *LocalFileManager) FileExists(path string) (bool, error) {
 	if err := fm.validatePath(path); err != nil {
-		return false, ErrInvalidPath
+		return false, err
 	}
 
 	fm.mu.RLock()
@@ -423,7 +423,7 @@ func (fm *LocalFileManager) FileExists(path string) (bool, error) {
 // CreateDirectory creates a new directory at the given path.
 func (fm *LocalFileManager) CreateDirectory(path string) error {
 	if err := fm.validatePath(path); err != nil {
-		return ErrInvalidPath
+		return err
 	}
 
 	fm.mu.Lock()
@@ -445,7 +445,7 @@ func (fm *LocalFileManager) CreateDirectory(path string) error {
 // DeleteFile deletes a file or directory at the given path.
 func (fm *LocalFileManager) DeleteFile(path string) error {
 	if err := fm.validatePath(path); err != nil {
-		return ErrInvalidPath
+		return err
 	}
 
 	fm.mu.Lock()
@@ -464,7 +464,7 @@ func (fm *LocalFileManager) DeleteFile(path string) error {
 // GetFileInfo returns metadata about a file or directory.
 func (fm *LocalFileManager) GetFileInfo(path string) (port.FileInfo, error) {
 	if err := fm.validatePath(path); err != nil {
-		return port.FileInfo{}, ErrInvalidPath
+		return port.FileInfo{}, err
 	}
 
 	fm.mu.RLock()

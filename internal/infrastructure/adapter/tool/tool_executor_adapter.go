@@ -3,10 +3,12 @@ package tool
 import (
 	"code-editing-agent/internal/domain/entity"
 	"code-editing-agent/internal/domain/port"
+	fileadapter "code-editing-agent/internal/infrastructure/adapter/file"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,6 +19,30 @@ type ExecutorAdapter struct {
 	fileManager port.FileManager
 	tools       map[string]entity.Tool
 	mu          sync.RWMutex
+}
+
+// wrapFileOperationError wraps file operation errors and prints a warning for path traversal attempts.
+func wrapFileOperationError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+
+	// Check for path traversal error in the error chain
+	if errors.Is(err, fileadapter.ErrPathTraversal) {
+		// Print a security warning to stderr
+		fmt.Fprintf(os.Stderr, "\x1b[91m[SECURITY WARNING] Path traversal attempt detected and blocked!\x1b[0m\n")
+		return fmt.Errorf("%s blocked due to potential security threat: %w", operation, err)
+	}
+
+	// Check for PathValidationError which has detailed reason
+	var pathErr *fileadapter.PathValidationError
+	if errors.As(err, &pathErr) && pathErr.Reason == "path traversal attempt detected" {
+		// Print a security warning to stderr
+		fmt.Fprintf(os.Stderr, "\x1b[91m[SECURITY WARNING] Path traversal attempt detected and blocked!\x1b[0m\n")
+		return fmt.Errorf("%s blocked due to potential security threat: %w", operation, err)
+	}
+
+	return fmt.Errorf("%s: %w", operation, err)
 }
 
 // NewExecutorAdapter creates a new ExecutorAdapter with the provided FileManager.
@@ -241,7 +267,7 @@ func (a *ExecutorAdapter) executeReadFile(input json.RawMessage) (string, error)
 
 	content, err := a.fileManager.ReadFile(in.Path)
 	if err != nil {
-		return "", fmt.Errorf("failed to read file: %w", err)
+		return "", wrapFileOperationError("Failed to read file", err)
 	}
 
 	return content, nil
@@ -267,7 +293,7 @@ func (a *ExecutorAdapter) executeListFiles(input json.RawMessage) (string, error
 	// Exclude .git directories by default for cleaner AI output
 	files, err := a.fileManager.ListFiles(dir, true, false)
 	if err != nil {
-		return "", fmt.Errorf("failed to list files: %w", err)
+		return "", wrapFileOperationError("Failed to list files", err)
 	}
 
 	// Convert relative paths to exclude the base directory for cleaner output
@@ -310,7 +336,7 @@ func (a *ExecutorAdapter) executeEditFile(input json.RawMessage) (string, error)
 	// Check if file exists
 	exists, err := a.fileManager.FileExists(in.Path)
 	if err != nil {
-		return "", fmt.Errorf("failed to check if file exists: %w", err)
+		return "", wrapFileOperationError("Failed to check if file exists", err)
 	}
 
 	// If file doesn't exist and old_str is empty, create a new file
@@ -321,7 +347,7 @@ func (a *ExecutorAdapter) executeEditFile(input json.RawMessage) (string, error)
 	// Read existing file content
 	content, err := a.fileManager.ReadFile(in.Path)
 	if err != nil {
-		return "", fmt.Errorf("failed to read file: %w", err)
+		return "", wrapFileOperationError("Failed to read file", err)
 	}
 
 	oldContent := content
@@ -334,7 +360,7 @@ func (a *ExecutorAdapter) executeEditFile(input json.RawMessage) (string, error)
 
 	// Write the modified content
 	if err := a.fileManager.WriteFile(in.Path, newContent); err != nil {
-		return "", fmt.Errorf("failed to write file: %w", err)
+		return "", wrapFileOperationError("Failed to write file", err)
 	}
 
 	return "OK", nil
@@ -346,13 +372,13 @@ func (a *ExecutorAdapter) createNewFile(filePath, content string) (string, error
 	dir := filepath.Dir(filePath)
 	if dir != "." && dir != "" {
 		if err := a.fileManager.CreateDirectory(dir); err != nil {
-			return "", fmt.Errorf("failed to create directory %s: %w", dir, err)
+			return "", wrapFileOperationError(fmt.Sprintf("Failed to create directory %s", dir), err)
 		}
 	}
 
 	// Write the new file content
 	if err := a.fileManager.WriteFile(filePath, content); err != nil {
-		return "", fmt.Errorf("failed to create file %s: %w", filePath, err)
+		return "", wrapFileOperationError(fmt.Sprintf("Failed to create file %s", filePath), err)
 	}
 
 	return fmt.Sprintf("Created file %s", filePath), nil

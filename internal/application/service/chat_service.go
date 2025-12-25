@@ -303,7 +303,13 @@ func (cs *ChatService) displayToolResults(
 ) {
 	for _, result := range results {
 		inputJSON := cs.findInputJSONForTool(result.ToolName, toolCalls)
-		_ = cs.userInterface.DisplayToolResult(result.ToolName, inputJSON, result.Result)
+
+		// Display either result or error message
+		displayResult := result.Result
+		if !result.Success && result.Error != "" {
+			displayResult = fmt.Sprintf("Error: %s", result.Error)
+		}
+		_ = cs.userInterface.DisplayToolResult(result.ToolName, inputJSON, displayResult)
 	}
 }
 
