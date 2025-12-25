@@ -350,9 +350,15 @@ func (cs *ChatService) addToolResultsToConversation(
 
 		// Convert DTO result to entity ToolResult
 		// IsError is true if there's an error message
+		// When there's an error, feed the error message back to the model
+		// so it understands why the tool failed
+		result := toolResults[i].Result
+		if toolResults[i].Error != "" {
+			result = toolResults[i].Error
+		}
 		toolResult := entity.ToolResult{
 			ToolID:  toolCall.ToolID,
-			Result:  toolResults[i].Result,
+			Result:  result,
 			IsError: toolResults[i].Error != "",
 		}
 

@@ -236,8 +236,22 @@ func (fm *LocalFileManager) ensureParentDirectories(path string) error {
 	return nil
 }
 
-// checkIsDirectory checks if a path is a directory and returns appropriate error.
-func (fm *LocalFileManager) checkIsDirectory(path string) error {
+// requireFile checks that a path is a file (not a directory).
+// Returns ErrIsDirectory if the path is a directory.
+func (fm *LocalFileManager) requireFile(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return ErrIsDirectory
+	}
+	return nil
+}
+
+// requireDirectory checks that a path is a directory (not a file).
+// Returns ErrNotDirectory if the path is not a directory.
+func (fm *LocalFileManager) requireDirectory(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -270,7 +284,7 @@ func (fm *LocalFileManager) ReadFile(path string) (string, error) {
 	defer fm.mu.RUnlock()
 
 	// Check if it's a directory
-	if err := fm.checkIsDirectory(path); err != nil {
+	if err := fm.requireFile(path); err != nil {
 		return "", err
 	}
 
@@ -336,7 +350,7 @@ func (fm *LocalFileManager) ListFiles(path string, recursive bool, includeGit bo
 	defer fm.mu.RUnlock()
 
 	// Check if path exists and is a directory
-	if err := fm.checkIsDirectory(path); err != nil {
+	if err := fm.requireDirectory(path); err != nil {
 		return nil, err
 	}
 

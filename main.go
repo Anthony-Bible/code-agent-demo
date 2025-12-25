@@ -99,7 +99,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			continue
 		}
 		readUserInput = false
-	conversation = append(conversation, anthropic.NewUserMessage(toolResults...))
+conversation = append(conversation, anthropic.NewUserMessage(toolResults...))
 	}
 	return nil
 }
