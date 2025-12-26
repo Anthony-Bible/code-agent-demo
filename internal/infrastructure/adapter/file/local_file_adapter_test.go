@@ -26,7 +26,7 @@ func TestLocalFileManager_ReadFile(t *testing.T) {
 		require.NoError(t, err)
 
 		content, err := fm.ReadFile(filePath)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, "hello world", content)
 	})
 
@@ -36,7 +36,7 @@ func TestLocalFileManager_ReadFile(t *testing.T) {
 
 		filePath := filepath.Join(tempDir, "nonexistent.txt")
 		_, err := fm.ReadFile(filePath)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no such file or directory")
 	})
 
@@ -49,7 +49,7 @@ func TestLocalFileManager_ReadFile(t *testing.T) {
 		require.NoError(t, err)
 
 		_, err = fm.ReadFile(dirPath)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Equal(t, "is a directory", err.Error())
 	})
 
@@ -60,7 +60,7 @@ func TestLocalFileManager_ReadFile(t *testing.T) {
 		// This should be rejected because it tries to go outside tempDir
 		path := filepath.Join(tempDir, "..", "etc", "passwd")
 		_, err := fm.ReadFile(path)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "path traversal attempt detected")
 	})
 }
@@ -72,10 +72,10 @@ func TestLocalFileManager_WriteFile(t *testing.T) {
 
 		path := filepath.Join(tempDir, "new.txt")
 		err := fm.WriteFile(path, "hello world")
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		content, err := os.ReadFile(path)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, "hello world", string(content))
 	})
 
@@ -88,10 +88,10 @@ func TestLocalFileManager_WriteFile(t *testing.T) {
 		require.NoError(t, err)
 
 		err = fm.WriteFile(path, "new content")
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		content, err := os.ReadFile(path)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, "new content", string(content))
 	})
 
@@ -104,7 +104,7 @@ func TestLocalFileManager_WriteFile(t *testing.T) {
 		require.NoError(t, err)
 
 		err = fm.WriteFile(dirPath, "content")
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Equal(t, "is a directory", err.Error())
 	})
 
@@ -131,7 +131,7 @@ func TestLocalFileManager_ListFiles(t *testing.T) {
 		os.Mkdir(filepath.Join(tempDir, "subdir2"), 0o755)
 
 		files, err := fm.ListFiles(tempDir, false, false)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Len(t, files, 4)
 
 		fileMap := make(map[string]bool)
@@ -157,7 +157,7 @@ func TestLocalFileManager_ListFiles(t *testing.T) {
 		os.WriteFile(filepath.Join(tempDir, "subdir2", "file.md"), []byte("# README"), 0o644)
 
 		files, err := fm.ListFiles(tempDir, true, false)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Len(t, files, 6)
 
 		fileMap := make(map[string]bool)
@@ -178,7 +178,7 @@ func TestLocalFileManager_ListFiles(t *testing.T) {
 
 		path := filepath.Join(tempDir, "..", "etc")
 		_, err := fm.ListFiles(path, false, false)
-		assert.Error(t, err)
+		require.Error(t, err)
 		require.Contains(t, err.Error(), "path traversal attempt detected")
 	})
 
@@ -192,7 +192,7 @@ func TestLocalFileManager_ListFiles(t *testing.T) {
 		os.WriteFile(filepath.Join(tempDir, "file1.txt"), []byte("content1"), 0o644)
 
 		files, err := fm.ListFiles(tempDir, false, false)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Len(t, files, 1)
 		assert.Equal(t, "file1.txt", files[0])
 	})
@@ -207,7 +207,7 @@ func TestLocalFileManager_ListFiles(t *testing.T) {
 		os.WriteFile(filepath.Join(tempDir, "file1.txt"), []byte("content1"), 0o644)
 
 		files, err := fm.ListFiles(tempDir, false, true)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Len(t, files, 2)
 
 		fileMap := make(map[string]bool)
@@ -241,7 +241,7 @@ func TestLocalFileManager_ListFiles(t *testing.T) {
 		os.WriteFile(filepath.Join(subdir, "nested.txt"), []byte("nested content"), 0o644)
 
 		files, err := fm.ListFiles(tempDir, true, false)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Len(t, files, 4)
 
 		fileMap := make(map[string]bool)
@@ -272,7 +272,7 @@ func TestLocalFileManager_ListFiles(t *testing.T) {
 		os.WriteFile(filepath.Join(tempDir, "file1.txt"), []byte("content1"), 0o644)
 
 		files, err := fm.ListFiles(tempDir, true, true)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		fileMap := make(map[string]bool)
 		for _, f := range files {
@@ -305,7 +305,7 @@ func TestLocalFileManager_ListFiles(t *testing.T) {
 		os.WriteFile(filepath.Join(tempDir, "module2", "nested", "app.go"), []byte("package app"), 0o644)
 
 		files, err := fm.ListFiles(tempDir, true, false)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		// Verify no .git paths are included
 		for _, f := range files {
@@ -331,7 +331,7 @@ func TestLocalFileManager_FileExists(t *testing.T) {
 		require.NoError(t, err)
 
 		exists, err := fm.FileExists(filePath)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.True(t, exists)
 	})
 
@@ -341,7 +341,7 @@ func TestLocalFileManager_FileExists(t *testing.T) {
 
 		filePath := filepath.Join(tempDir, "nonexistent.txt")
 		exists, err := fm.FileExists(filePath)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.False(t, exists)
 	})
 
@@ -351,7 +351,7 @@ func TestLocalFileManager_FileExists(t *testing.T) {
 
 		path := filepath.Join(tempDir, "..", "etc", "passwd")
 		_, err := fm.FileExists(path)
-		assert.Error(t, err)
+		require.Error(t, err)
 		require.Contains(t, err.Error(), "path traversal attempt detected")
 	})
 }
@@ -363,10 +363,10 @@ func TestLocalFileManager_CreateDirectory(t *testing.T) {
 
 		path := filepath.Join(tempDir, "newdir")
 		err := fm.CreateDirectory(path)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		info, err := os.Stat(path)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.True(t, info.IsDir())
 	})
 
@@ -376,10 +376,10 @@ func TestLocalFileManager_CreateDirectory(t *testing.T) {
 
 		path := filepath.Join(tempDir, "a", "b", "c", "d")
 		err := fm.CreateDirectory(path)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		info, err := os.Stat(path)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.True(t, info.IsDir())
 	})
 
@@ -389,7 +389,7 @@ func TestLocalFileManager_CreateDirectory(t *testing.T) {
 
 		path := filepath.Join(tempDir, "..", "etc", "malicious")
 		err := fm.CreateDirectory(path)
-		assert.Error(t, err)
+		require.Error(t, err)
 		require.Contains(t, err.Error(), "path traversal attempt detected")
 	})
 }
@@ -404,7 +404,7 @@ func TestLocalFileManager_DeleteFile(t *testing.T) {
 		require.NoError(t, err)
 
 		err = fm.DeleteFile(filePath)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		_, err = os.Stat(filePath)
 		assert.True(t, os.IsNotExist(err))
@@ -419,7 +419,7 @@ func TestLocalFileManager_DeleteFile(t *testing.T) {
 		require.NoError(t, err)
 
 		err = fm.DeleteFile(dirPath)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		_, err = os.Stat(dirPath)
 		assert.True(t, os.IsNotExist(err))
@@ -431,7 +431,7 @@ func TestLocalFileManager_DeleteFile(t *testing.T) {
 
 		path := filepath.Join(tempDir, "..", "etc", "passwd")
 		err := fm.DeleteFile(path)
-		assert.Error(t, err)
+		require.Error(t, err)
 		require.Contains(t, err.Error(), "path traversal attempt detected")
 	})
 }
@@ -447,7 +447,7 @@ func TestLocalFileManager_GetFileInfo(t *testing.T) {
 		require.NoError(t, err)
 
 		info, err := fm.GetFileInfo(filePath)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, "test.txt", info.Name)
 		assert.Equal(t, filePath, info.Path)
 		assert.Equal(t, int64(len(content)), info.Size)
@@ -465,7 +465,7 @@ func TestLocalFileManager_GetFileInfo(t *testing.T) {
 		require.NoError(t, err)
 
 		info, err := fm.GetFileInfo(dirPath)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, "testdir", info.Name)
 		assert.Equal(t, dirPath, info.Path)
 		assert.True(t, info.IsDirectory)
@@ -479,7 +479,7 @@ func TestLocalFileManager_GetFileInfo(t *testing.T) {
 
 		path := filepath.Join(tempDir, "..", "etc", "passwd")
 		_, err := fm.GetFileInfo(path)
-		assert.Error(t, err)
+		require.Error(t, err)
 		require.Contains(t, err.Error(), "path traversal attempt detected")
 	})
 }
@@ -499,7 +499,7 @@ func TestLocalFileManager_ConcurrentOperations(t *testing.T) {
 		errors := make(chan error, 10)
 
 		for i := range 5 {
-			go func(id int) {
+			go func(_ int) {
 				_, err := fm.ReadFile(filePath)
 				if err != nil {
 					errors <- err
@@ -533,7 +533,7 @@ func TestLocalFileManager_ConcurrentOperations(t *testing.T) {
 
 		// Final read should succeed
 		content, err := fm.ReadFile(filePath)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.NotEmpty(t, content)
 	})
 }

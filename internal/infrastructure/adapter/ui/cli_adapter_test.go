@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // These tests are intentionally written to fail during the Red Phase of TDD.
@@ -571,7 +572,7 @@ func TestCLIAdapter_DisplayToolResult_TruncatesLargeOutput(t *testing.T) {
 
 		err := adapter.DisplayToolResult("test_tool", "test_input", largeResult)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		outputStr := output.String()
 
 		// Should contain truncation indicator showing 20 lines were removed (50 - 30 = 20)
@@ -606,7 +607,7 @@ func TestCLIAdapter_DisplayToolResult_TruncatesLargeOutput(t *testing.T) {
 
 		err := adapter.DisplayToolResult("test_tool", "input", result)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		outputStr := output.String()
 
 		// Should show 1 line truncated
@@ -633,7 +634,7 @@ func TestCLIAdapter_DisplayToolResult_PreservesSmallOutput(t *testing.T) {
 
 		err := adapter.DisplayToolResult("test_tool", "test_input", smallResult)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		outputStr := output.String()
 
 		// Should NOT contain any truncation indicator
@@ -661,7 +662,7 @@ func TestCLIAdapter_DisplayToolResult_PreservesSmallOutput(t *testing.T) {
 
 		err := adapter.DisplayToolResult("test_tool", "input", result)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		outputStr := output.String()
 
 		// Should NOT contain any truncation indicator
@@ -679,7 +680,7 @@ func TestCLIAdapter_DisplayToolResult_PreservesSmallOutput(t *testing.T) {
 
 		err := adapter.DisplayToolResult("test_tool", "test_input", "")
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		outputStr := output.String()
 
 		// Should NOT contain any truncation indicator
@@ -695,7 +696,7 @@ func TestCLIAdapter_DisplayToolResult_PreservesSmallOutput(t *testing.T) {
 		singleLine := "just one line here"
 		err := adapter.DisplayToolResult("test_tool", "input", singleLine)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		outputStr := output.String()
 
 		assert.Contains(t, outputStr, singleLine, "should preserve single line output")
@@ -722,7 +723,7 @@ func TestCLIAdapter_DisplayToolResult_BashToolHandling(t *testing.T) {
 
 		err := adapter.DisplayToolResult("bash", "echo test", bashResult)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		outputStr := output.String()
 
 		// Should contain truncation indicator within the JSON stdout field
@@ -749,7 +750,7 @@ func TestCLIAdapter_DisplayToolResult_BashToolHandling(t *testing.T) {
 
 		err := adapter.DisplayToolResult("bash", "failing cmd", bashResult)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		outputStr := output.String()
 
 		// stderr should be truncated
@@ -771,7 +772,7 @@ func TestCLIAdapter_DisplayToolResult_BashToolHandling(t *testing.T) {
 
 		err := adapter.DisplayToolResult("bash", "echo test", plainResult)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		outputStr := output.String()
 
 		// Should still truncate using fallback
@@ -793,7 +794,7 @@ func TestCLIAdapter_DisplayToolResult_BashToolHandling(t *testing.T) {
 
 		err := adapter.DisplayToolResult("read_file", "/path/to/file", result)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		outputStr := output.String()
 
 		// Should truncate with regular TruncateOutput, not bash-specific
@@ -828,7 +829,7 @@ func TestCLIAdapter_SetTruncationConfig(t *testing.T) {
 
 		err := adapter.DisplayToolResult("test_tool", "input", result)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		outputStr := output.String()
 
 		// Should truncate 12 lines (20 - 8 = 12)
@@ -865,7 +866,7 @@ func TestCLIAdapter_SetTruncationConfig(t *testing.T) {
 
 		err := adapter.DisplayToolResult("test_tool", "input", result)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		outputStr := output.String()
 
 		// Should NOT truncate when disabled
@@ -905,7 +906,7 @@ func TestCLIAdapter_SetTruncationConfig(t *testing.T) {
 
 		err := adapter.DisplayToolResult("test_tool", "input", result)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		outputStr := output.String()
 
 		// Should truncate based on second config (10 + 5 = 15 threshold, 5 removed)
@@ -1034,7 +1035,7 @@ func TestCLIAdapter_DefaultTruncationConfig(t *testing.T) {
 
 		err := adapter.DisplayToolResult("test_tool", "input", result)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		outputStr := output.String()
 
 		// Should truncate using default config (20 + 10 = 30 threshold, 20 removed)
