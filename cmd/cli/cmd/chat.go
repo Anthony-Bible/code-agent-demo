@@ -79,8 +79,9 @@ func runChat(cmd *cobra.Command, args []string) error {
 				fmt.Printf("\n%s\n", cfg.GoodbyeMessage)
 				return nil
 			case <-firstPressCh:
-				// First Ctrl+C pressed - show message and continue waiting for input
+				// First Ctrl+C pressed - show message and re-display prompt
 				fmt.Printf("\nPress Ctrl+C again to exit\n")
+				fmt.Print("Claude: ")
 				// Set to nil to avoid receiving again on this channel
 				firstPressCh = nil
 				continue
