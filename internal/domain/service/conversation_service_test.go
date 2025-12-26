@@ -60,7 +60,7 @@ func TestNewConversationService(t *testing.T) {
 					t.Errorf("unexpected error: %v", err)
 				}
 				if service == nil {
-					t.Errorf("expected service instance but got nil")
+					t.Fatal("expected service instance but got nil")
 				}
 				if service.aiProvider != tt.aiProvider {
 					t.Errorf("AI provider not set correctly")

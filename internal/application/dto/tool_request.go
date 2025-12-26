@@ -79,7 +79,7 @@ func (d *ToolDefinition) ToJSON() (string, error) {
 	return string(data), nil
 }
 
-// FromJSON parses a ToolDefinition from a JSON string.
+// FromJSONToolDefinition parses a ToolDefinition from a JSON string.
 func FromJSONToolDefinition(jsonStr string) (*ToolDefinition, error) {
 	var def ToolDefinition
 	err := json.Unmarshal([]byte(jsonStr), &def)

@@ -183,7 +183,7 @@ func TestConvertTools_WithNoRequiredField(t *testing.T) {
 	}
 
 	// Assert: the required field is either nil or empty
-	if tool.InputSchema.Required != nil && len(tool.InputSchema.Required) > 0 {
+	if len(tool.InputSchema.Required) > 0 {
 		t.Errorf("expected Required field to be nil or empty, got %v", tool.InputSchema.Required)
 	}
 }
@@ -379,7 +379,7 @@ func TestConvertTools_MultipleTools(t *testing.T) {
 	if tool2.Name != "list_files" {
 		t.Errorf("tool 2: expected name 'list_files', got '%s'", tool2.Name)
 	}
-	if tool2.InputSchema.Required != nil && len(tool2.InputSchema.Required) > 0 {
+	if len(tool2.InputSchema.Required) > 0 {
 		t.Errorf("tool 2: expected no required fields, got %v", tool2.InputSchema.Required)
 	}
 }
