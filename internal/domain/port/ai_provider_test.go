@@ -12,7 +12,7 @@ func TestAIProviderInterface_Contract(t *testing.T) {
 	var _ AIProvider = (*mockAIProvider)(nil)
 }
 
-// mockAIProvider is a minimal implementation to validate interface contract
+// mockAIProvider is a minimal implementation to validate interface contract.
 type mockAIProvider struct{}
 
 func (m *mockAIProvider) SendMessage(

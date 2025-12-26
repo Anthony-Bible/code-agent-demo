@@ -12,7 +12,7 @@ func TestToolExecutorInterface_Contract(t *testing.T) {
 	var _ ToolExecutor = (*mockToolExecutor)(nil)
 }
 
-// mockToolExecutor is a minimal implementation to validate interface contract
+// mockToolExecutor is a minimal implementation to validate interface contract.
 type mockToolExecutor struct{}
 
 func (m *mockToolExecutor) RegisterTool(tool entity.Tool) error {

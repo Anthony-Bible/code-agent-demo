@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// chatCmd represents the chat command
+// chatCmd represents the chat command.
 var chatCmd = &cobra.Command{
 	Use:   "chat",
 	Short: "Start an interactive chat session",
@@ -26,13 +26,13 @@ func init() {
 	executeChat = runChat
 }
 
-// inputResult holds the result from the async input goroutine
+// inputResult holds the result from the async input goroutine.
 type inputResult struct {
 	text string
 	ok   bool
 }
 
-// runChat executes the chat command
+// runChat executes the chat command.
 func runChat(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	cfg := GetConfig(cmd)

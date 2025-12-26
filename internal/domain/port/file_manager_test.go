@@ -10,7 +10,7 @@ func TestFileManagerInterface_Contract(t *testing.T) {
 	var _ FileManager = (*mockFileManager)(nil)
 }
 
-// mockFileManager is a minimal implementation to validate interface contract
+// mockFileManager is a minimal implementation to validate interface contract.
 type mockFileManager struct{}
 
 func (m *mockFileManager) ReadFile(path string) (string, error) {

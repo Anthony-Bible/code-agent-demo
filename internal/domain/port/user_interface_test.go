@@ -11,7 +11,7 @@ func TestUserInterfaceInterface_Contract(t *testing.T) {
 	var _ UserInterface = (*mockUserInterface)(nil)
 }
 
-// mockUserInterface is a minimal implementation to validate interface contract
+// mockUserInterface is a minimal implementation to validate interface contract.
 type mockUserInterface struct{}
 
 func (m *mockUserInterface) GetUserInput(ctx context.Context) (string, bool) {

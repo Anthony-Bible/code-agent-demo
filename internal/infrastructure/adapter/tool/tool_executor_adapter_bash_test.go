@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// bashOutput represents the expected output structure from bash tool
+// bashOutput represents the expected output structure from bash tool.
 type bashOutputTest struct {
 	Stdout   string `json:"stdout"`
 	Stderr   string `json:"stderr"`
@@ -308,7 +308,7 @@ func TestBashTool_DangerousPatternVariations(t *testing.T) {
 // These tests are expected to FAIL until the feature is implemented
 // =============================================================================
 
-// callbackInvocation tracks the arguments passed to CommandConfirmationCallback
+// callbackInvocation tracks the arguments passed to CommandConfirmationCallback.
 type callbackInvocation struct {
 	command     string
 	isDangerous bool

@@ -21,7 +21,7 @@ import (
 // - Creating and initializing all adapters (infrastructure layer)
 // - Creating domain services (domain layer)
 // - Creating application services (application layer)
-// - Providing accessors for all dependencies
+// - Providing accessors for all dependencies.
 type Container struct {
 	config          *Config
 	chatService     *appsvc.ChatService
