@@ -46,6 +46,15 @@ func (m *mockUserInterface) SetColorScheme(scheme ColorScheme) error {
 	return nil
 }
 
+func (m *mockUserInterface) ConfirmBashCommand(
+	command string,
+	isDangerous bool,
+	reason string,
+	description string,
+) bool {
+	return false
+}
+
 // TestUserInterfaceGetUserInput_Exists validates GetUserInput method exists.
 func TestUserInterfaceGetUserInput_Exists(t *testing.T) {
 	var ui UserInterface = (*mockUserInterface)(nil)

@@ -174,3 +174,38 @@ func (c *CLIAdapter) SetColorScheme(scheme port.ColorScheme) error {
 
 	return nil
 }
+
+// ConfirmBashCommand prompts the user to confirm a bash command before execution.
+func (c *CLIAdapter) ConfirmBashCommand(command string, isDangerous bool, reason string, description string) bool {
+	// Display header based on danger level
+	if isDangerous {
+		fmt.Fprintf(c.output, "%s[DANGEROUS COMMAND] %s\x1b[0m\n", c.colors.Error, reason)
+	}
+	// Display description if provided
+	if description != "" {
+		fmt.Fprintf(c.output, "%s\x1b[0m\n", description)
+	}
+	// Display standard prefix for non-dangerous commands
+	if !isDangerous {
+		fmt.Fprintf(c.output, "%s[BASH COMMAND]\x1b[0m\n", c.colors.System)
+	}
+
+	// Display command in green with indentation
+	fmt.Fprintf(c.output, "  %s%s\x1b[0m\n", c.colors.Tool, command)
+
+	// Display confirmation prompt
+	fmt.Fprint(c.output, "Execute? [y/N]: ")
+
+	// Initialize scanner if needed
+	if c.scanner == nil {
+		c.scanner = bufio.NewScanner(c.input)
+	}
+
+	// Read user input
+	if !c.scanner.Scan() {
+		return false
+	}
+
+	input := strings.TrimSpace(strings.ToLower(c.scanner.Text()))
+	return input == "y" || input == "yes"
+}

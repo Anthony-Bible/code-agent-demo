@@ -52,6 +52,14 @@ func NewContainer(cfg *Config) (*Container, error) {
 	aiAdapter := ai.NewAnthropicAdapter(cfg.AIModel)
 	toolExecutor := tool.NewExecutorAdapter(fileManager)
 
+	// Set up bash command confirmation callback
+	// This prompts the user before executing any bash command
+	toolExecutor.SetCommandConfirmationCallback(
+		func(command string, isDangerous bool, reason, description string) bool {
+			return uiAdapter.ConfirmBashCommand(command, isDangerous, reason, description)
+		},
+	)
+
 	// Step 2: Create domain service (ConversationService)
 	// Note: ConversationService directly uses concrete adapter types
 	convService, err := service.NewConversationService(aiAdapter, toolExecutor)

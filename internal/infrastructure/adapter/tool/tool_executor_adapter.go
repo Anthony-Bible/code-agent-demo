@@ -1,24 +1,58 @@
 package tool
 
 import (
+	"bytes"
 	"code-editing-agent/internal/domain/entity"
 	"code-editing-agent/internal/domain/port"
-	fileadapter "code-editing-agent/internal/infrastructure/adapter/file"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
+	"time"
+
+	fileadapter "code-editing-agent/internal/infrastructure/adapter/file"
 )
+
+// DangerousCommandCallback is called when a dangerous command is detected.
+// It receives the command and reason, and returns true if execution should proceed.
+type DangerousCommandCallback func(command, reason string) bool
+
+// CommandConfirmationCallback is called before executing any bash command.
+// It receives the command, whether it's dangerous, the reason if dangerous, and a description.
+// Returns true if execution should proceed, false to block.
+type CommandConfirmationCallback func(command string, isDangerous bool, reason string, description string) bool
 
 // ExecutorAdapter implements the ToolExecutor port using the FileManager for file operations.
 type ExecutorAdapter struct {
-	fileManager port.FileManager
-	tools       map[string]entity.Tool
-	mu          sync.RWMutex
+	fileManager                 port.FileManager
+	tools                       map[string]entity.Tool
+	mu                          sync.RWMutex
+	dangerousCommandCallback    DangerousCommandCallback
+	commandConfirmationCallback CommandConfirmationCallback
+}
+
+// toRawMessage converts various input types to json.RawMessage for validation.
+func toRawMessage(input interface{}) (json.RawMessage, error) {
+	switch v := input.(type) {
+	case string:
+		return json.RawMessage(v), nil
+	case json.RawMessage:
+		return v, nil
+	case []byte:
+		return v, nil
+	default:
+		rawInput, err := json.Marshal(input)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal input: %w", err)
+		}
+		return rawInput, nil
+	}
 }
 
 // wrapFileOperationError wraps file operation errors and prints a warning for path traversal attempts.
@@ -59,6 +93,16 @@ func NewExecutorAdapter(fileManager port.FileManager) *ExecutorAdapter {
 	return adapter
 }
 
+// SetDangerousCommandCallback sets the callback for dangerous command confirmation.
+func (a *ExecutorAdapter) SetDangerousCommandCallback(cb DangerousCommandCallback) {
+	a.dangerousCommandCallback = cb
+}
+
+// SetCommandConfirmationCallback sets the callback for all command confirmation.
+func (a *ExecutorAdapter) SetCommandConfirmationCallback(cb CommandConfirmationCallback) {
+	a.commandConfirmationCallback = cb
+}
+
 // RegisterTool registers a new tool with the executor.
 func (a *ExecutorAdapter) RegisterTool(tool entity.Tool) error {
 	if err := tool.Validate(); err != nil {
@@ -96,20 +140,9 @@ func (a *ExecutorAdapter) ExecuteTool(ctx context.Context, name string, input in
 	}
 
 	// Convert input to JSON for validation
-	var rawInput json.RawMessage
-	switch v := input.(type) {
-	case string:
-		rawInput = json.RawMessage(v)
-	case json.RawMessage:
-		rawInput = v
-	case []byte:
-		rawInput = v
-	default:
-		var err error
-		rawInput, err = json.Marshal(input)
-		if err != nil {
-			return "", fmt.Errorf("failed to marshal input: %w", err)
-		}
+	rawInput, err := toRawMessage(input)
+	if err != nil {
+		return "", err
 	}
 
 	// Validate input against tool's schema
@@ -153,20 +186,9 @@ func (a *ExecutorAdapter) ValidateToolInput(name string, input interface{}) erro
 		return fmt.Errorf("tool not found: %s", name)
 	}
 
-	var rawInput json.RawMessage
-	switch v := input.(type) {
-	case string:
-		rawInput = json.RawMessage(v)
-	case json.RawMessage:
-		rawInput = v
-	case []byte:
-		rawInput = v
-	default:
-		var err error
-		rawInput, err = json.Marshal(input)
-		if err != nil {
-			return fmt.Errorf("failed to marshal input: %w", err)
-		}
+	rawInput, err := toRawMessage(input)
+	if err != nil {
+		return err
 	}
 
 	return tool.ValidateInput(rawInput)
@@ -237,10 +259,37 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 		RequiredFields: []string{"path"},
 	}
 	a.tools[editFileTool.Name] = editFileTool
+
+	// Register bash tool
+	bashTool := entity.Tool{
+		ID:          "bash",
+		Name:        "bash",
+		Description: "Executes shell commands and returns stdout, stderr, and exit code. Dangerous commands require user confirmation.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"command": map[string]interface{}{
+					"type":        "string",
+					"description": "The shell command to execute",
+				},
+				"description": map[string]interface{}{
+					"type":        "string",
+					"description": "A brief description of what this command does and why it's being run",
+				},
+				"timeout_ms": map[string]interface{}{
+					"type":        "integer",
+					"description": "Timeout in milliseconds (default: 30000)",
+				},
+			},
+			"required": []string{"command"},
+		},
+		RequiredFields: []string{"command"},
+	}
+	a.tools[bashTool.Name] = bashTool
 }
 
 // executeByName executes the appropriate tool function based on the tool name.
-func (a *ExecutorAdapter) executeByName(_ context.Context, name string, input json.RawMessage) (string, error) {
+func (a *ExecutorAdapter) executeByName(ctx context.Context, name string, input json.RawMessage) (string, error) {
 	switch name {
 	case "read_file":
 		return a.executeReadFile(input)
@@ -248,6 +297,8 @@ func (a *ExecutorAdapter) executeByName(_ context.Context, name string, input js
 		return a.executeListFiles(input)
 	case "edit_file":
 		return a.executeEditFile(input)
+	case "bash":
+		return a.executeBash(ctx, input)
 	default:
 		return "", fmt.Errorf("no implementation available for tool: %s", name)
 	}
@@ -382,4 +433,140 @@ func (a *ExecutorAdapter) createNewFile(filePath, content string) (string, error
 	}
 
 	return fmt.Sprintf("Created file %s", filePath), nil
+}
+
+// bashInput represents the input for the bash tool.
+type bashInput struct {
+	Command     string `json:"command"`
+	Description string `json:"description,omitempty"`
+	TimeoutMs   int    `json:"timeout_ms,omitempty"`
+}
+
+// bashOutput represents the output from the bash tool.
+type bashOutput struct {
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+	ExitCode int    `json:"exit_code"`
+}
+
+// defaultBashTimeout is the default timeout for bash command execution.
+const defaultBashTimeout = 30 * time.Second
+
+// dangerousPattern represents a pattern that indicates a dangerous command.
+type dangerousPattern struct {
+	pattern *regexp.Regexp
+	reason  string
+}
+
+// dangerousPatterns contains patterns for detecting dangerous commands.
+//
+//nolint:gochecknoglobals // This is intentionally a package-level constant for dangerous command detection
+var dangerousPatterns = []dangerousPattern{
+	// Matches rm with any flags followed by dangerous paths (/, ~, *)
+	{regexp.MustCompile(`rm\s+(-\w+\s+)*[/~*]`), "destructive rm command"},
+	{regexp.MustCompile(`sudo\s+`), "sudo command"},
+	{regexp.MustCompile(`chmod\s+777`), "insecure chmod"},
+	{regexp.MustCompile(`mkfs\.`), "filesystem format"},
+	{regexp.MustCompile(`dd\s+if=`), "low-level disk operation"},
+	{regexp.MustCompile(`>\s*/dev/`), "write to device"},
+}
+
+// isDangerousCommand checks if a command matches any dangerous patterns.
+func isDangerousCommand(cmd string) (bool, string) {
+	for _, dp := range dangerousPatterns {
+		if dp.pattern.MatchString(cmd) {
+			return true, dp.reason
+		}
+	}
+	return false, ""
+}
+
+// checkCommandConfirmation checks if a command should be allowed to execute.
+func (a *ExecutorAdapter) checkCommandConfirmation(command string, description string) error {
+	isDangerous, reason := isDangerousCommand(command)
+
+	switch {
+	case a.commandConfirmationCallback != nil:
+		if !a.commandConfirmationCallback(command, isDangerous, reason, description) {
+			if isDangerous {
+				return fmt.Errorf("dangerous command denied by user: %s (%s)", reason, command)
+			}
+			return fmt.Errorf("command denied by user: %s", command)
+		}
+	case a.dangerousCommandCallback != nil && isDangerous:
+		// Backward compatibility: use old callback for dangerous commands
+		if !a.dangerousCommandCallback(command, reason) {
+			return fmt.Errorf("dangerous command denied by user: %s (%s)", reason, command)
+		}
+	case isDangerous:
+		// No callback set and command is dangerous - block it
+		return fmt.Errorf("dangerous command blocked: %s (%s)", reason, command)
+	}
+	return nil
+}
+
+// executeBash executes a bash command and returns the output.
+func (a *ExecutorAdapter) executeBash(ctx context.Context, input json.RawMessage) (string, error) {
+	var in bashInput
+	if err := json.Unmarshal(input, &in); err != nil {
+		return "", fmt.Errorf("failed to unmarshal bash input: %w", err)
+	}
+
+	if in.Command == "" {
+		return "", errors.New("command is required")
+	}
+
+	// Check command confirmation
+	if err := a.checkCommandConfirmation(in.Command, in.Description); err != nil {
+		return "", err
+	}
+
+	// Set timeout
+	timeout := defaultBashTimeout
+	if in.TimeoutMs > 0 {
+		timeout = time.Duration(in.TimeoutMs) * time.Millisecond
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	//nolint:gosec // G204: This is intentionally executing user-provided commands (bash tool)
+	cmd := exec.CommandContext(
+		ctx,
+		"bash",
+		"-c",
+		in.Command,
+	)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+
+	output := bashOutput{
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+		ExitCode: 0,
+	}
+
+	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return "", fmt.Errorf("command timeout after %v", timeout)
+		}
+		// Get exit code from error
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			output.ExitCode = exitErr.ExitCode()
+		} else {
+			return "", fmt.Errorf("failed to execute command: %w", err)
+		}
+	}
+
+	result, err := json.Marshal(output)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal output: %w", err)
+	}
+
+	return string(result), nil
 }

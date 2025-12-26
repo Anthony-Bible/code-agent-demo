@@ -48,4 +48,13 @@ type UserInterface interface {
 
 	// SetColorScheme sets the color scheme for the interface.
 	SetColorScheme(scheme ColorScheme) error
+
+	// ConfirmBashCommand prompts the user to confirm a bash command before execution.
+	// Parameters:
+	//   - command: The bash command to be executed
+	//   - isDangerous: Whether the command matches dangerous patterns
+	//   - reason: If dangerous, describes why (e.g., "destructive rm command"); empty for standard commands
+	//   - description: AI's rationale for running the command; displayed before the command when non-empty
+	// Returns true if the user confirms execution, false otherwise.
+	ConfirmBashCommand(command string, isDangerous bool, reason string, description string) bool
 }

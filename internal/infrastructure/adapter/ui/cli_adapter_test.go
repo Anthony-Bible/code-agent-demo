@@ -2,6 +2,7 @@ package ui_test
 
 import (
 	"code-editing-agent/internal/domain/port"
+	"code-editing-agent/internal/infrastructure/adapter/ui"
 	"errors"
 	"strings"
 	"testing"
@@ -303,5 +304,417 @@ func TestCLIAdapter_ColorSchemeDefaults(t *testing.T) {
 
 	t.Run("reset to default colors works", func(t *testing.T) {
 		t.Skip("TODO: Implement CLIAdapter - test color scheme reset")
+	})
+}
+
+func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
+	// Red Phase TDD Tests for ConfirmBashCommand
+	// These tests define the expected behavior before implementation.
+
+	t.Run("confirms execution when user types lowercase y", func(t *testing.T) {
+		input := strings.NewReader("y\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		result := adapter.ConfirmBashCommand("echo hello", false, "", "")
+
+		assert.True(t, result, "should return true when user confirms with 'y'")
+	})
+
+	t.Run("confirms execution when user types yes", func(t *testing.T) {
+		input := strings.NewReader("yes\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		result := adapter.ConfirmBashCommand("ls -la", false, "", "")
+
+		assert.True(t, result, "should return true when user confirms with 'yes'")
+	})
+
+	t.Run("confirms execution when user types uppercase Y", func(t *testing.T) {
+		input := strings.NewReader("Y\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		result := adapter.ConfirmBashCommand("pwd", false, "", "")
+
+		assert.True(t, result, "should return true when user confirms with 'Y'")
+	})
+
+	t.Run("confirms execution when user types uppercase YES", func(t *testing.T) {
+		input := strings.NewReader("YES\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		result := adapter.ConfirmBashCommand("cat file.txt", false, "", "")
+
+		assert.True(t, result, "should return true when user confirms with 'YES'")
+	})
+
+	t.Run("confirms execution when user types mixed case Yes", func(t *testing.T) {
+		input := strings.NewReader("Yes\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		result := adapter.ConfirmBashCommand("grep pattern file", false, "", "")
+
+		assert.True(t, result, "should return true when user confirms with 'Yes'")
+	})
+
+	t.Run("denies execution when user types n", func(t *testing.T) {
+		input := strings.NewReader("n\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		result := adapter.ConfirmBashCommand("rm file.txt", true, "destructive rm command", "")
+
+		assert.False(t, result, "should return false when user denies with 'n'")
+	})
+
+	t.Run("denies execution when user types no", func(t *testing.T) {
+		input := strings.NewReader("no\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		result := adapter.ConfirmBashCommand("rm -rf /", true, "destructive rm command", "")
+
+		assert.False(t, result, "should return false when user denies with 'no'")
+	})
+
+	t.Run("denies execution on empty input (default deny)", func(t *testing.T) {
+		input := strings.NewReader("\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		result := adapter.ConfirmBashCommand("echo test", false, "", "")
+
+		assert.False(t, result, "should return false on empty input (default deny behavior)")
+	})
+
+	t.Run("denies execution on EOF", func(t *testing.T) {
+		input := strings.NewReader("") // Empty reader simulates EOF
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		result := adapter.ConfirmBashCommand("echo test", false, "", "")
+
+		assert.False(t, result, "should return false on EOF")
+	})
+
+	t.Run("denies execution on unrecognized input", func(t *testing.T) {
+		input := strings.NewReader("maybe\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		result := adapter.ConfirmBashCommand("echo test", false, "", "")
+
+		assert.False(t, result, "should return false on unrecognized input")
+	})
+
+	t.Run("denies execution on whitespace-only input", func(t *testing.T) {
+		input := strings.NewReader("   \n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		result := adapter.ConfirmBashCommand("echo test", false, "", "")
+
+		assert.False(t, result, "should return false on whitespace-only input")
+	})
+
+	t.Run("displays dangerous warning in red for dangerous commands", func(t *testing.T) {
+		input := strings.NewReader("n\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		adapter.ConfirmBashCommand("rm -rf /home", true, "destructive rm command", "")
+
+		outputStr := output.String()
+		// Check for red color code (\x1b[91m) and dangerous warning text
+		assert.Contains(t, outputStr, "\x1b[91m", "should contain red color code for dangerous warning")
+		assert.Contains(t, outputStr, "[DANGEROUS COMMAND]", "should display dangerous command warning label")
+		assert.Contains(t, outputStr, "destructive rm command", "should display the danger reason")
+	})
+
+	t.Run("displays standard prefix in cyan for non-dangerous commands", func(t *testing.T) {
+		input := strings.NewReader("n\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		adapter.ConfirmBashCommand("ls -la", false, "", "")
+
+		outputStr := output.String()
+		// Check for cyan color code (\x1b[96m) and standard prefix
+		assert.Contains(t, outputStr, "\x1b[96m", "should contain cyan color code for standard commands")
+		assert.Contains(t, outputStr, "[BASH COMMAND]", "should display bash command label")
+	})
+
+	t.Run("displays the command in green color", func(t *testing.T) {
+		input := strings.NewReader("n\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		command := "echo 'hello world'"
+		adapter.ConfirmBashCommand(command, false, "", "")
+
+		outputStr := output.String()
+		// Check for green color code (\x1b[92m) and the command itself
+		assert.Contains(t, outputStr, "\x1b[92m", "should contain green color code for command display")
+		assert.Contains(t, outputStr, command, "should display the actual command")
+	})
+
+	t.Run("displays confirmation prompt", func(t *testing.T) {
+		input := strings.NewReader("y\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		adapter.ConfirmBashCommand("echo test", false, "", "")
+
+		outputStr := output.String()
+		assert.Contains(
+			t,
+			outputStr,
+			"Execute? [y/N]:",
+			"should display confirmation prompt with default deny indicator",
+		)
+	})
+
+	t.Run("handles multiline command display", func(t *testing.T) {
+		input := strings.NewReader("y\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		multilineCmd := "echo line1 && \\\necho line2"
+		result := adapter.ConfirmBashCommand(multilineCmd, false, "", "")
+
+		outputStr := output.String()
+		assert.True(t, result, "should confirm multiline command")
+		assert.Contains(t, outputStr, multilineCmd, "should display full multiline command")
+	})
+
+	t.Run("handles command with special characters", func(t *testing.T) {
+		input := strings.NewReader("y\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		specialCmd := "echo 'test' | grep -E \"[a-z]+\" && ls $HOME"
+		result := adapter.ConfirmBashCommand(specialCmd, false, "", "")
+
+		outputStr := output.String()
+		assert.True(t, result, "should confirm command with special characters")
+		assert.Contains(t, outputStr, specialCmd, "should display command with special characters")
+	})
+
+	t.Run("trims whitespace from user input before checking", func(t *testing.T) {
+		input := strings.NewReader("  y  \n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		result := adapter.ConfirmBashCommand("echo test", false, "", "")
+
+		assert.True(t, result, "should trim whitespace and accept 'y' with surrounding spaces")
+	})
+
+	t.Run("dangerous command with empty reason still shows warning", func(t *testing.T) {
+		input := strings.NewReader("n\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		adapter.ConfirmBashCommand("sudo rm -rf /", true, "", "")
+
+		outputStr := output.String()
+		assert.Contains(
+			t,
+			outputStr,
+			"[DANGEROUS COMMAND]",
+			"should still show dangerous warning even with empty reason",
+		)
+	})
+
+	t.Run("resets color after output", func(t *testing.T) {
+		input := strings.NewReader("y\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		adapter.ConfirmBashCommand("echo test", false, "", "")
+
+		outputStr := output.String()
+		// Check that color reset code (\x1b[0m) is present
+		assert.Contains(t, outputStr, "\x1b[0m", "should reset color after output")
+	})
+}
+
+// Red Phase TDD Tests for ConfirmBashCommand description parameter.
+// These tests define the expected behavior for displaying command descriptions.
+// All tests will fail until the description parameter is added to the method signature
+// and the implementation is updated to display the description.
+func TestCLIAdapter_ConfirmBashCommand_Description(t *testing.T) {
+	t.Run("displays description when provided for non-dangerous command", func(t *testing.T) {
+		// This test will fail because:
+		// 1. Current signature is ConfirmBashCommand(command, isDangerous, reason string)
+		// 2. New signature should be ConfirmBashCommand(command, isDangerous, reason, description string)
+		input := strings.NewReader("y\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Call with the new 4-parameter signature
+		adapter.ConfirmBashCommand("ls", false, "", "List files in directory")
+
+		outputStr := output.String()
+
+		// The description should appear on a line before the command
+		assert.Contains(t, outputStr, "List files in directory",
+			"should display the description text in output")
+
+		// Verify the description appears before the command in the output
+		descIndex := strings.Index(outputStr, "List files in directory")
+		cmdIndex := strings.Index(outputStr, "ls")
+		assert.Greater(t, cmdIndex, descIndex,
+			"description should appear before the command")
+	})
+
+	t.Run("omits description when empty string provided", func(t *testing.T) {
+		// This test verifies that when description is empty, no extra line is shown
+		input := strings.NewReader("y\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		adapter.ConfirmBashCommand("ls", false, "", "")
+
+		outputStr := output.String()
+
+		// Should show [BASH COMMAND] header
+		assert.Contains(t, outputStr, "[BASH COMMAND]",
+			"should display bash command label")
+
+		// Count the lines between [BASH COMMAND] and the command itself
+		// With no description, the command should immediately follow the header
+		lines := strings.Split(outputStr, "\n")
+		var headerLineIdx, cmdLineIdx int
+		for i, line := range lines {
+			if strings.Contains(line, "[BASH COMMAND]") {
+				headerLineIdx = i
+			}
+			if strings.Contains(line, "ls") && !strings.Contains(line, "[BASH COMMAND]") {
+				cmdLineIdx = i
+				break
+			}
+		}
+
+		// When description is empty, command should be on the very next line after header
+		assert.Equal(t, headerLineIdx+1, cmdLineIdx,
+			"command should immediately follow header when description is empty")
+	})
+
+	t.Run("displays both danger reason and description for dangerous command", func(t *testing.T) {
+		// This test verifies that both the danger reason and description are shown
+		input := strings.NewReader("n\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		adapter.ConfirmBashCommand("rm -rf /", true, "destructive rm", "Clean temp files")
+
+		outputStr := output.String()
+
+		// Should show dangerous command warning with reason
+		assert.Contains(t, outputStr, "[DANGEROUS COMMAND]",
+			"should display dangerous command label")
+		assert.Contains(t, outputStr, "destructive rm",
+			"should display the danger reason")
+
+		// Should also show the description
+		assert.Contains(t, outputStr, "Clean temp files",
+			"should display the description text")
+
+		// Verify ordering: danger warning -> description -> command
+		dangerIndex := strings.Index(outputStr, "[DANGEROUS COMMAND]")
+		descIndex := strings.Index(outputStr, "Clean temp files")
+		cmdIndex := strings.Index(outputStr, "rm -rf /")
+
+		assert.Greater(t, descIndex, dangerIndex,
+			"description should appear after the danger warning")
+		assert.Greater(t, cmdIndex, descIndex,
+			"command should appear after the description")
+	})
+
+	t.Run("description line uses appropriate styling", func(t *testing.T) {
+		// This test verifies the description has proper visual styling
+		input := strings.NewReader("y\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		adapter.ConfirmBashCommand("git status", false, "", "Check repository status")
+
+		outputStr := output.String()
+
+		// The description should be visible in the output
+		assert.Contains(t, outputStr, "Check repository status",
+			"description should be present in output")
+
+		// The output should contain color reset to ensure proper formatting
+		assert.Contains(t, outputStr, "\x1b[0m",
+			"should contain color reset codes for proper formatting")
+	})
+
+	t.Run("handles description with special characters", func(t *testing.T) {
+		input := strings.NewReader("y\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		specialDescription := "Build project with flags: -v --output=\"dist/\" && run tests"
+		adapter.ConfirmBashCommand("make build", false, "", specialDescription)
+
+		outputStr := output.String()
+		assert.Contains(t, outputStr, specialDescription,
+			"should display description with special characters correctly")
+	})
+
+	t.Run("handles multiline description", func(t *testing.T) {
+		input := strings.NewReader("y\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		multilineDescription := "Step 1: Install dependencies\nStep 2: Build project"
+		adapter.ConfirmBashCommand("npm install && npm run build", false, "", multilineDescription)
+
+		outputStr := output.String()
+		assert.Contains(t, outputStr, "Step 1: Install dependencies",
+			"should display first line of multiline description")
+		assert.Contains(t, outputStr, "Step 2: Build project",
+			"should display second line of multiline description")
+	})
+
+	t.Run("dangerous command with description but empty reason", func(t *testing.T) {
+		input := strings.NewReader("n\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		adapter.ConfirmBashCommand("sudo apt-get update", true, "", "Update package lists")
+
+		outputStr := output.String()
+
+		// Should still show dangerous warning
+		assert.Contains(t, outputStr, "[DANGEROUS COMMAND]",
+			"should show dangerous command label even with empty reason")
+
+		// Should show the description
+		assert.Contains(t, outputStr, "Update package lists",
+			"should display description even when danger reason is empty")
+	})
+
+	t.Run("description does not affect confirmation result", func(t *testing.T) {
+		// Test that adding description parameter does not change the confirmation logic
+		inputYes := strings.NewReader("y\n")
+		outputYes := &strings.Builder{}
+		adapterYes := ui.NewCLIAdapterWithIO(inputYes, outputYes)
+
+		resultYes := adapterYes.ConfirmBashCommand("echo hello", false, "", "Print greeting")
+		assert.True(t, resultYes, "should return true when user confirms with description present")
+
+		inputNo := strings.NewReader("n\n")
+		outputNo := &strings.Builder{}
+		adapterNo := ui.NewCLIAdapterWithIO(inputNo, outputNo)
+
+		resultNo := adapterNo.ConfirmBashCommand("echo hello", false, "", "Print greeting")
+		assert.False(t, resultNo, "should return false when user denies with description present")
 	})
 }
