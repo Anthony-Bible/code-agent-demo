@@ -98,12 +98,13 @@ func (a *AnthropicAdapter) SendMessage(
 
 	// Convert port tools to Anthropic SDK tools
 	anthropicTools := a.convertTools(tools)
-
+	systemPrompt := "You are an AI assistant that helps users with code editing and explanations. Use the available tools when necessary to provide accurate and helpful responses."
 	// Call Anthropic API
 	response, err := a.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.Model(a.model),
 		MaxTokens: int64(4096),
 		Messages:  anthropicMessages,
+		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
 		Thinking:  anthropic.ThinkingConfigParamUnion{OfDisabled: &anthropic.ThinkingConfigDisabledParam{}},
 		Tools:     anthropicTools,
 	})
