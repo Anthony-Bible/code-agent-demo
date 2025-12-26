@@ -2,12 +2,12 @@ package cmd
 
 import (
 	"code-editing-agent/internal/infrastructure/config"
+	signalhandler "code-editing-agent/internal/infrastructure/signal"
 	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -18,6 +18,8 @@ var cfg *config.Config
 
 type configKey struct{}
 
+type interruptHandlerKey struct{}
+
 func contextWithConfig(ctx context.Context, c *config.Config) context.Context {
 	return context.WithValue(ctx, configKey{}, c)
 }
@@ -25,6 +27,21 @@ func contextWithConfig(ctx context.Context, c *config.Config) context.Context {
 func configFromContext(ctx context.Context) *config.Config {
 	if c, ok := ctx.Value(configKey{}).(*config.Config); ok {
 		return c
+	}
+	return nil
+}
+
+func contextWithInterruptHandler(ctx context.Context, h *signalhandler.InterruptHandler) context.Context {
+	return context.WithValue(ctx, interruptHandlerKey{}, h)
+}
+
+// InterruptHandlerFromContext retrieves the InterruptHandler from the given context.
+// Returns nil if no handler was stored in the context.
+// This is used by subcommands to access the shared interrupt handler for
+// graceful shutdown handling.
+func InterruptHandlerFromContext(ctx context.Context) *signalhandler.InterruptHandler {
+	if h, ok := ctx.Value(interruptHandlerKey{}).(*signalhandler.InterruptHandler); ok {
+		return h
 	}
 	return nil
 }
@@ -64,9 +81,13 @@ refactoring options, and explanations.`,
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() error {
-	// Handle graceful shutdown
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
+	// Create interrupt handler with 2 second timeout for double-press detection
+	handler := signalhandler.NewInterruptHandler(2 * time.Second)
+	handler.Start()
+	defer handler.Stop()
+
+	// Create context with the interrupt handler
+	ctx := contextWithInterruptHandler(handler.Context(), handler)
 
 	// Update root command context
 	rootCmd.SetContext(ctx)
