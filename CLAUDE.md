@@ -4,94 +4,101 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Go-based AI coding agent that creates an interactive console chat application with file manipulation capabilities. It interfaces with the Anthropic Claude API and supports custom models.
+A Go-based AI coding agent using hexagonal (clean) architecture. Provides an interactive CLI chat with file manipulation tools, interfacing with the Anthropic API.
 
 ## Development Commands
 
-### Building and Running
 ```bash
-# Build the application
-go build -o code-editing-agent
+# Build and run
+go build -o code-editing-agent ./cmd/cli
+./code-editing-agent chat
 
-# Run directly (for development)
-go run main.go
+# Run directly
+go run ./cmd/cli/main.go chat
 
-# Build optimized binary
-go build -ldflags="-s -w" -o code-editing-agent
-```
+# Testing
+go test ./...                                    # All tests
+go test ./internal/domain/entity -v              # Single package
+go test ./internal/infrastructure/adapter/file -v -run TestLocalFileManager_DeleteFile  # Single test
 
-### Dependencies
-```bash
-# Install/update dependencies
-go mod tidy
-
-# Download dependencies
-go mod download
-
-# Verify dependencies
-go mod verify
-```
-
-### Testing
-```bash
-# Run tests
-go test ./...
-
-# Run tests with coverage
-go test -cover ./...
-
-# Run tests with verbose output
-go test -v ./...
-```
-
-### Code Quality
-```bash
-# Format code
+# Code quality
 go fmt ./...
-
-# Run static analysis
 go vet ./...
 ```
 
 ## Architecture
 
-### Core Components
-- **Agent**: Main struct managing conversation state and tool execution
-- **Tool System**: Modular tool architecture with JSON schema validation
-  - `read_file`: Read file contents
-  - `list_files`: Directory exploration with recursive walk
-  - `edit_file`: String replacement-based editing with file creation support
-- **Chat Interface**: Command-line interactive chat with colored output
-- **Message Handling**: Structured conversation management with message history
+### Hexagonal Architecture (Ports & Adapters)
 
-### Key Patterns
-- **Tool Definition Pattern**: Tools are defined as structured objects with name, description, and input schema
-- **Schema Generation**: Uses `github.com/invopop/jsonschema` for automatic JSON schema generation
-- **Error Propagation**: Errors are gracefully handled and propagated to the CLI with user-friendly messages
-- **Single Binary Deployment**: Application compiles to a single executable
+```
+Presentation (cmd/cli/) → Application (internal/application/) → Domain (internal/domain/) ← Infrastructure (internal/infrastructure/)
+```
 
-### Model Configuration
-- Default model: `hf:zai-org/GLM-4.6`
-- Can be changed to Claude models by modifying the model variable in main.go
-- Uses Anthropic SDK for API communication
+**Domain Layer** (`internal/domain/`) - No external dependencies
+- `entity/` - Core objects: `Conversation`, `Message`, `Tool`
+- `port/` - Interface contracts: `AIProvider`, `ToolExecutor`, `FileManager`, `UserInterface`
+- `service/` - Business logic: `ConversationService`, `ToolService`
 
-## File Structure
+**Application Layer** (`internal/application/`)
+- `service/ChatService` - High-level orchestration
+- `usecase/` - `MessageProcessUseCase`, `ToolExecutionUseCase`
+- `dto/` - Data transfer objects between layers
 
-The application is primarily contained in `main.go` with the following key sections:
-- Agent struct and methods
-- Tool definitions and implementations
-- Chat interface loop
-- Color definitions for terminal output
+**Infrastructure Layer** (`internal/infrastructure/`)
+- `adapter/ai/anthropic_adapter.go` - Implements `AIProvider`
+- `adapter/file/local_file_adapter.go` - Implements `FileManager` (with path traversal protection)
+- `adapter/tool/tool_executor_adapter.go` - Implements `ToolExecutor` (bash, read_file, list_files, edit_file)
+- `adapter/ui/cli_adapter.go` - Implements `UserInterface`
+- `config/container.go` - Dependency injection wiring
+- `signal/interrupt_handler.go` - Double Ctrl+C exit handling
 
-## Extension Points
+### Key Data Flows
 
-### Adding New Tools
-1. Define the tool input struct with JSON tags
-2. Create a ToolDefinition with name, description, and input schema
-3. Implement the tool logic and add it to the tool map
-4. Register the tool in the switch statement
+**Chat Flow**: User Input → `ChatService.SendMessage()` → `ConversationService.ProcessAssistantResponse()` → `AIProvider.SendMessage()` → Tool execution if needed → Response
 
-### Modifying Behavior
-- Change model: Update the `model` variable in main()
-- Add colors: Extend the color constants map
-- Modify output: Update the print functions with new color schemes
+**Tool Execution**: AI requests tool → `ToolExecutionUseCase.ExecuteToolsInSession()` → `ExecutorAdapter.ExecuteTool()` → Results fed back to AI
+
+### Ports (Interfaces)
+
+| Port | Purpose | Adapter |
+|------|---------|---------|
+| `AIProvider` | AI model communication | `AnthropicAdapter` |
+| `FileManager` | Sandboxed file operations | `LocalFileManager` |
+| `ToolExecutor` | Tool registry & execution | `ExecutorAdapter` |
+| `UserInterface` | Terminal I/O | `CLIAdapter` |
+
+## Adding New Tools
+
+1. Register in `ExecutorAdapter.registerDefaultTools()` (`internal/infrastructure/adapter/tool/tool_executor_adapter.go`)
+2. Implement in `ExecuteTool()` switch statement
+3. Add tests
+
+## Configuration
+
+Environment variables with `AGENT_` prefix:
+- `AGENT_MODEL` - AI model (default: `hf:zai-org/GLM-4.6`)
+- `AGENT_MAX_TOKENS` - Response limit
+- `AGENT_WORKING_DIR` - Base directory for file operations
+
+## Testing Patterns
+
+Table-driven tests throughout. Example pattern:
+```go
+tests := []struct {
+    name    string
+    input   Type
+    want    Expected
+    wantErr bool
+}{...}
+for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) { ... })
+}
+```
+
+Mock implementations of ports for isolated testing - see `conversation_service_test.go`.
+
+## Security Features
+
+- **Path traversal prevention** in `LocalFileManager` - validates paths stay within baseDir
+- **Dangerous command detection** in `ExecutorAdapter` - patterns like `rm -rf`, `dd`, etc. require confirmation
+- **Input validation** at entity and DTO levels

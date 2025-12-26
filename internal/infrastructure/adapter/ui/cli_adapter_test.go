@@ -4,6 +4,7 @@ import (
 	"code-editing-agent/internal/domain/port"
 	"code-editing-agent/internal/infrastructure/adapter/ui"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -547,6 +548,501 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 // These tests define the expected behavior for displaying command descriptions.
 // All tests will fail until the description parameter is added to the method signature
 // and the implementation is updated to display the description.
+// Red Phase TDD Tests for truncation integration into CLIAdapter.
+// These tests define the expected behavior before implementation.
+// All tests will fail until the truncation config is added to CLIAdapter
+// and DisplayToolResult is modified to apply truncation.
+
+func TestCLIAdapter_DisplayToolResult_TruncatesLargeOutput(t *testing.T) {
+	// Test that output with more than 30 lines (head 20 + tail 10) gets truncated
+	// This test will fail because DisplayToolResult does not yet apply truncation
+
+	t.Run("truncates output exceeding threshold", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Generate 50 lines of output - should trigger truncation with default config (20 head + 10 tail = 30 threshold)
+		var lines []string
+		for i := 1; i <= 50; i++ {
+			lines = append(lines, fmt.Sprintf("line %d", i))
+		}
+		largeResult := strings.Join(lines, "\n")
+
+		err := adapter.DisplayToolResult("test_tool", "test_input", largeResult)
+
+		assert.NoError(t, err)
+		outputStr := output.String()
+
+		// Should contain truncation indicator showing 20 lines were removed (50 - 30 = 20)
+		assert.Contains(t, outputStr, "[... 20 lines truncated ...]",
+			"should show truncation indicator for 20 removed lines")
+
+		// Should contain first 20 lines
+		assert.Contains(t, outputStr, "line 1", "should preserve first line")
+		assert.Contains(t, outputStr, "line 20", "should preserve line 20 (last of head)")
+
+		// Should contain last 10 lines
+		assert.Contains(t, outputStr, "line 41", "should preserve line 41 (first of tail)")
+		assert.Contains(t, outputStr, "line 50", "should preserve last line")
+
+		// Should NOT contain middle lines
+		assert.NotContains(t, outputStr, "line 21\n", "should NOT contain line 21 (truncated)")
+		assert.NotContains(t, outputStr, "line 30\n", "should NOT contain line 30 (truncated)")
+		assert.NotContains(t, outputStr, "line 40\n", "should NOT contain line 40 (truncated)")
+	})
+
+	t.Run("truncates output at exactly threshold plus one", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Generate 31 lines - should truncate exactly 1 line
+		var lines []string
+		for i := 1; i <= 31; i++ {
+			lines = append(lines, fmt.Sprintf("line %d", i))
+		}
+		result := strings.Join(lines, "\n")
+
+		err := adapter.DisplayToolResult("test_tool", "input", result)
+
+		assert.NoError(t, err)
+		outputStr := output.String()
+
+		// Should show 1 line truncated
+		assert.Contains(t, outputStr, "[... 1 lines truncated ...]",
+			"should show truncation indicator for 1 removed line")
+	})
+}
+
+func TestCLIAdapter_DisplayToolResult_PreservesSmallOutput(t *testing.T) {
+	// Test that output with fewer lines than the threshold passes through unchanged
+	// This test will fail because DisplayToolResult does not yet check truncation config
+
+	t.Run("preserves output under threshold unchanged", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Generate 25 lines - under 30 threshold, should NOT truncate
+		var lines []string
+		for i := 1; i <= 25; i++ {
+			lines = append(lines, fmt.Sprintf("line %d", i))
+		}
+		smallResult := strings.Join(lines, "\n")
+
+		err := adapter.DisplayToolResult("test_tool", "test_input", smallResult)
+
+		assert.NoError(t, err)
+		outputStr := output.String()
+
+		// Should NOT contain any truncation indicator
+		assert.NotContains(t, outputStr, "truncated",
+			"should NOT show truncation indicator for small output")
+
+		// Should contain ALL lines
+		for i := 1; i <= 25; i++ {
+			assert.Contains(t, outputStr, fmt.Sprintf("line %d", i),
+				"should preserve all lines when under threshold")
+		}
+	})
+
+	t.Run("preserves output at exactly threshold", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Generate exactly 30 lines - at threshold, should NOT truncate
+		var lines []string
+		for i := 1; i <= 30; i++ {
+			lines = append(lines, fmt.Sprintf("line %d", i))
+		}
+		result := strings.Join(lines, "\n")
+
+		err := adapter.DisplayToolResult("test_tool", "input", result)
+
+		assert.NoError(t, err)
+		outputStr := output.String()
+
+		// Should NOT contain any truncation indicator
+		assert.NotContains(t, outputStr, "truncated",
+			"should NOT truncate when exactly at threshold")
+
+		// All lines should be present
+		assert.Contains(t, outputStr, "line 30", "should preserve line 30")
+	})
+
+	t.Run("preserves empty output", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		err := adapter.DisplayToolResult("test_tool", "test_input", "")
+
+		assert.NoError(t, err)
+		outputStr := output.String()
+
+		// Should NOT contain any truncation indicator
+		assert.NotContains(t, outputStr, "truncated",
+			"should NOT show truncation for empty output")
+	})
+
+	t.Run("preserves single line output", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		singleLine := "just one line here"
+		err := adapter.DisplayToolResult("test_tool", "input", singleLine)
+
+		assert.NoError(t, err)
+		outputStr := output.String()
+
+		assert.Contains(t, outputStr, singleLine, "should preserve single line output")
+		assert.NotContains(t, outputStr, "truncated", "should NOT truncate single line")
+	})
+}
+
+func TestCLIAdapter_DisplayToolResult_BashToolHandling(t *testing.T) {
+	// Test that bash tool results use TruncateBashOutput which handles JSON format
+	// This test will fail because DisplayToolResult does not yet detect bash tool
+
+	t.Run("uses TruncateBashOutput for bash tool", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Create bash-style JSON with large stdout
+		var stdoutLines []string
+		for i := 1; i <= 50; i++ {
+			stdoutLines = append(stdoutLines, fmt.Sprintf("stdout line %d", i))
+		}
+		bashResult := fmt.Sprintf(`{"stdout":"%s","stderr":"","exit_code":0}`,
+			strings.Join(stdoutLines, "\\n"))
+
+		err := adapter.DisplayToolResult("bash", "echo test", bashResult)
+
+		assert.NoError(t, err)
+		outputStr := output.String()
+
+		// Should contain truncation indicator within the JSON stdout field
+		assert.Contains(t, outputStr, "truncated",
+			"should truncate stdout within bash JSON output")
+
+		// Should preserve structure - exit_code should still be present
+		assert.Contains(t, outputStr, "exit_code",
+			"should preserve bash JSON structure")
+	})
+
+	t.Run("truncates stderr in bash output independently", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Create bash-style JSON with large stderr
+		var stderrLines []string
+		for i := 1; i <= 50; i++ {
+			stderrLines = append(stderrLines, fmt.Sprintf("error line %d", i))
+		}
+		bashResult := fmt.Sprintf(`{"stdout":"ok","stderr":"%s","exit_code":1}`,
+			strings.Join(stderrLines, "\\n"))
+
+		err := adapter.DisplayToolResult("bash", "failing cmd", bashResult)
+
+		assert.NoError(t, err)
+		outputStr := output.String()
+
+		// stderr should be truncated
+		assert.Contains(t, outputStr, "truncated",
+			"should truncate stderr within bash JSON output")
+	})
+
+	t.Run("falls back to regular truncation for invalid bash JSON", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Generate plain text output (not JSON) but use bash tool name
+		var lines []string
+		for i := 1; i <= 50; i++ {
+			lines = append(lines, fmt.Sprintf("line %d", i))
+		}
+		plainResult := strings.Join(lines, "\n")
+
+		err := adapter.DisplayToolResult("bash", "echo test", plainResult)
+
+		assert.NoError(t, err)
+		outputStr := output.String()
+
+		// Should still truncate using fallback
+		assert.Contains(t, outputStr, "truncated",
+			"should fall back to regular truncation for non-JSON bash output")
+	})
+
+	t.Run("does not use bash truncation for non-bash tools", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Create JSON that looks like bash output but for a different tool
+		var lines []string
+		for i := 1; i <= 50; i++ {
+			lines = append(lines, fmt.Sprintf("line %d", i))
+		}
+		result := strings.Join(lines, "\n")
+
+		err := adapter.DisplayToolResult("read_file", "/path/to/file", result)
+
+		assert.NoError(t, err)
+		outputStr := output.String()
+
+		// Should truncate with regular TruncateOutput, not bash-specific
+		assert.Contains(t, outputStr, "truncated",
+			"should use regular truncation for non-bash tools")
+	})
+}
+
+func TestCLIAdapter_SetTruncationConfig(t *testing.T) {
+	// Test that truncation config can be set and affects truncation behavior
+	// This test will fail because SetTruncationConfig method does not exist
+
+	t.Run("sets custom truncation config", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Set custom config with 5 head lines and 3 tail lines
+		customConfig := ui.TruncationConfig{
+			HeadLines: 5,
+			TailLines: 3,
+			Enabled:   true,
+		}
+		adapter.SetTruncationConfig(customConfig)
+
+		// Generate 20 lines - should truncate with custom config (5 + 3 = 8 threshold)
+		var lines []string
+		for i := 1; i <= 20; i++ {
+			lines = append(lines, fmt.Sprintf("line %d", i))
+		}
+		result := strings.Join(lines, "\n")
+
+		err := adapter.DisplayToolResult("test_tool", "input", result)
+
+		assert.NoError(t, err)
+		outputStr := output.String()
+
+		// Should truncate 12 lines (20 - 8 = 12)
+		assert.Contains(t, outputStr, "[... 12 lines truncated ...]",
+			"should truncate based on custom config")
+
+		// Should contain only first 5 lines
+		assert.Contains(t, outputStr, "line 5", "should preserve line 5 (last of custom head)")
+		assert.NotContains(t, outputStr, "\nline 6\n", "should NOT contain line 6 with custom config")
+
+		// Should contain only last 3 lines
+		assert.Contains(t, outputStr, "line 18", "should preserve line 18 (first of custom tail)")
+	})
+
+	t.Run("can disable truncation via config", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Disable truncation
+		disabledConfig := ui.TruncationConfig{
+			HeadLines: 20,
+			TailLines: 10,
+			Enabled:   false,
+		}
+		adapter.SetTruncationConfig(disabledConfig)
+
+		// Generate 100 lines - would normally truncate, but disabled
+		var lines []string
+		for i := 1; i <= 100; i++ {
+			lines = append(lines, fmt.Sprintf("line %d", i))
+		}
+		result := strings.Join(lines, "\n")
+
+		err := adapter.DisplayToolResult("test_tool", "input", result)
+
+		assert.NoError(t, err)
+		outputStr := output.String()
+
+		// Should NOT truncate when disabled
+		assert.NotContains(t, outputStr, "truncated",
+			"should NOT truncate when config is disabled")
+
+		// All lines should be present
+		assert.Contains(t, outputStr, "line 50", "should preserve all lines when disabled")
+		assert.Contains(t, outputStr, "line 100", "should preserve last line when disabled")
+	})
+
+	t.Run("setting config multiple times uses latest", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Set first config
+		adapter.SetTruncationConfig(ui.TruncationConfig{
+			HeadLines: 2,
+			TailLines: 2,
+			Enabled:   true,
+		})
+
+		// Override with second config
+		adapter.SetTruncationConfig(ui.TruncationConfig{
+			HeadLines: 10,
+			TailLines: 5,
+			Enabled:   true,
+		})
+
+		// Generate 20 lines
+		var lines []string
+		for i := 1; i <= 20; i++ {
+			lines = append(lines, fmt.Sprintf("line %d", i))
+		}
+		result := strings.Join(lines, "\n")
+
+		err := adapter.DisplayToolResult("test_tool", "input", result)
+
+		assert.NoError(t, err)
+		outputStr := output.String()
+
+		// Should truncate based on second config (10 + 5 = 15 threshold, 5 removed)
+		assert.Contains(t, outputStr, "[... 5 lines truncated ...]",
+			"should use most recent config")
+	})
+}
+
+func TestCLIAdapter_GetTruncationConfig(t *testing.T) {
+	// Test that truncation config can be retrieved
+	// This test will fail because GetTruncationConfig method does not exist
+
+	t.Run("returns current truncation config", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Set custom config
+		customConfig := ui.TruncationConfig{
+			HeadLines: 15,
+			TailLines: 8,
+			Enabled:   true,
+		}
+		adapter.SetTruncationConfig(customConfig)
+
+		// Retrieve config
+		retrievedConfig := adapter.GetTruncationConfig()
+
+		assert.Equal(t, customConfig.HeadLines, retrievedConfig.HeadLines,
+			"HeadLines should match set value")
+		assert.Equal(t, customConfig.TailLines, retrievedConfig.TailLines,
+			"TailLines should match set value")
+		assert.Equal(t, customConfig.Enabled, retrievedConfig.Enabled,
+			"Enabled should match set value")
+	})
+
+	t.Run("returns default config when not explicitly set", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Get config without setting it first
+		config := adapter.GetTruncationConfig()
+
+		// Should return default values
+		defaultConfig := ui.DefaultTruncationConfig()
+		assert.Equal(t, defaultConfig.HeadLines, config.HeadLines,
+			"HeadLines should have default value")
+		assert.Equal(t, defaultConfig.TailLines, config.TailLines,
+			"TailLines should have default value")
+		assert.Equal(t, defaultConfig.Enabled, config.Enabled,
+			"Enabled should have default value")
+	})
+
+	t.Run("returns copy not reference to internal state", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Get config
+		config1 := adapter.GetTruncationConfig()
+
+		// Modify the returned config
+		config1.HeadLines = 999
+		config1.Enabled = false
+
+		// Get config again
+		config2 := adapter.GetTruncationConfig()
+
+		// Should not be affected by modification of previous return value
+		assert.NotEqual(t, 999, config2.HeadLines,
+			"modifying returned config should not affect adapter internal state")
+		assert.True(t, config2.Enabled,
+			"modifying returned config should not affect adapter internal state")
+	})
+}
+
+func TestCLIAdapter_DefaultTruncationConfig(t *testing.T) {
+	// Test that new adapters have default truncation config applied
+	// This test will fail because CLIAdapter does not yet initialize truncationConfig
+
+	t.Run("new adapter with default IO has default truncation config", func(t *testing.T) {
+		// Note: NewCLIAdapter uses os.Stdin/Stdout, but we can still check config
+		adapter := ui.NewCLIAdapter()
+
+		config := adapter.GetTruncationConfig()
+
+		// Should match DefaultTruncationConfig() values
+		assert.Equal(t, 20, config.HeadLines,
+			"default HeadLines should be 20")
+		assert.Equal(t, 10, config.TailLines,
+			"default TailLines should be 10")
+		assert.True(t, config.Enabled,
+			"default Enabled should be true")
+	})
+
+	t.Run("new adapter with custom IO has default truncation config", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		config := adapter.GetTruncationConfig()
+
+		// Should also have default config
+		assert.Equal(t, 20, config.HeadLines,
+			"default HeadLines should be 20 for custom IO adapter")
+		assert.Equal(t, 10, config.TailLines,
+			"default TailLines should be 10 for custom IO adapter")
+		assert.True(t, config.Enabled,
+			"default Enabled should be true for custom IO adapter")
+	})
+
+	t.Run("default config enables truncation on large output without explicit config", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Do NOT set any config - rely on defaults
+
+		// Generate 50 lines - should truncate with default config
+		var lines []string
+		for i := 1; i <= 50; i++ {
+			lines = append(lines, fmt.Sprintf("line %d", i))
+		}
+		result := strings.Join(lines, "\n")
+
+		err := adapter.DisplayToolResult("test_tool", "input", result)
+
+		assert.NoError(t, err)
+		outputStr := output.String()
+
+		// Should truncate using default config (20 + 10 = 30 threshold, 20 removed)
+		assert.Contains(t, outputStr, "[... 20 lines truncated ...]",
+			"should apply default truncation config to large output")
+	})
+}
+
 func TestCLIAdapter_ConfirmBashCommand_Description(t *testing.T) {
 	t.Run("displays description when provided for non-dangerous command", func(t *testing.T) {
 		// This test will fail because:
