@@ -8,6 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/html"
 	fileadapter "code-editing-agent/internal/infrastructure/adapter/file"
 )
 
@@ -294,6 +299,29 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 		RequiredFields: []string{"command"},
 	}
 	a.tools[bashTool.Name] = bashTool
+
+	// Register fetch tool
+	fetchTool := entity.Tool{
+		ID:          "fetch",
+		Name:        "fetch",
+		Description: "Fetches web resources via HTTP/HTTPS. Prefer this to bash-isms like curl/wget",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"url": map[string]interface{}{
+					"type":        "string",
+					"description": "Full URL to fetch, e.g. https://...",
+				},
+				"includeMarkup": map[string]interface{}{
+					"type":        "boolean",
+					"description": "Include the HTML markup? Defaults to false. By default or when set to false, markup will be stripped and converted to plain text. Prefer markup stripping, and only set this to true if the output is confusing: otherwise you may download a massive amount of data",
+				},
+			},
+			"required": []string{"url"},
+		},
+		RequiredFields: []string{"url"},
+	}
+	a.tools[fetchTool.Name] = fetchTool
 }
 
 // executeByName executes the appropriate tool function based on the tool name.
@@ -307,6 +335,8 @@ func (a *ExecutorAdapter) executeByName(ctx context.Context, name string, input 
 		return a.executeEditFile(input)
 	case "bash":
 		return a.executeBash(ctx, input)
+	case "fetch":
+		return a.executeFetch(ctx, input)
 	default:
 		return "", fmt.Errorf("no implementation available for tool: %s", name)
 	}
@@ -500,6 +530,12 @@ type bashInput struct {
 	TimeoutMs   int    `json:"timeout_ms,omitempty"`
 }
 
+// fetchInput represents the input for the fetch tool.
+type fetchInput struct {
+	URL           string `json:"url"`
+	IncludeMarkup bool   `json:"includeMarkup,omitempty"`
+}
+
 // bashOutput represents the output from the bash tool.
 type bashOutput struct {
 	Stdout   string `json:"stdout"`
@@ -627,4 +663,318 @@ func (a *ExecutorAdapter) executeBash(ctx context.Context, input json.RawMessage
 	}
 
 	return string(result), nil
+}
+
+// defaultFetchTimeout is the default timeout for fetch operations.
+const defaultFetchTimeout = 30 * time.Second
+
+// maxResponseSize defines an upper bound on the number of bytes we will accept
+// in an HTTP response body. The 10MB limit is a compromise: it is large enough
+// to cover typical HTML pages and JSON responses used by tools, while still
+// preventing unbounded memory growth if a server returns an unexpectedly large
+// payload. Callers that use this constant to bound response reads should stop
+// reading and treat the operation as failed (for example, by returning an error)
+// when the response exceeds this limit, instead of loading the entire body into
+// memory.
+const maxResponseSize = 10 << 20
+
+// isPrivateIP checks if an IP address is in a private/internal range
+func isPrivateIP(ip net.IP) bool {
+	if ip.IsLoopback() {
+		return true
+	}
+
+	if ip4 := ip.To4(); ip4 != nil {
+		// Private IPv4 ranges
+		privateIPv4Ranges := []struct {
+			network *net.IPNet
+		}{
+			{network: mustParseCIDR("127.0.0.0/8")},    // Loopback
+			{network: mustParseCIDR("10.0.0.0/8")},     // Private Class A
+			{network: mustParseCIDR("172.16.0.0/12")},  // Private Class B
+			{network: mustParseCIDR("192.168.0.0/16")}, // Private Class C
+			{network: mustParseCIDR("169.254.0.0/16")}, // Link-local
+			{network: mustParseCIDR("224.0.0.0/4")},    // Multicast
+			{network: mustParseCIDR("0.0.0.0/8")},       // This network
+		}
+
+		for _, r := range privateIPv4Ranges {
+			if r.network.Contains(ip4) {
+				return true
+			}
+		}
+	} else {
+		// IPv6 private ranges
+		privateIPv6Ranges := []struct {
+			network *net.IPNet
+		}{
+			{network: mustParseCIDR("::1/128")},           // Loopback
+			{network: mustParseCIDR("fc00::/7")},           // Unique local
+			{network: mustParseCIDR("fe80::/10")},         // Link-local
+			{network: mustParseCIDR("ff00::/8")},           // Multicast
+			{network: mustParseCIDR("2000::/3")},           // Reserved for documentation
+			{network: mustParseCIDR("2001:db8::/32")},     // NET-TEST example
+		}
+
+		for _, r := range privateIPv6Ranges {
+			if r.network.Contains(ip) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// mustParseCIDR parses a CIDR string and panics on error
+func mustParseCIDR(cidr string) *net.IPNet {
+	_, network, err := net.ParseCIDR(cidr)
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse CIDR %s: %v", cidr, err))
+	}
+	return network
+}
+
+// validateURL validates that the URL is safe to fetch and blocks requests to private/internal resources.
+func validateURL(rawURL string) error {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL format: %w", err)
+	}
+
+	// Only allow http and https schemes
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return fmt.Errorf("URL must use http or https protocol, got: %s", parsedURL.Scheme)
+	}
+
+	// Ensure URL has a host
+	if parsedURL.Host == "" {
+		return fmt.Errorf("URL must have a host")
+	}
+
+	// Block credentials in URLs to prevent information disclosure
+	if parsedURL.User != nil {
+		return fmt.Errorf("URL contains credentials which are not allowed for security")
+	}
+
+	// Resolve hostname to IP addresses to check for private ranges
+	host := parsedURL.Hostname()
+	if host == "" {
+		return fmt.Errorf("invalid hostname in URL")
+	}
+
+	// Check if host is an IP address
+	hostIP := net.ParseIP(host)
+	if hostIP != nil {
+		// Direct IP address - check if it's private
+		if isPrivateIP(hostIP) {
+			return fmt.Errorf("direct IP address %s is in a private/internal range and is blocked for security", hostIP.String())
+		}
+	} else {
+		// Hostname - resolve to IPs and check each one
+		ips, err := net.LookupIP(host)
+		if err != nil {
+			return fmt.Errorf("failed to resolve hostname %s: %w", host, err)
+		}
+
+		// Check all resolved IP addresses
+		for _, ip := range ips {
+			if isPrivateIP(ip) {
+				return fmt.Errorf("hostname %s resolves to private IP address %s and is blocked for security", host, ip.String())
+			}
+		}
+
+		// If no IPs resolve, block the request
+		if len(ips) == 0 {
+			return fmt.Errorf("hostname %s does not resolve to any IP address", host)
+		}
+	}
+
+	return nil
+}
+
+// htmlToText converts HTML content to plain text.
+func htmlToText(htmlContent string) (string, error) {
+	doc, err := html.Parse(strings.NewReader(htmlContent))
+	if err != nil {
+		return "", fmt.Errorf("failed to parse HTML: %w", err)
+	}
+
+	var result strings.Builder
+
+	// Recursively extract text from nodes
+	var extractText func(*html.Node)
+	extractText = func(n *html.Node) {
+		switch n.Type {
+		case html.TextNode:
+			text := strings.TrimSpace(n.Data)
+			if text != "" {
+				result.WriteString(text)
+				result.WriteString(" ")
+			}
+
+		case html.ElementNode:
+			// Add newline for block elements
+			switch n.Data {
+			case "p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "br":
+				result.WriteString(" ")
+			case "li":
+				result.WriteString(" ")
+			}
+
+			// Recursively process children
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				extractText(c)
+			}
+		case html.DocumentNode:
+			// Process all children of document node
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				extractText(c)
+			}
+		}
+	}
+
+	extractText(doc)
+
+	// Clean up whitespace
+	text := result.String()
+	text = strings.Join(strings.Fields(text), " ")
+
+	return text, nil
+}
+
+// executeFetch executes the fetch tool.
+func (a *ExecutorAdapter) executeFetch(ctx context.Context, input json.RawMessage) (string, error) {
+	var in fetchInput
+	if err := json.Unmarshal(input, &in); err != nil {
+		return "", fmt.Errorf("failed to unmarshal fetch input: %w", err)
+	}
+
+	// Validate URL
+	if err := validateURL(in.URL); err != nil {
+		return "", fmt.Errorf("invalid URL: %w", err)
+	}
+
+	// Set timeout, but do not extend an existing earlier parent deadline.
+	if deadline, ok := ctx.Deadline(); ok {
+		// If the existing deadline is further in the future than our default timeout,
+		// apply a new timeout to cap it at defaultFetchTimeout. Otherwise, keep the
+		// tighter parent deadline.
+		if time.Until(deadline) > defaultFetchTimeout {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, defaultFetchTimeout)
+			defer cancel()
+		}
+	} else {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, defaultFetchTimeout)
+		defer cancel()
+	}
+
+	// Create HTTP request with context
+	req, err := http.NewRequestWithContext(ctx, "GET", in.URL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	// Set user agent
+	req.Header.Set("User-Agent", "code-editing-agent/1.0")
+
+	// Make HTTP request using a dedicated client with timeout and redirect policy
+	client := &http.Client{
+		Timeout: defaultFetchTimeout,
+		// Configure redirect policy to prevent SSRF attacks and excessive redirects
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// Limit to maximum 3 redirects to prevent excessive request chains
+			if len(via) >= 3 {
+				return fmt.Errorf("stopped after 3 redirects")
+			}
+			
+			// Validate redirect URL to prevent SSRF attacks
+			if err := validateURL(req.URL.String()); err != nil {
+				return fmt.Errorf("redirect blocked due to security policy: %w", err)
+			}
+			
+			return nil
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	if resp.StatusCode >= 400 {
+		respText := resp.Status
+		if resp.StatusCode == 403 {
+			respText = "authorization required"
+		}
+		return "", fmt.Errorf("HTTP %d (%s)", resp.StatusCode, respText)
+	}
+
+	// Check content length if available (may be -1 for chunked encoding)
+	if resp.ContentLength > maxResponseSize {
+		return "", fmt.Errorf("response too large: %d bytes (max: %d)", resp.ContentLength, maxResponseSize)
+	}
+
+	// Read response body with size tracking
+	var bodyBuffer bytes.Buffer
+	const maxChunkSize = 4096 // 4KB chunks for efficient memory usage
+	
+	// Track total bytes read to enforce size limit
+	totalBytesRead := int64(0)
+	chunk := make([]byte, maxChunkSize)
+	
+	for {
+		// Calculate remaining bytes we can read
+		remainingBytes := maxResponseSize - totalBytesRead
+		if remainingBytes <= 0 {
+			break // Stop reading if we've hit the limit
+		}
+		
+		// Read next chunk, but limit it to remaining bytes
+		chunkSize := uint64(maxChunkSize)
+		if uint64(remainingBytes) < chunkSize {
+			chunkSize = uint64(remainingBytes)
+		}
+		
+		n, err := resp.Body.Read(chunk[:chunkSize])
+		if n > 0 {
+			bodyBuffer.Write(chunk[:n])
+			totalBytesRead += int64(n)
+		}
+		
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", fmt.Errorf("failed to read response body: %w", err)
+		}
+		
+		// If Content-Length was available and we've read all expected bytes, stop
+		if resp.ContentLength >= 0 && totalBytesRead >= resp.ContentLength {
+			break
+		}
+	}
+
+	// Check if we hit the overall size limit while reading
+	if totalBytesRead >= maxResponseSize {
+		return "", fmt.Errorf("response truncated due to size limit (max: %d bytes, read: %d bytes)", maxResponseSize, totalBytesRead)
+	}
+
+	bodyBytes := bodyBuffer.Bytes()
+
+	content := string(bodyBytes)
+
+	// Convert HTML to text if includeMarkup is false
+	if !in.IncludeMarkup && strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html") {
+		converted, err := htmlToText(content)
+		if err != nil {
+			return "", fmt.Errorf("failed to convert HTML to text: %w", err)
+		}
+		content = converted
+	}
+
+	return content, nil
 }
