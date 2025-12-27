@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestConfig_HistoryDefaults verifies that Defaults() includes proper history configuration
+// TestConfig_HistoryDefaults verifies that Defaults() includes proper history configuration.
 func TestConfig_HistoryDefaults(t *testing.T) {
 	t.Run("HistoryFile has default value", func(t *testing.T) {
 		cfg := Defaults()
@@ -28,7 +28,7 @@ func TestConfig_HistoryDefaults(t *testing.T) {
 	})
 }
 
-// TestConfig_HistoryEnvironmentVariables verifies environment variable overrides
+// TestConfig_HistoryEnvironmentVariables verifies environment variable overrides.
 func TestConfig_HistoryEnvironmentVariables(t *testing.T) {
 	// Helper to reset viper between tests
 	resetViper := func() {
@@ -81,7 +81,7 @@ func TestConfig_HistoryEnvironmentVariables(t *testing.T) {
 	})
 }
 
-// TestConfig_HistoryValidation verifies validation of history configuration values
+// TestConfig_HistoryValidation verifies validation of history configuration values.
 func TestConfig_HistoryValidation(t *testing.T) {
 	resetViper := func() {
 		viper.Reset()
@@ -122,12 +122,12 @@ func TestConfig_HistoryValidation(t *testing.T) {
 
 		cfg := LoadConfig()
 
-		assert.Equal(t, "", cfg.HistoryFile,
+		assert.Empty(t, cfg.HistoryFile,
 			"empty history file should be allowed for in-memory only mode")
 	})
 }
 
-// TestConfig_HistoryFieldsExist verifies that Config struct has required history fields
+// TestConfig_HistoryFieldsExist verifies that Config struct has required history fields.
 func TestConfig_HistoryFieldsExist(t *testing.T) {
 	t.Run("Config has HistoryFile field", func(t *testing.T) {
 		cfg := &Config{}

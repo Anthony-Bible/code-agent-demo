@@ -26,6 +26,7 @@ type InterruptHandler struct {
 	resetTimer    *time.Timer
 	sigCh         chan os.Signal
 	stopCh        chan struct{}
+	exitFunc      func(int) // Exit function for force-exit on second press (mockable for testing)
 }
 
 // NewInterruptHandler creates a new InterruptHandler with the specified timeout.
@@ -37,6 +38,7 @@ func NewInterruptHandler(timeout time.Duration) *InterruptHandler {
 		ctx:          ctx,
 		cancel:       cancel,
 		firstPressCh: make(chan struct{}, 1),
+		exitFunc:     os.Exit,
 	}
 }
 
@@ -95,6 +97,7 @@ func (h *InterruptHandler) handleSecondPress() {
 	h.cancel()
 	h.pressCount = 0
 	h.stopResetTimer()
+	h.exitFunc(0) // Force exit since go-prompt blocks context cancellation
 }
 
 // handleFirstPress processes the first Ctrl+C (or first after timeout reset).

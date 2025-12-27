@@ -77,7 +77,7 @@ func TestContainer_UsesHistoryConfig(t *testing.T) {
 		require.True(t, ok, "UIAdapter should be a *ui.CLIAdapter")
 
 		// Empty history file should be preserved (in-memory only mode)
-		assert.Equal(t, "", cliAdapter.GetHistoryFile(),
+		assert.Empty(t, cliAdapter.GetHistoryFile(),
 			"CLIAdapter should accept empty HistoryFile for in-memory mode")
 	})
 }

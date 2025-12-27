@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"syscall"
 
 	"github.com/c-bata/go-prompt"
 )
@@ -67,6 +68,36 @@ func NewCLIAdapterWithIO(input io.Reader, output io.Writer) *CLIAdapter {
 	}
 }
 
+// NewCLIAdapterWithHistory creates a new CLIAdapter configured for interactive
+// mode with command history support. The historyFile parameter specifies the
+// path to the file where command history will be persisted. The maxEntries
+// parameter specifies the maximum number of history entries to store.
+//
+// If historyFile is empty, history will not be persisted to disk.
+// If maxEntries is <= 0, a default value will be used.
+//
+// The returned adapter is always in interactive mode (IsInteractive() returns true).
+func NewCLIAdapterWithHistory(historyFile string, maxEntries int) *CLIAdapter {
+	if maxEntries <= 0 {
+		maxEntries = 1000
+	}
+
+	// Expand ~ in history file path
+	expandedPath := ExpandPath(historyFile)
+
+	return &CLIAdapter{
+		input:             os.Stdin,
+		output:            os.Stdout,
+		prompt:            "> ",
+		colors:            defaultColorScheme(),
+		truncationConfig:  DefaultTruncationConfig(),
+		useInteractive:    true,
+		historyFile:       historyFile,
+		maxHistoryEntries: maxEntries,
+		historyManager:    NewHistoryManager(expandedPath, maxEntries),
+	}
+}
+
 // GetUserInput gets input from the user with context support.
 // When in interactive mode, uses go-prompt for arrow key navigation and history.
 // When in non-interactive mode, uses bufio.Scanner for simple line input.
@@ -106,7 +137,10 @@ func (c *CLIAdapter) getInteractiveInput() (string, bool) {
 		prompt.OptionPrefixTextColor(prompt.Blue),
 		prompt.OptionAddKeyBind(prompt.KeyBind{
 			Key: prompt.ControlC,
-			Fn:  func(*prompt.Buffer) { /* Let external signal handler manage Ctrl+C */ },
+			Fn: func(*prompt.Buffer) {
+				// Send SIGINT to self so the signal handler receives it
+				_ = syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+			},
 		}),
 	)
 
@@ -116,6 +150,18 @@ func (c *CLIAdapter) getInteractiveInput() (string, bool) {
 	}
 
 	return input, true
+}
+
+// getInteractiveConfirmation uses go-prompt for Y/N confirmation in interactive mode.
+// Returns the user's input string (to be checked by caller).
+// Ctrl+C returns empty string, which is treated as "no" (safe default).
+func (c *CLIAdapter) getInteractiveConfirmation() string {
+	input := prompt.Input(
+		"Execute? [y/N]: ",
+		emptyCompleter,
+		prompt.OptionPrefixTextColor(prompt.Yellow),
+	)
+	return input
 }
 
 // getScannerInput uses bufio.Scanner for non-interactive input.
@@ -332,36 +378,6 @@ func (c *CLIAdapter) GetMaxHistoryEntries() int {
 	return c.maxHistoryEntries
 }
 
-// NewCLIAdapterWithHistory creates a new CLIAdapter configured for interactive
-// mode with command history support. The historyFile parameter specifies the
-// path to the file where command history will be persisted. The maxEntries
-// parameter specifies the maximum number of history entries to store.
-//
-// If historyFile is empty, history will not be persisted to disk.
-// If maxEntries is <= 0, a default value will be used.
-//
-// The returned adapter is always in interactive mode (IsInteractive() returns true).
-func NewCLIAdapterWithHistory(historyFile string, maxEntries int) *CLIAdapter {
-	if maxEntries <= 0 {
-		maxEntries = 1000
-	}
-
-	// Expand ~ in history file path
-	expandedPath := ExpandPath(historyFile)
-
-	return &CLIAdapter{
-		input:             os.Stdin,
-		output:            os.Stdout,
-		prompt:            "> ",
-		colors:            defaultColorScheme(),
-		truncationConfig:  DefaultTruncationConfig(),
-		useInteractive:    true,
-		historyFile:       historyFile,
-		maxHistoryEntries: maxEntries,
-		historyManager:    NewHistoryManager(expandedPath, maxEntries),
-	}
-}
-
 // ConfirmBashCommand prompts the user to confirm a bash command before execution.
 // It displays the command with appropriate styling and waits for user input.
 //
@@ -390,20 +406,25 @@ func (c *CLIAdapter) ConfirmBashCommand(command string, isDangerous bool, reason
 	// Display command in green with indentation
 	fmt.Fprintf(c.output, "  %s%s\x1b[0m\n", c.colors.Tool, command)
 
-	// Display confirmation prompt
-	fmt.Fprint(c.output, "Execute? [y/N]: ")
+	var input string
 
-	// Initialize scanner if needed
-	if c.scanner == nil {
-		c.scanner = bufio.NewScanner(c.input)
+	// Use go-prompt for interactive mode, bufio.Scanner for non-interactive
+	if c.useInteractive && c.historyManager != nil {
+		// Interactive mode: use go-prompt to avoid stdin conflict
+		input = c.getInteractiveConfirmation()
+	} else {
+		// Non-interactive mode: use bufio.Scanner
+		fmt.Fprint(c.output, "Execute? [y/N]: ")
+		if c.scanner == nil {
+			c.scanner = bufio.NewScanner(c.input)
+		}
+		if !c.scanner.Scan() {
+			return false
+		}
+		input = c.scanner.Text()
 	}
 
-	// Read user input
-	if !c.scanner.Scan() {
-		return false
-	}
-
-	input := strings.TrimSpace(strings.ToLower(c.scanner.Text()))
+	input = strings.TrimSpace(strings.ToLower(input))
 	return input == "y" || input == "yes"
 }
 

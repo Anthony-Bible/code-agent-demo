@@ -6,6 +6,13 @@ import (
 	"time"
 )
 
+// newTestHandler creates an InterruptHandler for testing with exitFunc mocked to a no-op.
+func newTestHandler(timeout time.Duration) *InterruptHandler {
+	h := NewInterruptHandler(timeout)
+	h.exitFunc = func(int) {} // No-op to prevent os.Exit during tests
+	return h
+}
+
 // =============================================================================
 // TDD Red Phase Tests for InterruptHandler
 // These tests define the expected behavior for the double Ctrl+C exit feature.
@@ -15,43 +22,43 @@ import (
 func TestInterruptHandler_NewCreatesHandler(t *testing.T) {
 	t.Run("should create a valid handler with specified timeout", func(t *testing.T) {
 		timeout := 2 * time.Second
-		handler := NewInterruptHandler(timeout)
+		handler := newTestHandler(timeout)
 
 		if handler == nil {
-			t.Fatal("NewInterruptHandler() returned nil, expected a valid handler")
+			t.Fatal("newTestHandler() returned nil, expected a valid handler")
 		}
 	})
 
 	t.Run("should create handler with zero timeout", func(t *testing.T) {
-		handler := NewInterruptHandler(0)
+		handler := newTestHandler(0)
 
 		if handler == nil {
-			t.Fatal("NewInterruptHandler(0) returned nil, expected a valid handler")
+			t.Fatal("newTestHandler(0) returned nil, expected a valid handler")
 		}
 	})
 
 	t.Run("should create handler with very short timeout", func(t *testing.T) {
 		timeout := 1 * time.Millisecond
-		handler := NewInterruptHandler(timeout)
+		handler := newTestHandler(timeout)
 
 		if handler == nil {
-			t.Fatal("NewInterruptHandler() with short timeout returned nil")
+			t.Fatal("newTestHandler() with short timeout returned nil")
 		}
 	})
 
 	t.Run("should create handler with very long timeout", func(t *testing.T) {
 		timeout := 1 * time.Hour
-		handler := NewInterruptHandler(timeout)
+		handler := newTestHandler(timeout)
 
 		if handler == nil {
-			t.Fatal("NewInterruptHandler() with long timeout returned nil")
+			t.Fatal("newTestHandler() with long timeout returned nil")
 		}
 	})
 }
 
 func TestInterruptHandler_FirstInterruptFiresChannel(t *testing.T) {
 	t.Run("should fire FirstPress channel on first interrupt", func(t *testing.T) {
-		handler := NewInterruptHandler(2 * time.Second)
+		handler := newTestHandler(2 * time.Second)
 		if handler == nil {
 			t.Fatal("handler is nil")
 		}
@@ -76,7 +83,7 @@ func TestInterruptHandler_FirstInterruptFiresChannel(t *testing.T) {
 	})
 
 	t.Run("should not cancel context on first interrupt", func(t *testing.T) {
-		handler := NewInterruptHandler(2 * time.Second)
+		handler := newTestHandler(2 * time.Second)
 		if handler == nil {
 			t.Fatal("handler is nil")
 		}
@@ -106,7 +113,7 @@ func TestInterruptHandler_FirstInterruptFiresChannel(t *testing.T) {
 
 func TestInterruptHandler_DoubleInterruptCancelsContext(t *testing.T) {
 	t.Run("should cancel context on second interrupt within timeout", func(t *testing.T) {
-		handler := NewInterruptHandler(2 * time.Second)
+		handler := newTestHandler(2 * time.Second)
 		if handler == nil {
 			t.Fatal("handler is nil")
 		}
@@ -137,7 +144,7 @@ func TestInterruptHandler_DoubleInterruptCancelsContext(t *testing.T) {
 	})
 
 	t.Run("should cancel context immediately on rapid double press", func(t *testing.T) {
-		handler := NewInterruptHandler(2 * time.Second)
+		handler := newTestHandler(2 * time.Second)
 		if handler == nil {
 			t.Fatal("handler is nil")
 		}
@@ -167,7 +174,7 @@ func TestInterruptHandler_TimeoutResetsCounter(t *testing.T) {
 	t.Run("should reset counter after timeout expires", func(t *testing.T) {
 		// Use a very short timeout for testing
 		timeout := 50 * time.Millisecond
-		handler := NewInterruptHandler(timeout)
+		handler := newTestHandler(timeout)
 		if handler == nil {
 			t.Fatal("handler is nil")
 		}
@@ -229,7 +236,7 @@ func TestInterruptHandler_TimeoutResetsCounter(t *testing.T) {
 
 	t.Run("should cancel context on double press after reset", func(t *testing.T) {
 		timeout := 50 * time.Millisecond
-		handler := NewInterruptHandler(timeout)
+		handler := newTestHandler(timeout)
 		if handler == nil {
 			t.Fatal("handler is nil")
 		}
@@ -264,7 +271,7 @@ func TestInterruptHandler_TimeoutResetsCounter(t *testing.T) {
 
 func TestInterruptHandler_ContextCancelledOnSecondPress(t *testing.T) {
 	t.Run("context should return context.Canceled error after double press", func(t *testing.T) {
-		handler := NewInterruptHandler(2 * time.Second)
+		handler := newTestHandler(2 * time.Second)
 		if handler == nil {
 			t.Fatal("handler is nil")
 		}
@@ -294,7 +301,7 @@ func TestInterruptHandler_ContextCancelledOnSecondPress(t *testing.T) {
 	})
 
 	t.Run("context Done channel should be closed after double press", func(t *testing.T) {
-		handler := NewInterruptHandler(2 * time.Second)
+		handler := newTestHandler(2 * time.Second)
 		if handler == nil {
 			t.Fatal("handler is nil")
 		}
@@ -327,7 +334,7 @@ func TestInterruptHandler_ContextCancelledOnSecondPress(t *testing.T) {
 
 func TestInterruptHandler_StartAndStop(t *testing.T) {
 	t.Run("should handle multiple Start calls gracefully", func(t *testing.T) {
-		handler := NewInterruptHandler(2 * time.Second)
+		handler := newTestHandler(2 * time.Second)
 		if handler == nil {
 			t.Fatal("handler is nil")
 		}
@@ -339,7 +346,7 @@ func TestInterruptHandler_StartAndStop(t *testing.T) {
 	})
 
 	t.Run("should handle Stop without Start", func(t *testing.T) {
-		handler := NewInterruptHandler(2 * time.Second)
+		handler := newTestHandler(2 * time.Second)
 		if handler == nil {
 			t.Fatal("handler is nil")
 		}
@@ -349,7 +356,7 @@ func TestInterruptHandler_StartAndStop(t *testing.T) {
 	})
 
 	t.Run("should handle multiple Stop calls", func(t *testing.T) {
-		handler := NewInterruptHandler(2 * time.Second)
+		handler := newTestHandler(2 * time.Second)
 		if handler == nil {
 			t.Fatal("handler is nil")
 		}
@@ -361,7 +368,7 @@ func TestInterruptHandler_StartAndStop(t *testing.T) {
 	})
 
 	t.Run("should not respond to interrupts after Stop", func(t *testing.T) {
-		handler := NewInterruptHandler(2 * time.Second)
+		handler := newTestHandler(2 * time.Second)
 		if handler == nil {
 			t.Fatal("handler is nil")
 		}
@@ -391,7 +398,7 @@ func TestInterruptHandler_StartAndStop(t *testing.T) {
 }
 
 func TestInterruptHandler_FirstPressChannelNonNil(t *testing.T) {
-	handler := NewInterruptHandler(2 * time.Second)
+	handler := newTestHandler(2 * time.Second)
 	if handler == nil {
 		t.Fatal("handler is nil")
 	}
@@ -405,7 +412,7 @@ func TestInterruptHandler_FirstPressChannelNonNil(t *testing.T) {
 }
 
 func TestInterruptHandler_FirstPressChannelSameOnMultipleCalls(t *testing.T) {
-	handler := NewInterruptHandler(2 * time.Second)
+	handler := newTestHandler(2 * time.Second)
 	if handler == nil {
 		t.Fatal("handler is nil")
 	}
@@ -449,7 +456,7 @@ func TestInterruptHandler_FirstPressChannelSameOnMultipleCalls(t *testing.T) {
 
 func TestInterruptHandler_FirstPressFiresAfterReset(t *testing.T) {
 	timeout := 50 * time.Millisecond
-	handler := NewInterruptHandler(timeout)
+	handler := newTestHandler(timeout)
 	if handler == nil {
 		t.Fatal("handler is nil")
 	}
@@ -487,7 +494,7 @@ func TestInterruptHandler_FirstPressFiresAfterReset(t *testing.T) {
 
 func TestInterruptHandler_Context(t *testing.T) {
 	t.Run("Context should return non-nil context", func(t *testing.T) {
-		handler := NewInterruptHandler(2 * time.Second)
+		handler := newTestHandler(2 * time.Second)
 		if handler == nil {
 			t.Fatal("handler is nil")
 		}
@@ -501,7 +508,7 @@ func TestInterruptHandler_Context(t *testing.T) {
 	})
 
 	t.Run("Context should return the same context on multiple calls", func(t *testing.T) {
-		handler := NewInterruptHandler(2 * time.Second)
+		handler := newTestHandler(2 * time.Second)
 		if handler == nil {
 			t.Fatal("handler is nil")
 		}
@@ -522,7 +529,7 @@ func TestInterruptHandler_Context(t *testing.T) {
 	})
 
 	t.Run("Context should not be cancelled initially", func(t *testing.T) {
-		handler := NewInterruptHandler(2 * time.Second)
+		handler := newTestHandler(2 * time.Second)
 		if handler == nil {
 			t.Fatal("handler is nil")
 		}
@@ -551,7 +558,7 @@ func TestInterruptHandler_EdgeCases(t *testing.T) {
 	t.Run("should handle interrupt exactly at timeout boundary", func(t *testing.T) {
 		// This tests the edge case where second press comes exactly at timeout
 		timeout := 100 * time.Millisecond
-		handler := NewInterruptHandler(timeout)
+		handler := newTestHandler(timeout)
 		if handler == nil {
 			t.Fatal("handler is nil")
 		}
@@ -581,7 +588,7 @@ func TestInterruptHandler_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("should handle many rapid interrupts", func(t *testing.T) {
-		handler := NewInterruptHandler(2 * time.Second)
+		handler := newTestHandler(2 * time.Second)
 		if handler == nil {
 			t.Fatal("handler is nil")
 		}
@@ -625,7 +632,7 @@ type scenarioTestCase struct {
 func runScenario(t *testing.T, tt scenarioTestCase) {
 	t.Helper()
 
-	handler := NewInterruptHandler(tt.timeout)
+	handler := newTestHandler(tt.timeout)
 	if handler == nil {
 		t.Fatal("handler is nil")
 	}
