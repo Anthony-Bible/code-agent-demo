@@ -757,7 +757,7 @@ func (a *ExecutorAdapter) executeFetch(ctx context.Context, input json.RawMessag
 	}
 
 	// Check if we hit the limit
-	if len(bodyBytes) >= maxResponseSize {
+	if len(bodyBytes) == maxResponseSize {
 		return "", fmt.Errorf("response truncated due to size limit (max: %d bytes)", maxResponseSize)
 	}
 
