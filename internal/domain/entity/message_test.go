@@ -92,10 +92,8 @@ func TestMessage_NewMessage(t *testing.T) {
 				if got.Timestamp.IsZero() {
 					t.Error("NewMessage() timestamp should not be zero")
 				}
-			} else {
-				if got != nil {
-					t.Errorf("NewMessage() returned non-nil message on error: %+v", got)
-				}
+			} else if got != nil {
+				t.Errorf("NewMessage() returned non-nil message on error: %+v", got)
 			}
 		})
 	}

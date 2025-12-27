@@ -113,11 +113,9 @@ func TestConversation_AddMessage(t *testing.T) {
 					t.Errorf("Conversation.AddMessage() last message content = %v, want %v",
 						lastMessage.Content, tt.args.message.Content)
 				}
-			} else {
-				if len(c.Messages) != beforeLen {
-					t.Errorf("Conversation.AddMessage() should not add message on error, length before = %v, after = %v",
-						beforeLen, len(c.Messages))
-				}
+			} else if len(c.Messages) != beforeLen {
+				t.Errorf("Conversation.AddMessage() should not add message on error, length before = %v, after = %v",
+					beforeLen, len(c.Messages))
 			}
 		})
 	}
@@ -233,10 +231,8 @@ func TestConversation_GetLastMessage(t *testing.T) {
 				if got.Content != tt.want.Content {
 					t.Errorf("Conversation.GetLastMessage() content = %v, want %v", got.Content, tt.want.Content)
 				}
-			} else {
-				if got != nil {
-					t.Errorf("Conversation.GetLastMessage() returned non-nil message when not expected: %+v", got)
-				}
+			} else if got != nil {
+				t.Errorf("Conversation.GetLastMessage() returned non-nil message when not expected: %+v", got)
 			}
 		})
 	}

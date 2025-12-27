@@ -105,11 +105,9 @@ func TestTool_NewTool(t *testing.T) {
 				if got.Description != tt.description {
 					t.Errorf("NewTool() description = %v, want %v", got.Description, tt.description)
 				}
-			} else {
-				if got != nil {
+			} else if got != nil {
 					t.Errorf("NewTool() returned non-nil tool on error: %+v", got)
 				}
-			}
 		})
 	}
 }
