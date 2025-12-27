@@ -102,3 +102,73 @@ Mock implementations of ports for isolated testing - see `conversation_service_t
 - **Path traversal prevention** in `LocalFileManager` - validates paths stay within baseDir
 - **Dangerous command detection** in `ExecutorAdapter` - patterns like `rm -rf`, `dd`, etc. require confirmation
 - **Input validation** at entity and DTO levels
+
+## Agent Skills
+
+This agent supports skills following the [agentskills.io](https://agentskills.io) specification.
+
+### Skill Directory Structure
+
+Skills are discovered from the `./skills` directory:
+
+```
+skills/
+├── skill-name/
+│   └── SKILL.md          # Required
+├── other-skill/
+│   ├── SKILL.md          # Required
+│   ├── scripts/          # Optional - executable code
+│   ├── references/       # Optional - documentation
+│   └── assets/           # Optional - static resources
+└── README.md             # This file
+```
+
+### SKILL.md Format
+
+Each skill must contain a `SKILL.md` file with YAML frontmatter:
+
+```yaml
+---
+name: skill-name
+description: A description of what this skill does and when to use it.
+license: MIT              # Optional
+compatibility: Go 1.21+   # Optional
+metadata:
+  key: value              # Optional map
+allowed-tools: read_file list_files  # Optional space-delimited list
+---
+
+# Skill Content
+
+Detailed instructions, patterns, and examples for using the skill.
+```
+
+### Required Frontmatter Fields
+
+- `name`: Skill name (lowercase alphanumeric and hyphens, max 64 chars)
+- `description`: What the skill does and when to use it (max 1024 chars)
+
+### Optional Frontmatter Fields
+
+- `license`: License name or reference
+- `compatibility`: Environment requirements
+- `metadata`: Additional key-value pairs
+- `allowed-tools`: Pre-approved tools for this skill
+
+### How Skills Work
+
+1. **Discovery**: Skills are automatically discovered from `./skills` at startup
+2. **Metadata**: Skill name and description are added to the AI's system prompt
+3. **Activation**: Use the `activate_skill` tool to load full skill content on demand
+4. **Scripts**: Skills can reference scripts in a `scripts/` subdirectory (executed via bash tool)
+
+### Adding a New Skill
+
+1. Create a directory under `./skills/skill-name/`
+2. Create `SKILL.md` following the format above
+3. (Optional) Add `scripts/`, `references/`, `assets/` subdirectories
+4. The skill will be automatically discovered at next startup
+
+### Example Skill
+
+See `skills/test-skill/SKILL.md` and `skills/code-review/SKILL.md` for examples.
