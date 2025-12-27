@@ -10,6 +10,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -37,16 +38,27 @@ type Config struct {
 	// GoodbyeMessage is displayed when the chat session ends.
 	// Defaults to "Bye!"
 	GoodbyeMessage string
+
+	// HistoryFile is the path to the command history file.
+	// Defaults to "~/.code-editing-agent-history".
+	// Set to empty string to disable history persistence.
+	HistoryFile string
+
+	// HistoryMaxEntries is the maximum number of history entries to keep.
+	// Defaults to 1000.
+	HistoryMaxEntries int
 }
 
 // Defaults returns a Config struct with all default values set.
 func Defaults() *Config {
 	return &Config{
-		AIModel:        "hf:zai-org/GLM-4.6",
-		MaxTokens:      1024,
-		WorkingDir:     ".",
-		WelcomeMessage: "Chat with Claude (use 'ctrl+c' to quit)",
-		GoodbyeMessage: "Bye!",
+		AIModel:           "hf:zai-org/GLM-4.6",
+		MaxTokens:         1024,
+		WorkingDir:        ".",
+		WelcomeMessage:    "Chat with Claude (use 'ctrl+c' to quit)",
+		GoodbyeMessage:    "Bye!",
+		HistoryFile:       "~/.code-editing-agent-history",
+		HistoryMaxEntries: 1000,
 	}
 }
 
@@ -82,6 +94,17 @@ func LoadConfig() *Config {
 	}
 	if viper.IsSet("goodbyeMessage") {
 		cfg.GoodbyeMessage = viper.GetString("goodbyeMessage")
+	}
+	// For history_file, we need to check if the env var is set (including empty string)
+	// because empty string is valid for in-memory only mode
+	if val, ok := os.LookupEnv("AGENT_HISTORY_FILE"); ok {
+		cfg.HistoryFile = val
+	}
+	if viper.IsSet("history_max_entries") {
+		val := viper.GetInt("history_max_entries")
+		if val > 0 {
+			cfg.HistoryMaxEntries = val
+		}
 	}
 
 	return cfg

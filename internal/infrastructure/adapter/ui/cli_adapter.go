@@ -4,20 +4,32 @@ import (
 	"bufio"
 	"code-editing-agent/internal/domain/port"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+
+	"github.com/c-bata/go-prompt"
 )
 
 // CLIAdapter implements the UserInterface port using the command line.
 type CLIAdapter struct {
-	input            io.Reader
-	output           io.Writer
-	prompt           string
-	colors           port.ColorScheme
-	scanner          *bufio.Scanner
-	truncationConfig TruncationConfig
+	input             io.Reader
+	output            io.Writer
+	prompt            string
+	colors            port.ColorScheme
+	scanner           *bufio.Scanner
+	truncationConfig  TruncationConfig
+	useInteractive    bool
+	historyFile       string
+	maxHistoryEntries int
+	historyManager    *HistoryManager // Command history for interactive mode
+}
+
+// emptyCompleter is a no-op completer for go-prompt (we don't use auto-completion).
+func emptyCompleter(prompt.Document) []prompt.Suggest {
+	return nil
 }
 
 // defaultColorScheme returns the default ANSI color scheme for CLI output.
@@ -40,6 +52,7 @@ func NewCLIAdapter() *CLIAdapter {
 		prompt:           "> ",
 		colors:           defaultColorScheme(),
 		truncationConfig: DefaultTruncationConfig(),
+		useInteractive:   IsTerminal(os.Stdin),
 	}
 }
 
@@ -55,17 +68,60 @@ func NewCLIAdapterWithIO(input io.Reader, output io.Writer) *CLIAdapter {
 }
 
 // GetUserInput gets input from the user with context support.
+// When in interactive mode, uses go-prompt for arrow key navigation and history.
+// When in non-interactive mode, uses bufio.Scanner for simple line input.
 func (c *CLIAdapter) GetUserInput(ctx context.Context) (string, bool) {
-	if c.scanner == nil {
-		c.scanner = bufio.NewScanner(c.input)
-	}
-
 	// Check if context is cancelled
 	select {
 	case <-ctx.Done():
 		return "", false
 	default:
 		// Continue
+	}
+
+	// Use go-prompt for interactive mode with history support
+	if c.useInteractive && c.historyManager != nil {
+		return c.getInteractiveInput()
+	}
+
+	// Fall back to bufio.Scanner for non-interactive mode
+	return c.getScannerInput()
+}
+
+// getInteractiveInput uses go-prompt for feature-rich terminal input.
+func (c *CLIAdapter) getInteractiveInput() (string, bool) {
+	// Build history for go-prompt
+	var history []string
+	if c.historyManager != nil {
+		history = c.historyManager.History()
+	}
+
+	// Use prompt.Input for single-line input with history
+	// Note: Use go-prompt's built-in coloring (OptionPrefixTextColor) instead of
+	// manual ANSI codes in the prefix to avoid terminal rendering issues.
+	input := prompt.Input(
+		"Claude: ",
+		emptyCompleter,
+		prompt.OptionHistory(history),
+		prompt.OptionPrefixTextColor(prompt.Blue),
+		prompt.OptionAddKeyBind(prompt.KeyBind{
+			Key: prompt.ControlC,
+			Fn:  func(*prompt.Buffer) { /* Let external signal handler manage Ctrl+C */ },
+		}),
+	)
+
+	// Add to history if not empty
+	if strings.TrimSpace(input) != "" {
+		_ = c.historyManager.Add(input)
+	}
+
+	return input, true
+}
+
+// getScannerInput uses bufio.Scanner for non-interactive input.
+func (c *CLIAdapter) getScannerInput() (string, bool) {
+	if c.scanner == nil {
+		c.scanner = bufio.NewScanner(c.input)
 	}
 
 	// Display prompt
@@ -79,8 +135,7 @@ func (c *CLIAdapter) GetUserInput(ctx context.Context) (string, bool) {
 		return "", false
 	}
 
-	input := c.scanner.Text()
-	return input, true
+	return c.scanner.Text(), true
 }
 
 // DisplayMessage displays a message with the specified role.
@@ -215,6 +270,98 @@ func (c *CLIAdapter) GetTruncationConfig() TruncationConfig {
 	return c.truncationConfig
 }
 
+// =============================================================================
+// Terminal Detection
+// =============================================================================
+
+// IsTerminal checks if the given io.Reader is connected to a terminal.
+// It returns true if the reader is an *os.File that represents a terminal
+// (character device), false otherwise.
+//
+// This is used to determine whether to use interactive input (go-prompt)
+// or non-interactive input (bufio.Scanner).
+func IsTerminal(r io.Reader) bool {
+	if r == nil {
+		return false
+	}
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	stat, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (stat.Mode() & os.ModeCharDevice) != 0
+}
+
+// IsInteractive returns whether the adapter is in interactive mode.
+// When true, the adapter uses go-prompt for input with features like
+// command history, auto-completion, and line editing.
+// When false, the adapter uses bufio.Scanner for simple line-based input.
+func (c *CLIAdapter) IsInteractive() bool {
+	return c.useInteractive
+}
+
+// SetInteractive sets whether the adapter should use interactive mode.
+// This allows forcing interactive or non-interactive mode regardless of
+// terminal detection, which is useful for testing.
+func (c *CLIAdapter) SetInteractive(interactive bool) {
+	c.useInteractive = interactive
+}
+
+// InputModeString returns a string description of the current input mode.
+// Returns "interactive" if IsInteractive() is true, "non-interactive" otherwise.
+// This is useful for debugging and logging.
+func (c *CLIAdapter) InputModeString() string {
+	if c.useInteractive {
+		return "interactive"
+	}
+	return "non-interactive"
+}
+
+// GetHistoryFile returns the path to the command history file.
+// Returns an empty string if no history file is configured.
+func (c *CLIAdapter) GetHistoryFile() string {
+	return c.historyFile
+}
+
+// GetMaxHistoryEntries returns the maximum number of history entries to store.
+// Returns 0 if using the default value.
+func (c *CLIAdapter) GetMaxHistoryEntries() int {
+	return c.maxHistoryEntries
+}
+
+// NewCLIAdapterWithHistory creates a new CLIAdapter configured for interactive
+// mode with command history support. The historyFile parameter specifies the
+// path to the file where command history will be persisted. The maxEntries
+// parameter specifies the maximum number of history entries to store.
+//
+// If historyFile is empty, history will not be persisted to disk.
+// If maxEntries is <= 0, a default value will be used.
+//
+// The returned adapter is always in interactive mode (IsInteractive() returns true).
+func NewCLIAdapterWithHistory(historyFile string, maxEntries int) *CLIAdapter {
+	if maxEntries <= 0 {
+		maxEntries = 1000
+	}
+
+	// Expand ~ in history file path
+	expandedPath := ExpandPath(historyFile)
+
+	return &CLIAdapter{
+		input:             os.Stdin,
+		output:            os.Stdout,
+		prompt:            "> ",
+		colors:            defaultColorScheme(),
+		truncationConfig:  DefaultTruncationConfig(),
+		useInteractive:    true,
+		historyFile:       historyFile,
+		maxHistoryEntries: maxEntries,
+		historyManager:    NewHistoryManager(expandedPath, maxEntries),
+	}
+}
+
 // ConfirmBashCommand prompts the user to confirm a bash command before execution.
 // It displays the command with appropriate styling and waits for user input.
 //
@@ -258,4 +405,72 @@ func (c *CLIAdapter) ConfirmBashCommand(command string, isDangerous bool, reason
 
 	input := strings.TrimSpace(strings.ToLower(c.scanner.Text()))
 	return input == "y" || input == "yes"
+}
+
+// GetHistoryManager returns the HistoryManager for interactive adapters.
+// The HistoryManager provides command history functionality for go-prompt integration,
+// including persistent storage and navigation through previous commands.
+//
+// Returns nil for non-interactive adapters (those created with NewCLIAdapterWithIO).
+// For interactive adapters (those created with NewCLIAdapterWithHistory), returns
+// a pointer to the internal HistoryManager that can be used to query or modify history.
+//
+// The returned pointer is the same instance on subsequent calls (not a copy).
+func (c *CLIAdapter) GetHistoryManager() *HistoryManager {
+	return c.historyManager
+}
+
+// AddToHistory adds an entry to the command history.
+// The entry is trimmed of leading/trailing whitespace before storage.
+//
+// Returns an error in the following cases:
+//   - Non-interactive adapter: "history not available in non-interactive mode"
+//   - Empty or whitespace-only entry: ErrEmptyEntry
+//   - Entry contains embedded newlines: ErrEmbeddedNewline
+//   - Entry matches the most recent entry: ErrConsecutiveDuplicate
+//
+// On success, the entry is persisted to the history file (if configured)
+// and will be available for go-prompt history navigation.
+func (c *CLIAdapter) AddToHistory(entry string) error {
+	if c.historyManager == nil {
+		return errors.New("history not available in non-interactive mode")
+	}
+	return c.historyManager.Add(entry)
+}
+
+// ClearHistory clears all command history entries from both memory and the history file.
+// This operation is idempotent and safe to call on non-interactive adapters (no-op).
+// After calling ClearHistory, GetHistoryCallback will return an empty slice until
+// new entries are added via AddToHistory.
+func (c *CLIAdapter) ClearHistory() {
+	if c.historyManager != nil {
+		c.historyManager.Clear()
+	}
+}
+
+// GetPromptPrefix returns the current prompt prefix string displayed before user input.
+// This is the string set via SetPrompt, or the default "> " if not explicitly set.
+// The prompt prefix is used by go-prompt to display the input prompt in interactive mode.
+func (c *CLIAdapter) GetPromptPrefix() string {
+	return c.prompt
+}
+
+// GetHistoryCallback returns a callback function compatible with go-prompt's history option.
+// The callback returns a slice of all history entries in order added (oldest first),
+// suitable for arrow key navigation in interactive mode.
+//
+// Returns nil for non-interactive adapters. The returned callback reflects live updates;
+// entries added via AddToHistory or cleared via ClearHistory are immediately visible.
+//
+// Example usage with go-prompt:
+//
+//	p := prompt.New(executor, completer,
+//	    prompt.OptionHistory(adapter.GetHistoryCallback()()))
+func (c *CLIAdapter) GetHistoryCallback() func() []string {
+	if c.historyManager == nil {
+		return nil
+	}
+	return func() []string {
+		return c.historyManager.History()
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -11,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	// Add this:
+	// Add this:.
 	"github.com/invopop/jsonschema"
 )
 
@@ -39,7 +40,7 @@ func main() {
 		}
 		return scanner.Text(), true
 	}
-tools := []ToolDefinition{ReadFileDefinition, ListFilesDefinition, EditFileDefinition}
+	tools := []ToolDefinition{ReadFileDefinition, ListFilesDefinition, EditFileDefinition}
 	agent := NewAgent(&client, getUserMessage, tools)
 	err := agent.Run(context.TODO())
 	if err != nil {
@@ -99,7 +100,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			continue
 		}
 		readUserInput = false
-conversation = append(conversation, anthropic.NewUserMessage(toolResults...))
+		conversation = append(conversation, anthropic.NewUserMessage(toolResults...))
 	}
 	return nil
 }
@@ -162,7 +163,7 @@ func (a *Agent) executeTool(id string, name string, input json.RawMessage) anthr
 	return anthropic.NewToolResultBlock(id, response, false)
 }
 
-// tools definitions
+// ReadFileDefinition defines the read_file tool for reading file contents.
 var ReadFileDefinition = ToolDefinition{
 	Name:        "read_file",
 	Description: "Reads the contents of a given relative file path, use this when you want to see what's inside a file. Do not use this with directory names.",
@@ -268,7 +269,7 @@ func EditFile(input json.RawMessage) (string, error) {
 		panic(err)
 	}
 	if editFileInput.Path == "" || editFileInput.OldStr == editFileInput.NewStr {
-		return "", fmt.Errorf("invalid input parameters")
+		return "", errors.New("invalid input parameters")
 	}
 	content, err := os.ReadFile(editFileInput.Path)
 	if err != nil {
@@ -278,9 +279,9 @@ func EditFile(input json.RawMessage) (string, error) {
 		return "", err
 	}
 	oldContent := string(content)
-	newContent := strings.Replace(oldContent, editFileInput.OldStr, editFileInput.NewStr, -1)
+	newContent := strings.ReplaceAll(oldContent, editFileInput.OldStr, editFileInput.NewStr)
 	if oldContent == newContent && editFileInput.OldStr != "" {
-		return "", fmt.Errorf("old string not found in file")
+		return "", errors.New("old string not found in file")
 	}
 	err = os.WriteFile(editFileInput.Path, []byte(newContent), 0o644)
 	if err != nil {

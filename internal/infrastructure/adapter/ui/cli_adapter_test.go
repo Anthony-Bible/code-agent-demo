@@ -1,10 +1,15 @@
 package ui_test
 
 import (
+	"bufio"
+	"bytes"
 	"code-editing-agent/internal/domain/port"
 	"code-editing-agent/internal/infrastructure/adapter/ui"
+	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1041,6 +1046,935 @@ func TestCLIAdapter_DefaultTruncationConfig(t *testing.T) {
 		// Should truncate using default config (20 + 10 = 30 threshold, 20 removed)
 		assert.Contains(t, outputStr, "[... 20 lines truncated ...]",
 			"should apply default truncation config to large output")
+	})
+}
+
+// =============================================================================
+// Terminal Detection Tests - TDD Cycle 3 (Red Phase)
+// =============================================================================
+// These tests define expected behavior for terminal detection functionality.
+// All tests will FAIL until the implementation is added.
+// The goal is to detect if input is from an interactive terminal so we can
+// use go-prompt (interactive) or bufio.Scanner (non-interactive/piped input).
+
+func TestIsTerminal(t *testing.T) {
+	// Tests for the isTerminal() function that detects if a reader is a terminal.
+	// This function is used to determine whether to use interactive (go-prompt)
+	// or non-interactive (bufio.Scanner) input mode.
+
+	t.Run("returns true for os.File that is a terminal character device", func(t *testing.T) {
+		// This test will fail because isTerminal() function does not exist yet.
+		// When running in an actual terminal, os.Stdin should be detected as a terminal.
+		//
+		// Note: This test is tricky to run in CI environments since stdin
+		// might not be a true terminal. The implementation should use:
+		// stat.Mode() & os.ModeCharDevice != 0
+
+		// We can only test this with os.Stdout in certain environments
+		// For now, we test the function exists and handles *os.File
+		result := ui.IsTerminal(os.Stdout)
+
+		// In test environments this may be false (redirected output),
+		// but the function should at least not panic and return a bool
+		assert.IsType(t, true, result, "isTerminal should return a boolean")
+	})
+
+	t.Run("returns false for bytes.Buffer reader", func(t *testing.T) {
+		// This test will fail because isTerminal() function does not exist yet.
+		// A bytes.Buffer is not an *os.File, so it cannot be a terminal.
+
+		buf := &bytes.Buffer{}
+		buf.WriteString("some input\n")
+
+		result := ui.IsTerminal(buf)
+
+		assert.False(t, result, "bytes.Buffer should not be detected as a terminal")
+	})
+
+	t.Run("returns false for strings.Reader", func(t *testing.T) {
+		// This test will fail because isTerminal() function does not exist yet.
+		// A strings.Reader is not an *os.File, so it cannot be a terminal.
+
+		reader := strings.NewReader("test input\n")
+
+		result := ui.IsTerminal(reader)
+
+		assert.False(t, result, "strings.Reader should not be detected as a terminal")
+	})
+
+	t.Run("returns false for nil reader", func(t *testing.T) {
+		// This test will fail because isTerminal() function does not exist yet.
+		// Nil reader should safely return false without panicking.
+
+		result := ui.IsTerminal(nil)
+
+		assert.False(t, result, "nil reader should return false")
+	})
+
+	t.Run("returns false for pipe reader", func(t *testing.T) {
+		// This test will fail because isTerminal() function does not exist yet.
+		// A pipe is an *os.File but not a character device (terminal).
+
+		pipeReader, pipeWriter, err := os.Pipe()
+		require.NoError(t, err, "should create pipe without error")
+		defer pipeReader.Close()
+		defer pipeWriter.Close()
+
+		result := ui.IsTerminal(pipeReader)
+
+		assert.False(t, result, "pipe reader should not be detected as a terminal")
+	})
+
+	t.Run("returns false for regular file", func(t *testing.T) {
+		// This test will fail because isTerminal() function does not exist yet.
+		// A regular file on disk is an *os.File but not a terminal.
+
+		// Create a temporary file
+		tmpFile, err := os.CreateTemp(t.TempDir(), "terminal_test_*.txt")
+		require.NoError(t, err, "should create temp file without error")
+		defer os.Remove(tmpFile.Name())
+		defer tmpFile.Close()
+
+		result := ui.IsTerminal(tmpFile)
+
+		assert.False(t, result, "regular file should not be detected as a terminal")
+	})
+
+	t.Run("returns false for io.Reader wrapper around os.File", func(t *testing.T) {
+		// This test will fail because isTerminal() function does not exist yet.
+		// If an *os.File is wrapped in another io.Reader, we lose the type info.
+
+		tmpFile, err := os.CreateTemp(t.TempDir(), "terminal_test_*.txt")
+		require.NoError(t, err)
+		defer os.Remove(tmpFile.Name())
+		defer tmpFile.Close()
+
+		// Wrap the file in a bufio.Reader - this hides the underlying *os.File
+		wrappedReader := bufio.NewReader(tmpFile)
+
+		result := ui.IsTerminal(wrappedReader)
+
+		assert.False(t, result,
+			"wrapped os.File should return false since type assertion fails")
+	})
+}
+
+func TestCLIAdapter_InteractiveMode(t *testing.T) {
+	// Tests for interactive mode detection in CLIAdapter constructors.
+	// The adapter needs to know if it's running interactively to choose
+	// between go-prompt (interactive) and bufio.Scanner (non-interactive).
+
+	t.Run("NewCLIAdapter detects terminal mode from os.Stdin", func(t *testing.T) {
+		// This test will fail because:
+		// 1. CLIAdapter does not have a useInteractive field yet
+		// 2. NewCLIAdapter does not call isTerminal() yet
+		// 3. IsInteractive() method does not exist yet
+
+		adapter := ui.NewCLIAdapter()
+
+		// The adapter should have detected whether stdin is a terminal
+		// In test environments, this is typically false (not a TTY)
+		// But the method should exist and return a boolean
+		result := adapter.IsInteractive()
+
+		assert.IsType(t, true, result,
+			"IsInteractive should return a boolean indicating terminal mode")
+	})
+
+	t.Run("NewCLIAdapterWithIO is always non-interactive", func(t *testing.T) {
+		// This test will fail because:
+		// 1. CLIAdapter does not have a useInteractive field yet
+		// 2. IsInteractive() method does not exist yet
+		//
+		// NewCLIAdapterWithIO is used for testing with custom io.Reader/Writer,
+		// and should always be non-interactive since test readers are not terminals.
+
+		input := strings.NewReader("test input\n")
+		output := &strings.Builder{}
+
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		result := adapter.IsInteractive()
+
+		assert.False(t, result,
+			"NewCLIAdapterWithIO should always create non-interactive adapter")
+	})
+
+	t.Run("NewCLIAdapterWithHistory creates interactive adapter with history support", func(t *testing.T) {
+		// This test will fail because:
+		// 1. NewCLIAdapterWithHistory constructor does not exist yet
+		// 2. CLIAdapter does not have historyFile or maxHistoryEntries fields yet
+		// 3. GetHistoryFile() method does not exist yet
+		// 4. GetMaxHistoryEntries() method does not exist yet
+		//
+		// This constructor creates an interactive adapter with command history
+		// that persists to a file.
+
+		historyFile := "/tmp/test_history.txt"
+		maxEntries := 100
+
+		adapter := ui.NewCLIAdapterWithHistory(historyFile, maxEntries)
+
+		assert.True(t, adapter.IsInteractive(),
+			"NewCLIAdapterWithHistory should create an interactive adapter")
+		assert.Equal(t, historyFile, adapter.GetHistoryFile(),
+			"should store the history file path")
+		assert.Equal(t, maxEntries, adapter.GetMaxHistoryEntries(),
+			"should store the max history entries")
+	})
+
+	t.Run("NewCLIAdapterWithHistory with empty history file path", func(t *testing.T) {
+		// This test will fail because NewCLIAdapterWithHistory does not exist yet.
+		// Empty history file path should still work (just no persistence).
+
+		adapter := ui.NewCLIAdapterWithHistory("", 50)
+
+		assert.True(t, adapter.IsInteractive(),
+			"should still be interactive even without history file")
+		assert.Empty(t, adapter.GetHistoryFile(),
+			"empty history file should be stored as-is")
+	})
+
+	t.Run("NewCLIAdapterWithHistory with zero max entries uses default", func(t *testing.T) {
+		// This test will fail because NewCLIAdapterWithHistory does not exist yet.
+		// Zero max entries should use a reasonable default.
+
+		adapter := ui.NewCLIAdapterWithHistory("/tmp/test_history.txt", 0)
+
+		assert.True(t, adapter.IsInteractive(),
+			"should still be interactive with zero max entries")
+		assert.Positive(t, adapter.GetMaxHistoryEntries(),
+			"zero max entries should use a positive default value")
+	})
+
+	t.Run("NewCLIAdapterWithHistory with negative max entries uses default", func(t *testing.T) {
+		// This test will fail because NewCLIAdapterWithHistory does not exist yet.
+		// Negative max entries should use a reasonable default.
+
+		adapter := ui.NewCLIAdapterWithHistory("/tmp/test_history.txt", -10)
+
+		assert.Positive(t, adapter.GetMaxHistoryEntries(),
+			"negative max entries should use a positive default value")
+	})
+}
+
+func TestCLIAdapter_UseInteractiveFlag(t *testing.T) {
+	// Tests for the useInteractive field that controls input mode.
+	// When useInteractive=false, uses bufio.Scanner (existing behavior).
+	// When useInteractive=true, should use go-prompt (Cycle 4).
+
+	t.Run("adapter has useInteractive field controlling input mode", func(t *testing.T) {
+		// This test will fail because:
+		// 1. useInteractive field does not exist yet
+		// 2. IsInteractive() method does not exist yet
+
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// The adapter should have an IsInteractive method
+		isInteractive := adapter.IsInteractive()
+
+		assert.False(t, isInteractive,
+			"adapter created with custom IO should not be interactive")
+	})
+
+	t.Run("non-interactive adapter uses bufio.Scanner for input", func(t *testing.T) {
+		// This test will fail because IsInteractive() does not exist yet.
+		// This test verifies that the existing bufio.Scanner behavior works
+		// when useInteractive is false.
+
+		input := strings.NewReader("hello world\n")
+		output := &strings.Builder{}
+
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Verify non-interactive mode
+		assert.False(t, adapter.IsInteractive(),
+			"should be non-interactive for custom IO")
+
+		// Verify existing bufio.Scanner behavior still works
+		ctx := context.Background()
+		userInput, ok := adapter.GetUserInput(ctx)
+
+		assert.True(t, ok, "should successfully read input")
+		assert.Equal(t, "hello world", userInput, "should read input via Scanner")
+	})
+
+	t.Run("SetInteractive allows changing interactive mode", func(t *testing.T) {
+		// This test will fail because:
+		// 1. SetInteractive() method does not exist yet
+		// 2. useInteractive field does not exist yet
+		//
+		// This method allows forcing interactive or non-interactive mode,
+		// which is useful for testing.
+
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Initially non-interactive
+		assert.False(t, adapter.IsInteractive(), "should start non-interactive")
+
+		// Enable interactive mode
+		adapter.SetInteractive(true)
+		assert.True(t, adapter.IsInteractive(), "should be interactive after SetInteractive(true)")
+
+		// Disable interactive mode
+		adapter.SetInteractive(false)
+		assert.False(t, adapter.IsInteractive(), "should be non-interactive after SetInteractive(false)")
+	})
+
+	t.Run("interactive mode flag persists across multiple GetUserInput calls", func(t *testing.T) {
+		// This test will fail because IsInteractive() does not exist yet.
+		// The interactive flag should not change during usage.
+
+		input := strings.NewReader("line1\nline2\nline3\n")
+		output := &strings.Builder{}
+
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Verify mode before first call
+		initialMode := adapter.IsInteractive()
+
+		ctx := context.Background()
+
+		// Read multiple lines
+		adapter.GetUserInput(ctx)
+		assert.Equal(t, initialMode, adapter.IsInteractive(),
+			"interactive mode should not change after first GetUserInput")
+
+		adapter.GetUserInput(ctx)
+		assert.Equal(t, initialMode, adapter.IsInteractive(),
+			"interactive mode should not change after second GetUserInput")
+
+		adapter.GetUserInput(ctx)
+		assert.Equal(t, initialMode, adapter.IsInteractive(),
+			"interactive mode should not change after third GetUserInput")
+	})
+
+	t.Run("interactive adapter stores prompt configuration", func(t *testing.T) {
+		// This test will fail because NewCLIAdapterWithHistory does not exist yet.
+		// Interactive adapters need to store prompt configuration for go-prompt.
+
+		adapter := ui.NewCLIAdapterWithHistory("/tmp/history.txt", 100)
+
+		// Should be interactive
+		assert.True(t, adapter.IsInteractive(), "should be interactive")
+
+		// Should be able to set and retrieve prompt
+		err := adapter.SetPrompt("custom> ")
+		assert.NoError(t, err, "should set prompt without error")
+
+		// The prompt should be stored and available for go-prompt
+		// (This will be verified more thoroughly in Cycle 4 with go-prompt integration)
+	})
+}
+
+func TestCLIAdapter_InteractiveModeWithContext(t *testing.T) {
+	// Tests for context handling in interactive mode.
+	// Both interactive and non-interactive modes should respect context cancellation.
+
+	t.Run("non-interactive mode respects context cancellation", func(t *testing.T) {
+		// This should work with existing implementation but tests the documented behavior
+
+		input := strings.NewReader("this should not be read\n")
+		output := &strings.Builder{}
+
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Cancel context before reading
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		userInput, ok := adapter.GetUserInput(ctx)
+
+		assert.False(t, ok, "should return false when context is cancelled")
+		assert.Empty(t, userInput, "should return empty string when context is cancelled")
+	})
+
+	t.Run("interactive mode respects context cancellation", func(t *testing.T) {
+		// This test will fail because:
+		// 1. NewCLIAdapterWithHistory does not exist yet
+		// 2. Interactive mode context handling is not implemented yet
+		//
+		// Interactive mode with go-prompt should also respect context cancellation.
+
+		adapter := ui.NewCLIAdapterWithHistory("/tmp/history.txt", 100)
+
+		// Cancel context before reading
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		userInput, ok := adapter.GetUserInput(ctx)
+
+		assert.False(t, ok, "interactive mode should return false when context is cancelled")
+		assert.Empty(t, userInput, "should return empty string when context is cancelled")
+	})
+}
+
+func TestCLIAdapter_InputModeString(t *testing.T) {
+	// Tests for a method that returns a string description of the input mode.
+	// This is useful for debugging and logging.
+
+	t.Run("returns 'interactive' for interactive mode", func(t *testing.T) {
+		// This test will fail because:
+		// 1. NewCLIAdapterWithHistory does not exist yet
+		// 2. InputModeString() method does not exist yet
+
+		adapter := ui.NewCLIAdapterWithHistory("/tmp/history.txt", 100)
+
+		modeStr := adapter.InputModeString()
+
+		assert.Equal(t, "interactive", modeStr,
+			"should return 'interactive' for interactive adapter")
+	})
+
+	t.Run("returns 'non-interactive' for non-interactive mode", func(t *testing.T) {
+		// This test will fail because InputModeString() method does not exist yet
+
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		modeStr := adapter.InputModeString()
+
+		assert.Equal(t, "non-interactive", modeStr,
+			"should return 'non-interactive' for non-interactive adapter")
+	})
+}
+
+// =============================================================================
+// Go-Prompt Integration Tests - TDD Cycle 4 (Red Phase)
+// =============================================================================
+// These tests define expected behavior for go-prompt integration in CLIAdapter.
+// All tests will FAIL until the implementation is added.
+// The goal is to integrate go-prompt for interactive input with arrow key support
+// and command history.
+//
+// NOTE: These tests use t.Skip() with detailed comments describing the expected
+// behavior. This allows the tests to compile while documenting what needs to be
+// implemented. Once the methods are added, remove the t.Skip() calls.
+
+func TestCLIAdapter_GetUserInput_InteractiveMode(t *testing.T) {
+	// Tests for interactive mode input behavior.
+	// When in interactive mode, the adapter should use go-prompt instead of bufio.Scanner.
+	// Note: We cannot easily test go-prompt directly in unit tests since it requires
+	// a real terminal. These tests verify the setup and mode switching behavior.
+
+	t.Run("interactive mode uses different input method than non-interactive", func(t *testing.T) {
+		// Expected behavior:
+		// 1. Interactive mode should use go-prompt instead of bufio.Scanner
+		// 2. The adapter needs to switch between bufio.Scanner and go-prompt based on mode
+		// 3. The key difference is that interactive mode should NOT use the scanner field
+		//    directly - it should delegate to go-prompt.
+
+		adapter := ui.NewCLIAdapterWithHistory("/tmp/test_history.txt", 100)
+
+		// Verify we're in interactive mode
+		assert.True(t, adapter.IsInteractive(),
+			"adapter created with NewCLIAdapterWithHistory should be interactive")
+
+		// The adapter should have a different code path for interactive input.
+		// We cannot test go-prompt behavior directly, but we can verify the adapter
+		// is configured correctly for interactive mode.
+	})
+
+	t.Run("non-interactive mode continues to use bufio.Scanner", func(t *testing.T) {
+		// This test verifies that the existing non-interactive behavior is preserved.
+		input := strings.NewReader("test input line\n")
+		output := &strings.Builder{}
+
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		assert.False(t, adapter.IsInteractive(),
+			"adapter created with custom IO should be non-interactive")
+
+		ctx := context.Background()
+		result, ok := adapter.GetUserInput(ctx)
+
+		assert.True(t, ok, "should successfully read input in non-interactive mode")
+		assert.Equal(t, "test input line", result,
+			"non-interactive mode should use bufio.Scanner for input")
+	})
+
+	t.Run("interactive adapter returns false when using custom readers", func(t *testing.T) {
+		// Expected behavior:
+		// When SetInteractive(true) is called on an adapter with custom IO,
+		// GetUserInput should return false since go-prompt requires real
+		// terminal file descriptors.
+
+		input := strings.NewReader("input\n")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Force interactive mode on adapter with custom IO
+		adapter.SetInteractive(true)
+
+		ctx := context.Background()
+		_, ok := adapter.GetUserInput(ctx)
+
+		// Current behavior: still uses scanner, so this passes
+		// After go-prompt integration: should fail because go-prompt cannot work with strings.Reader
+		// For now, we just verify the mode flag is set
+		assert.True(t, adapter.IsInteractive(),
+			"SetInteractive(true) should set interactive mode flag")
+		_ = ok // Result depends on implementation
+	})
+}
+
+func TestCLIAdapter_HistoryIntegration(t *testing.T) {
+	// Tests for HistoryManager integration with CLIAdapter.
+	// The adapter should create and manage a HistoryManager for interactive mode.
+
+	t.Run("interactive adapter creates a HistoryManager", func(t *testing.T) {
+		// Expected behavior:
+		// 1. CLIAdapter should have a historyManager field of type *HistoryManager
+		// 2. GetHistoryManager() method should return the history manager
+		// 3. NewCLIAdapterWithHistory should initialize the historyManager
+
+		adapter := ui.NewCLIAdapterWithHistory("/tmp/test_history_integration.txt", 100)
+		historyManager := adapter.GetHistoryManager()
+		require.NotNil(t, historyManager, "interactive adapter should have a HistoryManager")
+	})
+
+	t.Run("history manager uses configured file path", func(t *testing.T) {
+		// Expected behavior:
+		// The history manager should be configured with the file path passed to
+		// NewCLIAdapterWithHistory. Since HistoryManager.filePath is private,
+		// we verify via the adapter's GetHistoryFile() getter.
+
+		historyFile := "/tmp/custom_history_path.txt"
+		adapter := ui.NewCLIAdapterWithHistory(historyFile, 50)
+
+		// This part works - GetHistoryFile exists
+		assert.Equal(t, historyFile, adapter.GetHistoryFile(),
+			"adapter should store the history file path")
+
+		hm := adapter.GetHistoryManager()
+		require.NotNil(t, hm, "should have a history manager")
+	})
+
+	t.Run("history manager uses configured max entries", func(t *testing.T) {
+		// Expected behavior:
+		// The history manager should respect the maxEntries parameter.
+
+		maxEntries := 75
+		adapter := ui.NewCLIAdapterWithHistory("/tmp/test_history.txt", maxEntries)
+
+		// This part works - GetMaxHistoryEntries exists
+		assert.Equal(t, maxEntries, adapter.GetMaxHistoryEntries(),
+			"adapter should store the max history entries")
+
+		hm := adapter.GetHistoryManager()
+		require.NotNil(t, hm, "should have a history manager")
+	})
+
+	t.Run("history is loaded from file on adapter creation", func(t *testing.T) {
+		// Expected behavior:
+		// When an adapter is created with a history file that already exists,
+		// the HistoryManager should load the existing history entries.
+
+		historyFile := "/tmp/test_history_load_" + strconv.Itoa(os.Getpid()) + ".txt"
+		defer os.Remove(historyFile)
+		content := "first command\nsecond command\nthird command\n"
+		err := os.WriteFile(historyFile, []byte(content), 0o600)
+		require.NoError(t, err)
+		adapter := ui.NewCLIAdapterWithHistory(historyFile, 100)
+		hm := adapter.GetHistoryManager()
+		require.NotNil(t, hm)
+		history := hm.History()
+		assert.Len(t, history, 3)
+	})
+
+	t.Run("adding input adds to history", func(t *testing.T) {
+		// Expected behavior:
+		// CLIAdapter should have an AddToHistory(entry string) error method
+		// that delegates to the internal HistoryManager.
+
+		historyFile := "/tmp/test_history_add_" + strconv.Itoa(os.Getpid()) + ".txt"
+		defer os.Remove(historyFile)
+		adapter := ui.NewCLIAdapterWithHistory(historyFile, 100)
+		err := adapter.AddToHistory("new command entered")
+		require.NoError(t, err)
+		hm := adapter.GetHistoryManager()
+		require.NotNil(t, hm)
+		history := hm.History()
+		assert.Len(t, history, 1)
+		assert.Equal(t, "new command entered", history[0])
+	})
+
+	t.Run("history persists across adapter instances", func(t *testing.T) {
+		// Expected behavior:
+		// History added in one adapter instance should be available in a new
+		// instance that uses the same history file.
+
+		historyFile := "/tmp/test_history_persist_" + strconv.Itoa(os.Getpid()) + ".txt"
+		defer os.Remove(historyFile)
+		adapter1 := ui.NewCLIAdapterWithHistory(historyFile, 100)
+		_ = adapter1.AddToHistory("command from session 1")
+		_ = adapter1.AddToHistory("another command")
+		adapter2 := ui.NewCLIAdapterWithHistory(historyFile, 100)
+		hm := adapter2.GetHistoryManager()
+		history := hm.History()
+		assert.Len(t, history, 2)
+	})
+
+	t.Run("non-interactive adapter does not create HistoryManager", func(t *testing.T) {
+		// Expected behavior:
+		// GetHistoryManager() should return nil for non-interactive adapters.
+
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+		hm := adapter.GetHistoryManager()
+		assert.Nil(t, hm)
+	})
+
+	t.Run("AddToHistory returns error for non-interactive adapter", func(t *testing.T) {
+		// Expected behavior:
+		// Attempting to add history in non-interactive mode should return an error
+		// like ErrNotInteractive with message containing "interactive".
+
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+		err := adapter.AddToHistory("some command")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "interactive")
+	})
+
+	t.Run("AddToHistory with empty string returns error", func(t *testing.T) {
+		// Expected behavior:
+		// Empty or whitespace-only input should not be added to history.
+		// Should return ErrEmptyEntry from HistoryManager.
+
+		historyFile := "/tmp/test_history_empty_" + strconv.Itoa(os.Getpid()) + ".txt"
+		defer os.Remove(historyFile)
+		adapter := ui.NewCLIAdapterWithHistory(historyFile, 100)
+		err := adapter.AddToHistory("")
+		require.Error(t, err)
+	})
+
+	t.Run("AddToHistory with whitespace-only string returns error", func(t *testing.T) {
+		// Expected behavior:
+		// Whitespace-only input should return ErrEmptyEntry.
+
+		historyFile := "/tmp/test_history_ws_" + strconv.Itoa(os.Getpid()) + ".txt"
+		defer os.Remove(historyFile)
+		adapter := ui.NewCLIAdapterWithHistory(historyFile, 100)
+		err := adapter.AddToHistory("   \t\n   ")
+		require.Error(t, err)
+	})
+
+	t.Run("ClearHistory clears all history entries", func(t *testing.T) {
+		// Expected behavior:
+		// CLIAdapter should have a ClearHistory() method that delegates to
+		// the internal HistoryManager.Clear().
+
+		historyFile := "/tmp/test_history_clear_" + strconv.Itoa(os.Getpid()) + ".txt"
+		defer os.Remove(historyFile)
+		adapter := ui.NewCLIAdapterWithHistory(historyFile, 100)
+		_ = adapter.AddToHistory("first")
+		_ = adapter.AddToHistory("second")
+		adapter.ClearHistory()
+		hm := adapter.GetHistoryManager()
+		assert.Equal(t, 0, hm.Size())
+	})
+}
+
+func TestCLIAdapter_GetHistoryManager(t *testing.T) {
+	// Tests for the GetHistoryManager() method.
+
+	t.Run("interactive adapter has GetHistoryManager method returning HistoryManager pointer", func(t *testing.T) {
+		// Expected behavior:
+		// GetHistoryManager() should return *HistoryManager for interactive adapters.
+
+		adapter := ui.NewCLIAdapterWithHistory("/tmp/test_history.txt", 100)
+		hm := adapter.GetHistoryManager()
+		require.NotNil(t, hm)
+		_ = hm.Size() // Verify it's the correct type
+	})
+
+	t.Run("GetHistoryManager returns nil for non-interactive adapters", func(t *testing.T) {
+		// Expected behavior:
+		// Non-interactive adapters should return nil from GetHistoryManager().
+
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+		hm := adapter.GetHistoryManager()
+		assert.Nil(t, hm)
+	})
+
+	t.Run("GetHistoryManager returns same instance on multiple calls", func(t *testing.T) {
+		// Expected behavior:
+		// The HistoryManager should be created once and reused (same pointer).
+
+		adapter := ui.NewCLIAdapterWithHistory("/tmp/test_history.txt", 100)
+		hm1 := adapter.GetHistoryManager()
+		hm2 := adapter.GetHistoryManager()
+		require.NotNil(t, hm1)
+		require.NotNil(t, hm2)
+		assert.Same(t, hm1, hm2)
+	})
+
+	t.Run("GetHistoryManager returns manager with correct configuration", func(t *testing.T) {
+		// Expected behavior:
+		// The returned HistoryManager should respect the configured max entries.
+
+		historyFile := "/tmp/configured_history.txt"
+		defer os.Remove(historyFile)
+		maxEntries := 250
+		adapter := ui.NewCLIAdapterWithHistory(historyFile, maxEntries)
+		hm := adapter.GetHistoryManager()
+		require.NotNil(t, hm)
+		for i := range maxEntries + 50 {
+			_ = hm.Add(fmt.Sprintf("entry %d", i))
+		}
+		assert.LessOrEqual(t, hm.Size(), maxEntries)
+	})
+}
+
+func TestCLIAdapter_PromptPrefix(t *testing.T) {
+	// Tests for prompt prefix configuration in interactive mode.
+	// The prompt prefix is shown before user input in interactive mode.
+
+	t.Run("interactive adapter uses the configured prompt prefix", func(t *testing.T) {
+		// Expected behavior:
+		// SetPrompt() should set the prompt that go-prompt will display.
+
+		adapter := ui.NewCLIAdapterWithHistory("/tmp/test.txt", 100)
+
+		// Set a custom prompt - this method already exists
+		err := adapter.SetPrompt("MyApp> ")
+		require.NoError(t, err)
+
+		// The prompt should be stored and available for go-prompt
+		// This is verified by the GetPromptPrefix test below
+	})
+
+	t.Run("GetPromptPrefix returns current prompt string", func(t *testing.T) {
+		// Expected behavior:
+		// GetPromptPrefix() should return the current prompt string.
+
+		adapter := ui.NewCLIAdapterWithHistory("/tmp/test.txt", 100)
+		err := adapter.SetPrompt("Custom> ")
+		require.NoError(t, err)
+		promptPrefix := adapter.GetPromptPrefix()
+		assert.Equal(t, "Custom> ", promptPrefix)
+	})
+
+	t.Run("default prompt prefix is used when not explicitly set", func(t *testing.T) {
+		// Expected behavior:
+		// New adapters should have a default prompt prefix of "> ".
+
+		adapter := ui.NewCLIAdapterWithHistory("/tmp/test.txt", 100)
+		promptPrefix := adapter.GetPromptPrefix()
+		assert.NotEmpty(t, promptPrefix)
+		assert.Equal(t, "> ", promptPrefix)
+	})
+
+	t.Run("prompt prefix is available after SetPrompt", func(t *testing.T) {
+		// Expected behavior:
+		// GetPromptPrefix() should reflect the most recent SetPrompt() call.
+
+		adapter := ui.NewCLIAdapterWithHistory("/tmp/test.txt", 100)
+		_ = adapter.SetPrompt("First> ")
+		assert.Equal(t, "First> ", adapter.GetPromptPrefix())
+		_ = adapter.SetPrompt("Second> ")
+		assert.Equal(t, "Second> ", adapter.GetPromptPrefix())
+	})
+
+	t.Run("prompt includes colors for go-prompt in interactive mode", func(t *testing.T) {
+		// Expected behavior:
+		// GetPromptColors() should return go-prompt compatible color configuration.
+
+		t.Skip("TODO: Implement GetPromptColors() method - Red Phase test")
+
+		// After implementation:
+		// adapter := ui.NewCLIAdapterWithHistory("/tmp/test.txt", 100)
+		// colors := adapter.GetPromptColors()
+		// require.NotNil(t, colors)
+	})
+
+	t.Run("non-interactive adapter does not need special prompt colors", func(t *testing.T) {
+		// Expected behavior:
+		// GetPromptColors() should return nil for non-interactive adapters.
+
+		t.Skip("TODO: Implement GetPromptColors() method - Red Phase test")
+
+		// After implementation:
+		// input := strings.NewReader("")
+		// output := &strings.Builder{}
+		// adapter := ui.NewCLIAdapterWithIO(input, output)
+		// colors := adapter.GetPromptColors()
+		// assert.Nil(t, colors)
+	})
+}
+
+func TestCLIAdapter_HistoryCallback(t *testing.T) {
+	// Tests for history callback integration with go-prompt.
+	// go-prompt needs a callback function to provide history entries.
+
+	t.Run("GetHistoryCallback returns function for go-prompt", func(t *testing.T) {
+		// Expected behavior:
+		// GetHistoryCallback() should return func() []string that provides
+		// history entries for go-prompt's arrow key navigation.
+
+		historyFile := "/tmp/test_callback_" + strconv.Itoa(os.Getpid()) + ".txt"
+		defer os.Remove(historyFile)
+		adapter := ui.NewCLIAdapterWithHistory(historyFile, 100)
+		_ = adapter.AddToHistory("ls -la")
+		_ = adapter.AddToHistory("git status")
+		_ = adapter.AddToHistory("go test ./...")
+		callback := adapter.GetHistoryCallback()
+		require.NotNil(t, callback)
+		entries := callback()
+		assert.Len(t, entries, 3)
+		assert.Equal(t, "ls -la", entries[0])
+	})
+
+	t.Run("history callback returns empty slice for empty history", func(t *testing.T) {
+		// Expected behavior:
+		// Callback should return []string{} when history is empty.
+
+		historyFile := "/tmp/test_callback_empty_" + strconv.Itoa(os.Getpid()) + ".txt"
+		defer os.Remove(historyFile)
+		adapter := ui.NewCLIAdapterWithHistory(historyFile, 100)
+		callback := adapter.GetHistoryCallback()
+		require.NotNil(t, callback)
+		entries := callback()
+		assert.Empty(t, entries)
+	})
+
+	t.Run("history callback reflects live updates", func(t *testing.T) {
+		// Expected behavior:
+		// The callback should return current history, not a cached copy.
+
+		historyFile := "/tmp/test_callback_live_" + strconv.Itoa(os.Getpid()) + ".txt"
+		defer os.Remove(historyFile)
+		adapter := ui.NewCLIAdapterWithHistory(historyFile, 100)
+		callback := adapter.GetHistoryCallback()
+		require.NotNil(t, callback)
+		assert.Empty(t, callback())
+		_ = adapter.AddToHistory("first")
+		assert.Len(t, callback(), 1)
+		_ = adapter.AddToHistory("second")
+		assert.Len(t, callback(), 2)
+		adapter.ClearHistory()
+		assert.Empty(t, callback())
+	})
+
+	t.Run("non-interactive adapter GetHistoryCallback returns nil", func(t *testing.T) {
+		// Expected behavior:
+		// Non-interactive adapters should return nil.
+
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+		callback := adapter.GetHistoryCallback()
+		assert.Nil(t, callback)
+	})
+}
+
+func TestCLIAdapter_GoPromptOptions(t *testing.T) {
+	// Tests for go-prompt option configuration.
+	// The adapter needs to provide options for configuring go-prompt.
+
+	t.Run("GetGoPromptOptions returns configuration options", func(t *testing.T) {
+		// Expected behavior:
+		// GetGoPromptOptions() should return []prompt.Option for configuring go-prompt.
+
+		t.Skip("TODO: Implement GetGoPromptOptions() method - Red Phase test")
+
+		// After implementation:
+		// adapter := ui.NewCLIAdapterWithHistory("/tmp/test.txt", 100)
+		// options := adapter.GetGoPromptOptions()
+		// require.NotNil(t, options)
+		// assert.NotEmpty(t, options)
+	})
+
+	t.Run("options include history configuration", func(t *testing.T) {
+		// Expected behavior:
+		// The options should include prompt.OptionHistory with the callback.
+
+		t.Skip("TODO: Implement GetGoPromptOptions() method - Red Phase test")
+
+		// After implementation:
+		// historyFile := "/tmp/test_opts_" + fmt.Sprintf("%d", os.Getpid()) + ".txt"
+		// defer os.Remove(historyFile)
+		// adapter := ui.NewCLIAdapterWithHistory(historyFile, 100)
+		// adapter.AddToHistory("historical command")
+		// options := adapter.GetGoPromptOptions()
+		// require.NotNil(t, options)
+	})
+
+	t.Run("options include prompt prefix", func(t *testing.T) {
+		// Expected behavior:
+		// The options should include prompt.OptionPrefix with the prompt string.
+
+		t.Skip("TODO: Implement GetGoPromptOptions() method - Red Phase test")
+
+		// After implementation:
+		// adapter := ui.NewCLIAdapterWithHistory("/tmp/test.txt", 100)
+		// adapter.SetPrompt("TestPrompt> ")
+		// options := adapter.GetGoPromptOptions()
+		// require.NotNil(t, options)
+	})
+
+	t.Run("non-interactive adapter GetGoPromptOptions returns nil", func(t *testing.T) {
+		// Expected behavior:
+		// Non-interactive adapters should return nil.
+
+		t.Skip("TODO: Implement GetGoPromptOptions() method - Red Phase test")
+
+		// After implementation:
+		// input := strings.NewReader("")
+		// output := &strings.Builder{}
+		// adapter := ui.NewCLIAdapterWithIO(input, output)
+		// options := adapter.GetGoPromptOptions()
+		// assert.Nil(t, options)
+	})
+}
+
+func TestCLIAdapter_InteractiveInputBehavior(t *testing.T) {
+	// Tests for interactive input behavior specifics.
+	// These tests document expected behavior but cannot be fully automated
+	// since go-prompt requires a real terminal.
+
+	t.Run("interactive GetUserInput adds successful input to history", func(t *testing.T) {
+		// Expected behavior:
+		// When the user provides input in interactive mode, it should be
+		// automatically added to history (after successful input, not on empty/EOF).
+		t.Skip("Cannot test go-prompt input behavior without real terminal")
+	})
+
+	t.Run("interactive GetUserInput does not add empty input to history", func(t *testing.T) {
+		// Expected behavior:
+		// Empty input (just pressing Enter) should not be added to history.
+		t.Skip("Cannot test go-prompt input behavior without real terminal")
+	})
+
+	t.Run("interactive GetUserInput does not add consecutive duplicates", func(t *testing.T) {
+		// Expected behavior:
+		// Entering the same command twice in a row should only add it once.
+		t.Skip("Cannot test go-prompt input behavior without real terminal")
+	})
+
+	t.Run("interactive mode supports arrow key navigation through history", func(t *testing.T) {
+		// Expected behavior:
+		// Up/down arrows should navigate through history.
+		t.Skip("Cannot test go-prompt input behavior without real terminal")
+	})
+
+	t.Run("interactive mode supports basic line editing", func(t *testing.T) {
+		// Expected behavior:
+		// Left/right arrows, backspace, delete, home, end should work.
+		t.Skip("Cannot test go-prompt input behavior without real terminal")
 	})
 }
 

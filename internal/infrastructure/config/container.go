@@ -48,7 +48,7 @@ type Container struct {
 func NewContainer(cfg *Config) (*Container, error) {
 	// Step 1: Create infrastructure adapters
 	fileManager := file.NewLocalFileManager(cfg.WorkingDir)
-	uiAdapter := ui.NewCLIAdapter()
+	uiAdapter := ui.NewCLIAdapterWithHistory(cfg.HistoryFile, cfg.HistoryMaxEntries)
 	aiAdapter := ai.NewAnthropicAdapter(cfg.AIModel)
 	toolExecutor := tool.NewExecutorAdapter(fileManager)
 
