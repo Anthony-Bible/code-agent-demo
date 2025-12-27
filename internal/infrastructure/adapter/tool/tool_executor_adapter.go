@@ -694,6 +694,11 @@ func validateURL(rawURL string) error {
 		return fmt.Errorf("URL must have a host")
 	}
 
+	// Block credentials in URLs to prevent information disclosure
+	if parsedURL.User != nil {
+		return fmt.Errorf("URL contains credentials which are not allowed for security")
+	}
+
 	// Resolve hostname to IP addresses to check for private ranges
 	host := parsedURL.Hostname()
 	if host == "" {
@@ -817,9 +822,23 @@ func (a *ExecutorAdapter) executeFetch(ctx context.Context, input json.RawMessag
 	// Set user agent
 	req.Header.Set("User-Agent", "code-editing-agent/1.0")
 
-	// Make HTTP request using a dedicated client with timeout
+	// Make HTTP request using a dedicated client with timeout and redirect policy
 	client := &http.Client{
 		Timeout: defaultFetchTimeout,
+		// Configure redirect policy to prevent SSRF attacks and excessive redirects
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// Limit to maximum 3 redirects to prevent excessive request chains
+			if len(via) >= 3 {
+				return fmt.Errorf("stopped after 3 redirects")
+			}
+			
+			// Validate redirect URL to prevent SSRF attacks
+			if err := validateURL(req.URL.String()); err != nil {
+				return fmt.Errorf("redirect blocked due to security policy: %w", err)
+			}
+			
+			return nil
+		},
 	}
 	resp, err := client.Do(req)
 	if err != nil {

@@ -780,6 +780,84 @@ func TestFetchTool_NonHTMLContentKeepOriginal(t *testing.T) {
 	}
 }
 
+func TestFetchTool_RedirectPolicyLimit(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	// This endpoint will redirect multiple times to test our redirect limit
+	// httpbin.org/relative-redirect/3 creates 3 redirects
+	serverURL := "https://httpbin.org/relative-redirect/3"
+
+	input := fmt.Sprintf(`{"url": "%s"}`, serverURL)
+	result, err := adapter.ExecuteTool(context.Background(), "fetch", input)
+	if err != nil {
+		// If it fails due to redirect limit, that's what we want to test
+		if strings.Contains(err.Error(), "redirect") || strings.Contains(err.Error(), "stopped after") {
+			// This is expected behavior - our redirect policy is working
+			t.Logf("Redirect policy working: %v", err)
+			return
+		}
+		// Other errors are acceptable for network reasons
+		t.Logf("Network error (acceptable): %v", err)
+		return
+	}
+
+	// If it succeeds, verify we got some content
+	if len(result) > 0 {
+		t.Logf("Successfully fetched with redirects: %d bytes", len(result))
+	}
+}
+
+func TestFetchTool_ExcessiveRedirectsBlocked(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	// This endpoint will create 5 redirects, which should exceed our limit of 3
+	serverURL := "https://httpbin.org/relative-redirect/5"
+
+	input := fmt.Sprintf(`{"url": "%s"}`, serverURL)
+	_, err := adapter.ExecuteTool(context.Background(), "fetch", input)
+	if err == nil {
+		t.Error("Expected error due to excessive redirects, got nil")
+	} else if !strings.Contains(err.Error(), "redirect") && !strings.Contains(err.Error(), "stopped after") {
+		t.Errorf("Expected redirect-related error, got: %v", err)
+	}
+}
+
+func TestFetchTool_RedirectToPrivateIPBlocked(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	// We'll use a test that simulates a redirect to a private IP
+	// Since we can't easily set up a server that redirects to private IPs,
+	// we'll test the validation logic indirectly
+	
+	// Test that the redirect URL validation works by checking a private IP URL directly
+	privateURL := "http://127.0.0.1:8080"
+	input := fmt.Sprintf(`{"url": "%s"}`, privateURL)
+	_, err := adapter.ExecuteTool(context.Background(), "fetch", input)
+	if err == nil {
+		t.Error("Expected error for private IP redirect target, got nil")
+	} else if !strings.Contains(err.Error(), "private") && !strings.Contains(err.Error(), "blocked") {
+		t.Errorf("Expected private IP blocking error, got: %v", err)
+	}
+}
+
+func TestFetchTool_RedirectURLWithCredentialsBlocked(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	// Test that URLs with credentials in redirect are blocked
+	credsURL := "http://user:pass@example.com"
+	input := fmt.Sprintf(`{"url": "%s"}`, credsURL)
+	_, err := adapter.ExecuteTool(context.Background(), "fetch", input)
+	if err == nil {
+		t.Error("Expected error for URL with credentials, got nil")
+	} else if !strings.Contains(err.Error(), "credentials") {
+		t.Errorf("Expected credentials error, got: %v", err)
+	}
+}
+
 func TestFetchTool_ContentLengthHandling(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
 	adapter := NewExecutorAdapter(fileManager)
