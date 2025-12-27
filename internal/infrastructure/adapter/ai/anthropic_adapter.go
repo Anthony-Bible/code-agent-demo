@@ -45,8 +45,9 @@ var (
 // The struct maintains an internal Anthropic client and model configuration,
 // allowing for consistent model usage across all requests.
 type AnthropicAdapter struct {
-	client anthropic.Client
-	model  string
+	client       anthropic.Client
+	model        string
+	skillManager port.SkillManager
 }
 
 // NewAnthropicAdapter creates a new AnthropicAdapter with the specified model.
@@ -54,13 +55,15 @@ type AnthropicAdapter struct {
 //
 // Parameters:
 //   - model: The AI model to use (e.g., "hf:zai-org/GLM-4.6", "claude-3-5-sonnet-20241022")
+//   - skillManager: Optional skill manager for providing skill metadata to the system prompt
 //
 // Returns:
 //   - port.AIProvider: An implementation of the AIProvider interface
-func NewAnthropicAdapter(model string) port.AIProvider {
+func NewAnthropicAdapter(model string, skillManager port.SkillManager) port.AIProvider {
 	return &AnthropicAdapter{
-		client: anthropic.NewClient(),
-		model:  model,
+		client:       anthropic.NewClient(),
+		model:        model,
+		skillManager: skillManager,
 	}
 }
 
@@ -98,7 +101,10 @@ func (a *AnthropicAdapter) SendMessage(
 
 	// Convert port tools to Anthropic SDK tools
 	anthropicTools := a.convertTools(tools)
-	systemPrompt := "You are an AI assistant that helps users with code editing and explanations. Use the available tools when necessary to provide accurate and helpful responses."
+
+	// Build system prompt with skill metadata
+	systemPrompt := a.buildSystemPrompt()
+
 	// Call Anthropic API
 	response, err := a.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.Model(a.model),
@@ -114,6 +120,47 @@ func (a *AnthropicAdapter) SendMessage(
 
 	// Convert response to domain Message and extract tool info
 	return a.convertResponse(response)
+}
+
+// buildSystemPrompt constructs the system prompt with optional skill metadata.
+// If a skill manager is available, it includes available skills in the prompt
+// following the agentskills.io specification format.
+func (a *AnthropicAdapter) buildSystemPrompt() string {
+	basePrompt := "You are an AI assistant that helps users with code editing and explanations. Use the available tools when necessary to provide accurate and helpful responses."
+
+	// If no skill manager, return base prompt
+	if a.skillManager == nil {
+		return basePrompt
+	}
+
+	// Try to discover skills
+	skills, err := a.skillManager.DiscoverSkills(context.Background())
+	if err != nil || len(skills.Skills) == 0 {
+		return basePrompt
+	}
+
+	// Build skills section
+	var sb strings.Builder
+	sb.WriteString(basePrompt)
+	sb.WriteString("\n\n## Available Skills\n\n")
+
+	for _, skill := range skills.Skills {
+		sb.WriteString(fmt.Sprintf("### %s\n", skill.Name))
+		sb.WriteString(fmt.Sprintf("%s\n", skill.Description))
+		if skill.License != "" {
+			sb.WriteString(fmt.Sprintf("License: %s\n", skill.License))
+		}
+		if len(skill.AllowedTools) > 0 {
+			sb.WriteString(fmt.Sprintf("Allowed tools: %s\n", strings.Join(skill.AllowedTools, ", ")))
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(
+		"You can use the `activate_skill` tool to load the full content of a skill when its capabilities are needed for the task at hand.",
+	)
+
+	return sb.String()
 }
 
 // GenerateToolSchema returns an empty tool input schema.

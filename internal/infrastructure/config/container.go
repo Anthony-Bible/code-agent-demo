@@ -7,6 +7,7 @@ import (
 	"code-editing-agent/internal/domain/service"
 	"code-editing-agent/internal/infrastructure/adapter/ai"
 	"code-editing-agent/internal/infrastructure/adapter/file"
+	"code-editing-agent/internal/infrastructure/adapter/skill"
 	"code-editing-agent/internal/infrastructure/adapter/tool"
 	"code-editing-agent/internal/infrastructure/adapter/ui"
 
@@ -23,13 +24,14 @@ import (
 // - Creating application services (application layer)
 // - Providing accessors for all dependencies.
 type Container struct {
-	config          *Config
-	chatService     *appsvc.ChatService
-	conversationSvc *service.ConversationService
-	fileManager     port.FileManager
-	uiAdapter       port.UserInterface
-	aiAdapter       port.AIProvider
-	toolExecutor    port.ToolExecutor
+	config       *Config
+	chatService  *appsvc.ChatService
+	convService  *service.ConversationService
+	fileManager  port.FileManager
+	uiAdapter    port.UserInterface
+	aiAdapter    port.AIProvider
+	toolExecutor port.ToolExecutor
+	skillManager port.SkillManager
 }
 
 // NewContainer creates a new DI container and wires all dependencies.
@@ -47,10 +49,15 @@ type Container struct {
 //   - error: An error if any dependency creation fails
 func NewContainer(cfg *Config) (*Container, error) {
 	// Step 1: Create infrastructure adapters
+	// Note: order matters - skillManager must be created before aiAdapter
 	fileManager := file.NewLocalFileManager(cfg.WorkingDir)
 	uiAdapter := ui.NewCLIAdapterWithHistory(cfg.HistoryFile, cfg.HistoryMaxEntries)
-	aiAdapter := ai.NewAnthropicAdapter(cfg.AIModel)
+	skillManager := skill.NewLocalSkillManager()
+	aiAdapter := ai.NewAnthropicAdapter(cfg.AIModel, skillManager)
 	toolExecutor := tool.NewExecutorAdapter(fileManager)
+
+	// Set skill manager on tool executor for skill activation
+	toolExecutor.SetSkillManager(skillManager)
 
 	// Set up bash command confirmation callback
 	// This prompts the user before executing any bash command
@@ -81,13 +88,14 @@ func NewContainer(cfg *Config) (*Container, error) {
 	}
 
 	return &Container{
-		config:          cfg,
-		chatService:     chatService,
-		conversationSvc: convService,
-		fileManager:     fileManager,
-		uiAdapter:       uiAdapter,
-		aiAdapter:       aiAdapter,
-		toolExecutor:    toolExecutor,
+		config:       cfg,
+		chatService:  chatService,
+		convService:  convService,
+		fileManager:  fileManager,
+		uiAdapter:    uiAdapter,
+		aiAdapter:    aiAdapter,
+		toolExecutor: toolExecutor,
+		skillManager: skillManager,
 	}, nil
 }
 
@@ -105,7 +113,7 @@ func (c *Container) Config() *Config {
 // ConversationService returns the domain conversation service.
 // Useful for testing and advanced use cases.
 func (c *Container) ConversationService() *service.ConversationService {
-	return c.conversationSvc
+	return c.convService
 }
 
 // FileManager returns the file manager port implementation.
@@ -130,4 +138,10 @@ func (c *Container) AIAdapter() port.AIProvider {
 // Useful for direct tool execution outside of chat sessions.
 func (c *Container) ToolExecutor() port.ToolExecutor {
 	return c.toolExecutor
+}
+
+// SkillManager returns the skill manager port implementation.
+// Useful for direct skill discovery and activation operations.
+func (c *Container) SkillManager() port.SkillManager {
+	return c.skillManager
 }
