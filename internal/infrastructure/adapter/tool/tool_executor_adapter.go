@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -618,7 +619,65 @@ const defaultFetchTimeout = 30 * time.Second
 // when the response exceeds this limit, instead of loading the entire body into
 // memory.
 const maxResponseSize = 10 << 20
-// validateURL validates that the URL is safe to fetch.
+
+// isPrivateIP checks if an IP address is in a private/internal range
+func isPrivateIP(ip net.IP) bool {
+	if ip.IsLoopback() {
+		return true
+	}
+
+	if ip4 := ip.To4(); ip4 != nil {
+		// Private IPv4 ranges
+		privateIPv4Ranges := []struct {
+			network *net.IPNet
+		}{
+			{network: mustParseCIDR("127.0.0.0/8")},    // Loopback
+			{network: mustParseCIDR("10.0.0.0/8")},     // Private Class A
+			{network: mustParseCIDR("172.16.0.0/12")},  // Private Class B
+			{network: mustParseCIDR("192.168.0.0/16")}, // Private Class C
+			{network: mustParseCIDR("169.254.0.0/16")}, // Link-local
+			{network: mustParseCIDR("224.0.0.0/4")},    // Multicast
+			{network: mustParseCIDR("0.0.0.0/8")},       // This network
+		}
+
+		for _, r := range privateIPv4Ranges {
+			if r.network.Contains(ip4) {
+				return true
+			}
+		}
+	} else {
+		// IPv6 private ranges
+		privateIPv6Ranges := []struct {
+			network *net.IPNet
+		}{
+			{network: mustParseCIDR("::1/128")},           // Loopback
+			{network: mustParseCIDR("fc00::/7")},           // Unique local
+			{network: mustParseCIDR("fe80::/10")},         // Link-local
+			{network: mustParseCIDR("ff00::/8")},           // Multicast
+			{network: mustParseCIDR("2000::/3")},           // Reserved for documentation
+			{network: mustParseCIDR("2001:db8::/32")},     // NET-TEST example
+		}
+
+		for _, r := range privateIPv6Ranges {
+			if r.network.Contains(ip) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// mustParseCIDR parses a CIDR string and panics on error
+func mustParseCIDR(cidr string) *net.IPNet {
+	_, network, err := net.ParseCIDR(cidr)
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse CIDR %s: %v", cidr, err))
+	}
+	return network
+}
+
+// validateURL validates that the URL is safe to fetch and blocks requests to private/internal resources.
 func validateURL(rawURL string) error {
 	parsedURL, err := url.Parse(rawURL)
 	if err != nil {
@@ -633,6 +692,39 @@ func validateURL(rawURL string) error {
 	// Ensure URL has a host
 	if parsedURL.Host == "" {
 		return fmt.Errorf("URL must have a host")
+	}
+
+	// Resolve hostname to IP addresses to check for private ranges
+	host := parsedURL.Hostname()
+	if host == "" {
+		return fmt.Errorf("invalid hostname in URL")
+	}
+
+	// Check if host is an IP address
+	hostIP := net.ParseIP(host)
+	if hostIP != nil {
+		// Direct IP address - check if it's private
+		if isPrivateIP(hostIP) {
+			return fmt.Errorf("direct IP address %s is in a private/internal range and is blocked for security", hostIP.String())
+		}
+	} else {
+		// Hostname - resolve to IPs and check each one
+		ips, err := net.LookupIP(host)
+		if err != nil {
+			return fmt.Errorf("failed to resolve hostname %s: %w", host, err)
+		}
+
+		// Check all resolved IP addresses
+		for _, ip := range ips {
+			if isPrivateIP(ip) {
+				return fmt.Errorf("hostname %s resolves to private IP address %s and is blocked for security", host, ip.String())
+			}
+		}
+
+		// If no IPs resolve, block the request
+		if len(ips) == 0 {
+			return fmt.Errorf("hostname %s does not resolve to any IP address", host)
+		}
 	}
 
 	return nil
@@ -744,22 +836,57 @@ func (a *ExecutorAdapter) executeFetch(ctx context.Context, input json.RawMessag
 		return "", fmt.Errorf("HTTP %d (%s)", resp.StatusCode, respText)
 	}
 
-	// Check content length
+	// Check content length if available (may be -1 for chunked encoding)
 	if resp.ContentLength > maxResponseSize {
 		return "", fmt.Errorf("response too large: %d bytes (max: %d)", resp.ContentLength, maxResponseSize)
 	}
 
-	// Read and limit response body
-	limitedReader := io.LimitReader(resp.Body, maxResponseSize)
-	bodyBytes, err := io.ReadAll(limitedReader)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response body: %w", err)
+	// Read response body with size tracking
+	var bodyBuffer bytes.Buffer
+	const maxChunkSize = 4096 // 4KB chunks for efficient memory usage
+	
+	// Track total bytes read to enforce size limit
+	totalBytesRead := int64(0)
+	chunk := make([]byte, maxChunkSize)
+	
+	for {
+		// Calculate remaining bytes we can read
+		remainingBytes := maxResponseSize - totalBytesRead
+		if remainingBytes <= 0 {
+			break // Stop reading if we've hit the limit
+		}
+		
+		// Read next chunk, but limit it to remaining bytes
+		chunkSize := uint64(maxChunkSize)
+		if uint64(remainingBytes) < chunkSize {
+			chunkSize = uint64(remainingBytes)
+		}
+		
+		n, err := resp.Body.Read(chunk[:chunkSize])
+		if n > 0 {
+			bodyBuffer.Write(chunk[:n])
+			totalBytesRead += int64(n)
+		}
+		
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", fmt.Errorf("failed to read response body: %w", err)
+		}
+		
+		// If Content-Length was available and we've read all expected bytes, stop
+		if resp.ContentLength >= 0 && totalBytesRead >= resp.ContentLength {
+			break
+		}
 	}
 
-	// Check if we hit the limit
-	if len(bodyBytes) == maxResponseSize {
-		return "", fmt.Errorf("response truncated due to size limit (max: %d bytes)", maxResponseSize)
+	// Check if we hit the overall size limit while reading
+	if totalBytesRead >= maxResponseSize {
+		return "", fmt.Errorf("response truncated due to size limit (max: %d bytes, read: %d bytes)", maxResponseSize, totalBytesRead)
 	}
+
+	bodyBytes := bodyBuffer.Bytes()
 
 	content := string(bodyBytes)
 
