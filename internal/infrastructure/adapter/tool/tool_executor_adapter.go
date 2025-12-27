@@ -700,9 +700,21 @@ func (a *ExecutorAdapter) executeFetch(ctx context.Context, input json.RawMessag
 		return "", fmt.Errorf("invalid URL: %w", err)
 	}
 
-	// Set timeout
-	ctx, cancel := context.WithTimeout(ctx, defaultFetchTimeout)
-	defer cancel()
+	// Set timeout, but do not extend an existing earlier parent deadline.
+	if deadline, ok := ctx.Deadline(); ok {
+		// If the existing deadline is further in the future than our default timeout,
+		// apply a new timeout to cap it at defaultFetchTimeout. Otherwise, keep the
+		// tighter parent deadline.
+		if time.Until(deadline) > defaultFetchTimeout {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, defaultFetchTimeout)
+			defer cancel()
+		}
+	} else {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, defaultFetchTimeout)
+		defer cancel()
+	}
 
 	// Create HTTP request with context
 	req, err := http.NewRequestWithContext(ctx, "GET", in.URL, nil)
