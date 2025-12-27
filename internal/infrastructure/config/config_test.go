@@ -1,7 +1,6 @@
 package config
 
 import (
-	"os"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -40,8 +39,7 @@ func TestConfig_HistoryEnvironmentVariables(t *testing.T) {
 		defer resetViper()
 
 		customPath := "/custom/path/to/history"
-		os.Setenv("AGENT_HISTORY_FILE", customPath)
-		defer os.Unsetenv("AGENT_HISTORY_FILE")
+		t.Setenv("AGENT_HISTORY_FILE", customPath)
 
 		cfg := LoadConfig()
 
@@ -53,8 +51,7 @@ func TestConfig_HistoryEnvironmentVariables(t *testing.T) {
 		resetViper()
 		defer resetViper()
 
-		os.Setenv("AGENT_HISTORY_MAX_ENTRIES", "5000")
-		defer os.Unsetenv("AGENT_HISTORY_MAX_ENTRIES")
+		t.Setenv("AGENT_HISTORY_MAX_ENTRIES", "5000")
 
 		cfg := LoadConfig()
 
@@ -67,10 +64,8 @@ func TestConfig_HistoryEnvironmentVariables(t *testing.T) {
 		defer resetViper()
 
 		customPath := "/tmp/agent-history"
-		os.Setenv("AGENT_HISTORY_FILE", customPath)
-		os.Setenv("AGENT_HISTORY_MAX_ENTRIES", "250")
-		defer os.Unsetenv("AGENT_HISTORY_FILE")
-		defer os.Unsetenv("AGENT_HISTORY_MAX_ENTRIES")
+		t.Setenv("AGENT_HISTORY_FILE", customPath)
+		t.Setenv("AGENT_HISTORY_MAX_ENTRIES", "250")
 
 		cfg := LoadConfig()
 
@@ -91,8 +86,7 @@ func TestConfig_HistoryValidation(t *testing.T) {
 		resetViper()
 		defer resetViper()
 
-		os.Setenv("AGENT_HISTORY_MAX_ENTRIES", "0")
-		defer os.Unsetenv("AGENT_HISTORY_MAX_ENTRIES")
+		t.Setenv("AGENT_HISTORY_MAX_ENTRIES", "0")
 
 		cfg := LoadConfig()
 
@@ -104,8 +98,7 @@ func TestConfig_HistoryValidation(t *testing.T) {
 		resetViper()
 		defer resetViper()
 
-		os.Setenv("AGENT_HISTORY_MAX_ENTRIES", "-100")
-		defer os.Unsetenv("AGENT_HISTORY_MAX_ENTRIES")
+		t.Setenv("AGENT_HISTORY_MAX_ENTRIES", "-100")
 
 		cfg := LoadConfig()
 
@@ -117,8 +110,7 @@ func TestConfig_HistoryValidation(t *testing.T) {
 		resetViper()
 		defer resetViper()
 
-		os.Setenv("AGENT_HISTORY_FILE", "")
-		defer os.Unsetenv("AGENT_HISTORY_FILE")
+		t.Setenv("AGENT_HISTORY_FILE", "")
 
 		cfg := LoadConfig()
 
