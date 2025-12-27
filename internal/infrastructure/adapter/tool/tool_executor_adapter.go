@@ -8,6 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/html"
 	fileadapter "code-editing-agent/internal/infrastructure/adapter/file"
 )
 
@@ -286,6 +290,29 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 		RequiredFields: []string{"command"},
 	}
 	a.tools[bashTool.Name] = bashTool
+
+	// Register fetch tool
+	fetchTool := entity.Tool{
+		ID:          "fetch",
+		Name:        "fetch",
+		Description: "Fetches web resources via HTTP/HTTPS. Prefer this to bash-isms like curl/wget",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"url": map[string]interface{}{
+					"type":        "string",
+					"description": "Full url to fetch, e.g. https://...",
+				},
+				"includeMarkup": map[string]interface{}{
+					"type":        "boolean",
+					"description": "Include the HTML markup? Defaults to false. By default or when set to false, markup will be stripped and converted to plain text. Prefer markup stripping, and only set this to true if the output is confusing: otherwise you may download a massive amount of data",
+				},
+			},
+			"required": []string{"url"},
+		},
+		RequiredFields: []string{"url"},
+	}
+	a.tools[fetchTool.Name] = fetchTool
 }
 
 // executeByName executes the appropriate tool function based on the tool name.
@@ -299,6 +326,8 @@ func (a *ExecutorAdapter) executeByName(ctx context.Context, name string, input 
 		return a.executeEditFile(input)
 	case "bash":
 		return a.executeBash(ctx, input)
+	case "fetch":
+		return a.executeFetch(ctx, input)
 	default:
 		return "", fmt.Errorf("no implementation available for tool: %s", name)
 	}
@@ -442,6 +471,12 @@ type bashInput struct {
 	TimeoutMs   int    `json:"timeout_ms,omitempty"`
 }
 
+// fetchInput represents the input for the fetch tool.
+type fetchInput struct {
+	URL           string `json:"url"`
+	IncludeMarkup bool   `json:"includeMarkup,omitempty"`
+}
+
 // bashOutput represents the output from the bash tool.
 type bashOutput struct {
 	Stdout   string `json:"stdout"`
@@ -569,4 +604,150 @@ func (a *ExecutorAdapter) executeBash(ctx context.Context, input json.RawMessage
 	}
 
 	return string(result), nil
+}
+
+// defaultFetchTimeout is the default timeout for fetch operations.
+const defaultFetchTimeout = 30 * time.Second
+const maxResponseSize = 10 << 20 // 10MB max response size
+
+// validateURL validates that the URL is safe to fetch.
+func validateURL(rawURL string) error {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL format: %w", err)
+	}
+
+	// Only allow http and https schemes
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return fmt.Errorf("URL must use http or https protocol, got: %s", parsedURL.Scheme)
+	}
+
+	// Ensure URL has a host
+	if parsedURL.Host == "" {
+		return fmt.Errorf("URL must have a host")
+	}
+
+	return nil
+}
+
+// htmlToText converts HTML content to plain text.
+func htmlToText(htmlContent string) (string, error) {
+	doc, err := html.Parse(strings.NewReader(htmlContent))
+	if err != nil {
+		return "", fmt.Errorf("failed to parse HTML: %w", err)
+	}
+
+	var result strings.Builder
+
+	// Recursively extract text from nodes
+	var extractText func(*html.Node)
+	extractText = func(n *html.Node) {
+		switch n.Type {
+		case html.TextNode:
+			text := strings.TrimSpace(n.Data)
+			if text != "" {
+				result.WriteString(text)
+				result.WriteString(" ")
+			}
+
+		case html.ElementNode:
+			// Add newline for block elements
+			switch n.Data {
+			case "p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "br":
+				result.WriteString(" ")
+			case "li":
+				result.WriteString(" ")
+			}
+
+			// Recursively process children
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				extractText(c)
+			}
+		case html.DocumentNode:
+			// Process all children of document node
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				extractText(c)
+			}
+		}
+	}
+
+	extractText(doc)
+
+	// Clean up whitespace
+	text := result.String()
+	text = strings.Join(strings.Fields(text), " ")
+
+	return text, nil
+}
+
+// executeFetch executes the fetch tool.
+func (a *ExecutorAdapter) executeFetch(ctx context.Context, input json.RawMessage) (string, error) {
+	var in fetchInput
+	if err := json.Unmarshal(input, &in); err != nil {
+		return "", fmt.Errorf("failed to unmarshal fetch input: %w", err)
+	}
+
+	// Validate URL
+	if err := validateURL(in.URL); err != nil {
+		return "", fmt.Errorf("invalid URL: %w", err)
+	}
+
+	// Set timeout
+	ctx, cancel := context.WithTimeout(ctx, defaultFetchTimeout)
+	defer cancel()
+
+	// Create HTTP request with context
+	req, err := http.NewRequestWithContext(ctx, "GET", in.URL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	// Set user agent
+	req.Header.Set("User-Agent", "code-editing-agent/1.0")
+
+	// Make HTTP request
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	if resp.StatusCode >= 400 {
+		respText := resp.Status
+		if resp.StatusCode == 403 {
+			respText = "authorization required"
+		}
+		return "", fmt.Errorf("HTTP %d (%s)", resp.StatusCode, respText)
+	}
+
+	// Check content length
+	if resp.ContentLength > maxResponseSize {
+		return "", fmt.Errorf("response too large: %d bytes (max: %d)", resp.ContentLength, maxResponseSize)
+	}
+
+	// Read and limit response body
+	limitedReader := io.LimitReader(resp.Body, maxResponseSize)
+	bodyBytes, err := io.ReadAll(limitedReader)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	// Check if we hit the limit
+	if len(bodyBytes) >= maxResponseSize {
+		return "", fmt.Errorf("response truncated due to size limit (max: %d bytes)", maxResponseSize)
+	}
+
+	content := string(bodyBytes)
+
+	// Convert HTML to text if includeMarkup is false
+	if !in.IncludeMarkup && strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html") {
+		converted, err := htmlToText(content)
+		if err != nil {
+			return "", fmt.Errorf("failed to convert HTML to text: %w", err)
+		}
+		content = converted
+	}
+
+	return content, nil
 }

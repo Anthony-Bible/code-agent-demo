@@ -4,8 +4,12 @@ import (
 	"code-editing-agent/internal/infrastructure/adapter/file"
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // bashOutput represents the expected output structure from bash tool.
@@ -517,5 +521,292 @@ func TestBashTool_BackwardCompat_DangerousCallbackStillWorks(t *testing.T) {
 	}
 	if !strings.Contains(inv.reason, "sudo") {
 		t.Errorf("Expected reason to contain 'sudo', got %q", inv.reason)
+	}
+}
+
+// =============================================================================
+// Tests for Fetch Tool
+// =============================================================================
+
+func TestFetchTool_Registration(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	tools, err := adapter.ListTools()
+	if err != nil {
+		t.Fatalf("ListTools failed: %v", err)
+	}
+
+	found := false
+	for _, tool := range tools {
+		if tool.Name == "fetch" {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Error("fetch tool should be registered")
+	}
+
+	// Verify the fetch tool has the correct schema
+	fetchTool, exists := adapter.GetTool("fetch")
+	if !exists {
+		t.Fatal("fetch tool should exist")
+	}
+
+	if fetchTool.Description != "Fetches web resources via HTTP/HTTPS. Prefer this to bash-isms like curl/wget" {
+		t.Errorf("Expected description to mention curl/wget alternative, got: %s", fetchTool.Description)
+	}
+
+	// Verify required fields
+	if len(fetchTool.RequiredFields) != 1 || fetchTool.RequiredFields[0] != "url" {
+		t.Errorf("Expected required fields to be ['url'], got: %v", fetchTool.RequiredFields)
+	}
+}
+
+func TestFetchTool_SimpleTextFetch(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	// Create test server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "Hello, World!")
+	}))
+	defer server.Close()
+
+	input := fmt.Sprintf(`{"url": "%s"}`, server.URL)
+	result, err := adapter.ExecuteTool(context.Background(), "fetch", input)
+	if err != nil {
+		t.Fatalf("ExecuteTool failed: %v", err)
+	}
+
+	if result != "Hello, World!" {
+		t.Errorf("Expected 'Hello, World!', got %q", result)
+	}
+}
+
+func TestFetchTool_HTMLToTextConversion(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	// Create test server with HTML content
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `<html><body><h1>Title</h1><p>Paragraph text.</p></body></html>`)
+	}))
+	defer server.Close()
+
+	// Test with includeMarkup=false (default)
+	input := fmt.Sprintf(`{"url": "%s"}`, server.URL)
+	result, err := adapter.ExecuteTool(context.Background(), "fetch", input)
+	if err != nil {
+		t.Fatalf("ExecuteTool failed: %v", err)
+	}
+
+	expected := "Title Paragraph text."
+	if result != expected {
+		t.Errorf("Expected '%s', got %q", expected, result)
+	}
+}
+
+func TestFetchTool_IncludeMarkup(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	// Create test server with HTML content
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `<html><body><h1>Title</h1><p>Paragraph text.</p></body></html>`)
+	}))
+	defer server.Close()
+
+	// Test with includeMarkup=true
+	input := fmt.Sprintf(`{"url": "%s", "includeMarkup": true}`, server.URL)
+	result, err := adapter.ExecuteTool(context.Background(), "fetch", input)
+	if err != nil {
+		t.Fatalf("ExecuteTool failed: %v", err)
+	}
+
+	expected := `<html><body><h1>Title</h1><p>Paragraph text.</p></body></html>`
+	if result != expected {
+		t.Errorf("Expected '%s', got %q", expected, result)
+	}
+}
+
+func TestFetchTool_HTTPError(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	// Create test server that returns 404
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, "Not Found")
+	}))
+	defer server.Close()
+
+	input := fmt.Sprintf(`{"url": "%s"}`, server.URL)
+	_, err := adapter.ExecuteTool(context.Background(), "fetch", input)
+	if err == nil {
+		t.Fatal("Expected error for 404, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "404") {
+		t.Errorf("Expected error to contain '404', got: %v", err)
+	}
+}
+
+func TestFetchTool_403AuthorizationError(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	// Create test server that returns 403
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, "Forbidden")
+	}))
+	defer server.Close()
+
+	input := fmt.Sprintf(`{"url": "%s"}`, server.URL)
+	_, err := adapter.ExecuteTool(context.Background(), "fetch", input)
+	if err == nil {
+		t.Fatal("Expected error for 403, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "authorization required") {
+		t.Errorf("Expected error to contain 'authorization required', got: %v", err)
+	}
+}
+
+func TestFetchTool_InvalidURL(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	testCases := []struct {
+		name string
+		url  string
+	}{
+		{"file protocol", "file:///etc/passwd"},
+		{"ftp protocol", "ftp://example.com/file.txt"},
+		{"no protocol", "example.com/file.txt"},
+		{"invalid format", "http://"},
+		{"empty", ""},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := fmt.Sprintf(`{"url": "%s"}`, tc.url)
+			_, err := adapter.ExecuteTool(context.Background(), "fetch", input)
+			if err == nil {
+				t.Errorf("Expected error for invalid URL %q, got nil", tc.url)
+			}
+		})
+	}
+}
+
+func TestFetchTool_EmptyURL(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	input := `{"url": ""}`
+	_, err := adapter.ExecuteTool(context.Background(), "fetch", input)
+	if err == nil {
+		t.Fatal("Expected error for empty URL, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "invalid URL") {
+		t.Errorf("Expected error to contain 'invalid URL', got: %v", err)
+	}
+}
+
+func TestFetchTool_MissingURL(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	input := `{"includeMarkup": true}`
+	_, err := adapter.ExecuteTool(context.Background(), "fetch", input)
+	if err == nil {
+		t.Fatal("Expected error for missing URL, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "url") {
+		t.Errorf("Expected error to contain 'url', got: %v", err)
+	}
+}
+
+func TestFetchTool_ContextCancel(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	// Create test server that delays response
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2 * time.Second) // Delay longer than context timeout
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "Delayed response")
+	}))
+	defer server.Close()
+
+	// Create context with short timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	input := fmt.Sprintf(`{"url": "%s"}`, server.URL)
+	_, err := adapter.ExecuteTool(ctx, "fetch", input)
+	if err == nil {
+		t.Fatal("Expected error due to context cancellation, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "context") && !strings.Contains(err.Error(), "deadline") {
+		t.Errorf("Expected error to contain context/deadline, got: %v", err)
+	}
+}
+
+func TestFetchTool_NonHTMLContentKeepOriginal(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	// Create test server with JSON content
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"message": "Hello", "status": "ok"}`)
+	}))
+	defer server.Close()
+
+	// Even with includeMarkup=false, non-HTML content should not be converted
+	input := fmt.Sprintf(`{"url": "%s"}`, server.URL)
+	result, err := adapter.ExecuteTool(context.Background(), "fetch", input)
+	if err != nil {
+		t.Fatalf("ExecuteTool failed: %v", err)
+	}
+
+	expected := `{"message": "Hello", "status": "ok"}`
+	if result != expected {
+		t.Errorf("Expected '%s', got %q", expected, result)
+	}
+}
+
+func TestFetchTool_MalformedInput(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	testCases := []string{
+		`{"url": 123}`,
+		`"invalid json"`,
+		`{}`,
+		`null`,
+	}
+
+	for _, input := range testCases {
+		t.Run(fmt.Sprintf("input: %s", input), func(t *testing.T) {
+			_, err := adapter.ExecuteTool(context.Background(), "fetch", input)
+			if err == nil {
+				t.Errorf("Expected error for malformed input %q, got nil", input)
+			}
+		})
 	}
 }
