@@ -208,6 +208,14 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 					"type":        "string",
 					"description": "The relative path to the file to read in the working directory..",
 				},
+				"start_line": map[string]interface{}{
+					"type":        "integer",
+					"description": "The 1-based line number to start reading from. If not provided, reads from the beginning.",
+				},
+				"end_line": map[string]interface{}{
+					"type":        "integer",
+					"description": "The 1-based line number to stop reading at (inclusive). If not provided, reads to the end.",
+				},
 			},
 			"required": []string{"path"},
 		},
@@ -237,7 +245,7 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 	editFileTool := entity.Tool{
 		ID:          "edit_file",
 		Name:        "edit_file",
-		Description: "Makes edits to a text file. Replaces 'old_str' with 'new_str' in the given file. 'old_str' and 'new_str' MUST be different from each other. If the file specified with path doesn't exist, it will be created.The old_stribg must match exactly including whitespace and new lines. Include a few lines before to avoid editing a string with multiple matches.",
+		Description: "Makes edits to a text file. Replaces 'old_str' with 'new_str' in the given file. 'old_str' and 'new_str' MUST be different from each other. If the file specified with path doesn't exist, it will be created. The old_str must match exactly including whitespace and new lines. Include a few lines before to avoid editing a string with multiple matches.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -306,7 +314,53 @@ func (a *ExecutorAdapter) executeByName(ctx context.Context, name string, input 
 
 // readFileInput represents the input for the read_file tool.
 type readFileInput struct {
-	Path string `json:"path"`
+	Path      string `json:"path"`
+	StartLine *int   `json:"start_line"`
+	EndLine   *int   `json:"end_line"`
+}
+
+// validateLineRange validates start_line and end_line parameters.
+// Returns an error if the values are invalid.
+func (in *readFileInput) validateLineRange() error {
+	if in.StartLine != nil && *in.StartLine < 1 {
+		return fmt.Errorf("start_line must be >= 1, got %d", *in.StartLine)
+	}
+	if in.EndLine != nil && *in.EndLine < 1 {
+		return fmt.Errorf("end_line must be >= 1, got %d", *in.EndLine)
+	}
+	if in.StartLine != nil && in.EndLine != nil && *in.StartLine > *in.EndLine {
+		return fmt.Errorf("start_line (%d) must be <= end_line (%d)", *in.StartLine, *in.EndLine)
+	}
+	return nil
+}
+
+// formatLinesWithNumbers formats file content as numbered lines within the specified range.
+// startLine and endLine are 1-based line numbers. If nil, they default to the beginning and end of the file.
+func formatLinesWithNumbers(content string, startLine, endLine *int) string {
+	lines := strings.Split(content, "\n")
+	// Remove trailing empty line if content ends with newline
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+
+	// Determine start and end indices (1-based to 0-based), clamped to valid range
+	startIdx := 0
+	if startLine != nil {
+		startIdx = min(*startLine-1, len(lines))
+	}
+
+	endIdx := len(lines)
+	if endLine != nil {
+		endIdx = min(*endLine, len(lines))
+	}
+
+	// Build output with line numbers
+	var result strings.Builder
+	for i := startIdx; i < endIdx; i++ {
+		result.WriteString(fmt.Sprintf("%d: %s\n", i+1, lines[i]))
+	}
+
+	return result.String()
 }
 
 // executeReadFile executes the read_file tool.
@@ -316,12 +370,16 @@ func (a *ExecutorAdapter) executeReadFile(input json.RawMessage) (string, error)
 		return "", fmt.Errorf("failed to unmarshal read_file input: %w", err)
 	}
 
+	if err := in.validateLineRange(); err != nil {
+		return "", err
+	}
+
 	content, err := a.fileManager.ReadFile(in.Path)
 	if err != nil {
 		return "", wrapFileOperationError("Failed to read file", err)
 	}
 
-	return content, nil
+	return formatLinesWithNumbers(content, in.StartLine, in.EndLine), nil
 }
 
 // listFilesInput represents the input for the list_files tool.
