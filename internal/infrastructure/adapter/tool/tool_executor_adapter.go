@@ -301,7 +301,7 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 			"properties": map[string]interface{}{
 				"url": map[string]interface{}{
 					"type":        "string",
-					"description": "Full url to fetch, e.g. https://...",
+					"description": "Full URL to fetch, e.g. https://...",
 				},
 				"includeMarkup": map[string]interface{}{
 					"type":        "boolean",
