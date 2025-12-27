@@ -608,8 +608,16 @@ func (a *ExecutorAdapter) executeBash(ctx context.Context, input json.RawMessage
 
 // defaultFetchTimeout is the default timeout for fetch operations.
 const defaultFetchTimeout = 30 * time.Second
-const maxResponseSize = 10 << 20 // 10MB max response size
 
+// maxResponseSize defines an upper bound on the number of bytes we will accept
+// in an HTTP response body. The 10MB limit is a compromise: it is large enough
+// to cover typical HTML pages and JSON responses used by tools, while still
+// preventing unbounded memory growth if a server returns an unexpectedly large
+// payload. Callers that use this constant to bound response reads should stop
+// reading and treat the operation as failed (for example, by returning an error)
+// when the response exceeds this limit, instead of loading the entire body into
+// memory.
+const maxResponseSize = 10 << 20
 // validateURL validates that the URL is safe to fetch.
 func validateURL(rawURL string) error {
 	parsedURL, err := url.Parse(rawURL)
