@@ -156,12 +156,12 @@ code-editing-agent/
 
 3. **Build the application**
    ```bash
-   go build -o code-editing-agent ./cmd/cli
+   go build -o agent ./cmd/cli
    ```
 
 4. **Run the application**
    ```bash
-   ./code-editing-agent chat
+   ./agent chat
    ```
 
 ### Quick Start
@@ -171,7 +171,7 @@ code-editing-agent/
 export ANTHROPIC_API_KEY=your-api-key-here
 
 # Start the agent
-./code-editing-agent chat
+./agent chat
 
 # Or run directly
 go run ./cmd/cli main.go chat
@@ -182,7 +182,7 @@ go run ./cmd/cli main.go chat
 ### Basic Chat
 
 ```bash
-./code-editing-agent chat
+./agent chat
 ```
 
 Once started, you can interact naturally:
@@ -203,6 +203,12 @@ New session started: 3a1b2c3d4e5f6789...
 | `read_file` | Read file contents | Ask the AI to "Read file: main.go" |
 | `list_files` | List files in directory | Ask to "List all files in ./internal" |
 | `edit_file` | Edit files via string replacement | Ask to "Replace this text in file.go" |
+| `bash` | Execute shell commands | Ask to "Run command: go test ./..." |
+
+**Built-in Safety Features:**
+- **Path Traversal Protection**: All file operations are sandboxed within the working directory
+- **Dangerous Command Detection**: Commands like `rm -rf`, `dd`, format operations require confirmation
+- **Graceful Shutdown**: Double Ctrl+C to exit, single press shows help message
 
 ### Configuration
 
@@ -210,7 +216,7 @@ The application supports configuration via:
 
 **Command-line flags:**
 ```bash
-./code-editing-agent chat --model "hf:zai-org/GLM-4.6" --max-tokens 2048
+./agent chat --model "hf:zai-org/GLM-4.6" --max-tokens 2048
 ```
 
 **Environment variables (AGENT_* prefix):**
@@ -220,6 +226,8 @@ export AGENT_MAX_TOKENS=2048
 export AGENT_WORKING_DIR=/path/to/project
 export AGENT_WELCOME_MESSAGE="Hello! How can I help?"
 export AGENT_GOODBYE_MESSAGE="Goodbye!"
+export AGENT_HISTORY_FILE=""  # Disable history
+export AGENT_HISTORY_MAX_ENTRIES=500
 ```
 
 **Configuration options:**
@@ -228,8 +236,10 @@ export AGENT_GOODBYE_MESSAGE="Goodbye!"
 | `--model` | `hf:zai-org/GLM-4.6` | AI model to use |
 | `--maxTokens` | `1024` | Maximum tokens in responses |
 | `--workingDir` | `.` | Base directory for file operations |
-| `--welcomeMessage` | `Chat...` | Displayed on session start |
+| `--welcomeMessage` | `Chat with Claude (use 'ctrl+c' to quit)` | Displayed on session start |
 | `--goodbyeMessage` | `Bye!` | Displayed on session end |
+| `--historyFile` | `~/.agent-history` | Command history file location |
+| `--historyMaxEntries` | `1000` | Maximum history entries to keep |
 
 ## Development
 
