@@ -9,23 +9,34 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/c-bata/go-prompt"
 )
 
+// Key constants for special key handling.
+const (
+	KeyTab      = "tab"
+	KeyShiftTab = "shift+tab"
+)
+
 // CLIAdapter implements the UserInterface port using the command line.
 type CLIAdapter struct {
-	input             io.Reader
-	output            io.Writer
-	prompt            string
-	colors            port.ColorScheme
-	scanner           *bufio.Scanner
-	truncationConfig  TruncationConfig
-	useInteractive    bool
-	historyFile       string
-	maxHistoryEntries int
-	historyManager    *HistoryManager // Command history for interactive mode
+	input              io.Reader
+	output             io.Writer
+	prompt             string
+	colors             port.ColorScheme
+	scanner            *bufio.Scanner
+	truncationConfig   TruncationConfig
+	useInteractive     bool
+	historyFile        string
+	maxHistoryEntries  int
+	historyManager     *HistoryManager // Command history for interactive mode
+	modeToggleCallback func()
+	planMode           bool
+	sessionID          string
+	mu                 sync.RWMutex
 }
 
 // emptyCompleter is a no-op completer for go-prompt (we don't use auto-completion).
@@ -493,5 +504,66 @@ func (c *CLIAdapter) GetHistoryCallback() func() []string {
 	}
 	return func() []string {
 		return c.historyManager.History()
+	}
+}
+
+// SetModeToggleCallback sets the callback function to invoke when Shift+Tab is pressed.
+// This allows external code to handle mode toggling via keyboard shortcuts.
+// The callback is invoked in a thread-safe manner.
+func (c *CLIAdapter) SetModeToggleCallback(callback func()) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.modeToggleCallback = callback
+}
+
+// SetSessionID sets the session ID for the adapter.
+// The session ID is displayed in the prompt when set.
+// Thread-safe for concurrent access.
+func (c *CLIAdapter) SetSessionID(sessionID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.sessionID = sessionID
+}
+
+// SetPlanMode sets the plan mode state for the adapter.
+// When plan mode is enabled, a "[PLAN MODE]" prefix is displayed in the prompt.
+// Thread-safe for concurrent access.
+func (c *CLIAdapter) SetPlanMode(enabled bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.planMode = enabled
+}
+
+// GetPrompt returns the current prompt string with mode indicator if applicable.
+// The prompt format depends on the current plan mode and session ID:
+//   - Normal mode: "Claude> [sessionID]"
+//   - Plan mode: "[PLAN MODE] Claude> [sessionID]"
+//
+// Thread-safe for concurrent reads.
+func (c *CLIAdapter) GetPrompt() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	result := c.prompt
+	if c.planMode {
+		result = "[PLAN MODE] " + result
+	}
+	if c.sessionID != "" {
+		result = result + " [" + c.sessionID + "]"
+	}
+	return result
+}
+
+// HandleKeyPress processes a key press event.
+// If the key is Shift+Tab and a mode toggle callback is registered, invokes the callback.
+// This is typically called by the input handler to respond to keyboard shortcuts.
+// Thread-safe for concurrent access.
+func (c *CLIAdapter) HandleKeyPress(key string) {
+	if key == KeyShiftTab {
+		c.mu.RLock()
+		callback := c.modeToggleCallback
+		c.mu.RUnlock()
+		if callback != nil {
+			callback()
+		}
 	}
 }

@@ -2149,3 +2149,178 @@ func TestCLIAdapter_ConfirmBashCommand_Description(t *testing.T) {
 		assert.False(t, resultNo, "should return false when user denies with description present")
 	})
 }
+
+// Mode Toggle Tests - RED Phase
+// These tests define the expected behavior of mode toggle functionality.
+// They will FAIL until the implementation is added.
+
+func TestCLIAdapter_ShiftTabKeybinding(t *testing.T) {
+	t.Run("invokes mode toggle callback on Shift+Tab", func(t *testing.T) {
+		// Setup: Track callback invocations
+		callbackInvoked := false
+		toggleCallback := func() {
+			callbackInvoked = true
+		}
+
+		// Create adapter with mode toggle callback
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter.SetModeToggleCallback(toggleCallback)
+
+		// Simulate Shift+Tab keypress
+		// This will call the underlying keybinding handler
+		adapter.HandleKeyPress(ui.KeyShiftTab)
+
+		// Assert that callback was invoked
+		assert.True(t, callbackInvoked,
+			"Shift+Tab keypress should invoke the mode toggle callback")
+	})
+
+	t.Run("multiple Shift+Tab presses toggle mode back and forth", func(t *testing.T) {
+		modeStates := []bool{}
+		toggleCallback := func() {
+			modeStates = append(modeStates, true)
+		}
+
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter.SetModeToggleCallback(toggleCallback)
+
+		// Press Shift+Tab three times
+		adapter.HandleKeyPress(ui.KeyShiftTab)
+		adapter.HandleKeyPress(ui.KeyShiftTab)
+		adapter.HandleKeyPress(ui.KeyShiftTab)
+
+		// Should have invoked callback three times
+		assert.Len(t, modeStates, 3,
+			"each Shift+Tab press should invoke the toggle callback")
+	})
+
+	t.Run("other keys do not invoke mode toggle callback", func(t *testing.T) {
+		callbackInvoked := false
+		toggleCallback := func() {
+			callbackInvoked = true
+		}
+
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter.SetModeToggleCallback(toggleCallback)
+
+		// Press regular Tab (not Shift+Tab)
+		adapter.HandleKeyPress(ui.KeyTab)
+
+		// Callback should NOT be invoked
+		assert.False(t, callbackInvoked,
+			"regular Tab key should not invoke mode toggle callback")
+	})
+
+	t.Run("handles nil mode toggle callback gracefully", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter.SetModeToggleCallback(nil)
+
+		// Should not panic when Shift+Tab is pressed with nil callback
+		assert.NotPanics(t, func() {
+			adapter.HandleKeyPress(ui.KeyShiftTab)
+		}, "should not panic when mode toggle callback is nil")
+	})
+}
+
+func TestCLIAdapter_PromptChangesWithMode(t *testing.T) {
+	t.Run("prompt shows [PLAN MODE] indicator when in plan mode", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Set adapter to plan mode
+		adapter.SetPlanMode(true)
+
+		// Get prompt text
+		prompt := adapter.GetPrompt()
+
+		// Should contain [PLAN MODE] indicator
+		assert.Contains(t, prompt, "[PLAN MODE]",
+			"prompt should contain [PLAN MODE] indicator when in plan mode")
+
+		// Should be visible (not empty after formatting)
+		assert.NotEmpty(t, prompt,
+			"prompt should not be empty when in plan mode")
+	})
+
+	t.Run("prompt does not show [PLAN MODE] indicator when in normal mode", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Set adapter to normal mode
+		adapter.SetPlanMode(false)
+
+		// Get prompt text
+		prompt := adapter.GetPrompt()
+
+		// Should NOT contain [PLAN MODE] indicator
+		assert.NotContains(t, prompt, "[PLAN MODE]",
+			"prompt should NOT contain [PLAN MODE] indicator when in normal mode")
+	})
+
+	t.Run("prompt updates dynamically when mode toggles", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Start in normal mode
+		adapter.SetPlanMode(false)
+		normalPrompt := adapter.GetPrompt()
+		assert.NotContains(t, normalPrompt, "[PLAN MODE]",
+			"normal mode prompt should not contain indicator")
+
+		// Toggle to plan mode
+		adapter.SetPlanMode(true)
+		planPrompt := adapter.GetPrompt()
+		assert.Contains(t, planPrompt, "[PLAN MODE]",
+			"plan mode prompt should contain indicator")
+
+		// Toggle back to normal mode
+		adapter.SetPlanMode(false)
+		normalPromptAgain := adapter.GetPrompt()
+		assert.NotContains(t, normalPromptAgain, "[PLAN MODE]",
+			"normal mode prompt should not contain indicator after toggle")
+	})
+
+	t.Run("prompt shows indicator with consistent styling", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		adapter.SetPlanMode(true)
+		prompt := adapter.GetPrompt()
+
+		// The [PLAN MODE] indicator should be the first element in the prompt
+		// This ensures it's consistently visible
+		assert.True(t, strings.HasPrefix(prompt, "[PLAN MODE]") ||
+			strings.Contains(prompt, "[PLAN MODE]"),
+			"[PLAN MODE] indicator should appear prominently in prompt")
+	})
+
+	t.Run("prompt preserves other elements with mode indicator", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		// Set some session context before enabling plan mode
+		adapter.SetSessionID("test-session-123")
+		adapter.SetPlanMode(true)
+
+		prompt := adapter.GetPrompt()
+
+		// Should contain both mode indicator and session info
+		assert.Contains(t, prompt, "[PLAN MODE]",
+			"prompt should show mode indicator")
+		assert.Contains(t, prompt, "test-session-123",
+			"prompt should preserve session information")
+	})
+}

@@ -48,6 +48,7 @@ Presentation (cmd/cli/) → Application (internal/application/) → Domain (inte
 - `adapter/ai/anthropic_adapter.go` - Implements `AIProvider`
 - `adapter/file/local_file_adapter.go` - Implements `FileManager` (with path traversal protection)
 - `adapter/tool/tool_executor_adapter.go` - Implements `ToolExecutor` (bash, read_file, list_files, edit_file)
+- `adapter/tool/planning_executor_adapter.go` - Decorator that wraps `ToolExecutor` for plan mode
 - `adapter/ui/cli_adapter.go` - Implements `UserInterface`
 - `config/container.go` - Dependency injection wiring
 - `signal/interrupt_handler.go` - Double Ctrl+C exit handling
@@ -56,7 +57,7 @@ Presentation (cmd/cli/) → Application (internal/application/) → Domain (inte
 
 **Chat Flow**: User Input → `ChatService.SendMessage()` → `ConversationService.ProcessAssistantResponse()` → `AIProvider.SendMessage()` → Tool execution if needed → Response
 
-**Tool Execution**: AI requests tool → `ToolExecutionUseCase.ExecuteToolsInSession()` → `ExecutorAdapter.ExecuteTool()` → Results fed back to AI
+**Tool Execution**: AI requests tool → `ToolExecutionUseCase.ExecuteToolsInSession()` → `PlanningExecutorAdapter` (if plan mode enabled) → `ExecutorAdapter.ExecuteTool()` → Results fed back to AI
 
 ### Ports (Interfaces)
 
@@ -64,7 +65,7 @@ Presentation (cmd/cli/) → Application (internal/application/) → Domain (inte
 |------|---------|---------|
 | `AIProvider` | AI model communication | `AnthropicAdapter` |
 | `FileManager` | Sandboxed file operations | `LocalFileManager` |
-| `ToolExecutor` | Tool registry & execution | `ExecutorAdapter` |
+| `ToolExecutor` | Tool registry & execution | `ExecutorAdapter` (decorated by `PlanningExecutorAdapter`) |
 | `UserInterface` | Terminal I/O | `CLIAdapter` |
 
 ## Adding New Tools
@@ -172,3 +173,56 @@ Detailed instructions, patterns, and examples for using the skill.
 ### Example Skill
 
 See `skills/test-skill/SKILL.md` and `skills/code-review/SKILL.md` for examples.
+
+## Mode Toggle Feature (Plan Mode)
+
+The agent supports a "plan mode" where tool executions are written to `.agent/plans/` instead of being executed directly. This allows reviewing proposed changes before applying them.
+
+### Enabling Plan Mode
+
+In the CLI, use the `:mode` command:
+- `:mode` or `:mode toggle` - Toggle between plan and normal mode
+- `:mode plan` - Enable plan mode
+- `:mode normal` - Disable plan mode
+
+### Visual Indicators
+
+When in plan mode:
+- Assistant responses are prefixed with `[PLAN MODE]`
+- Tools write JSON plans to `{workingDir}/.agent/plans/{sessionID}_{timestamp}.json`
+- System message confirms mode status when toggled
+
+### Plan File Format
+
+Plans are written as JSON with the following structure:
+```json
+{
+  "session_id": "...",
+  "tool_name": "bash",
+  "input": {"command": "ls -la"},
+  "timestamp": "2024-01-20T15:30:01Z"
+}
+```
+
+### Architecture
+
+The `PlanningExecutorAdapter` decorates the base `ExecutorAdapter` using the decorator pattern:
+- Checks mode state per session via `ConversationService.SetPlanMode()`
+- In plan mode: writes tool execution plans to files instead of executing
+- In normal mode: delegates execution to the wrapped executor
+- Uses thread-safe `sessionModes` map for concurrent access
+
+### Implementation Details
+
+Key files:
+- `internal/infrastructure/adapter/tool/planning_executor_adapter.go` - Decorator implementation
+- `internal/domain/service/conversation_service.go` - Session mode state management
+- `internal/application/service/chat_service.go` - Mode command handling
+- `cmd/cli/cmd/chat.go` - CLI integration of `:mode` command
+- `internal/infrastructure/config/container.go` - Decorator wiring
+
+The decorator is wired in the container:
+```go
+baseExecutor := tool.NewExecutorAdapter(fileManager)
+toolExecutor := tool.NewPlanningExecutorAdapter(baseExecutor, fileManager, cfg.WorkingDir)
+```

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 )
 
 var (
@@ -25,6 +26,8 @@ type ConversationService struct {
 	conversations  map[string]*entity.Conversation
 	currentSession string
 	processing     map[string]bool
+	sessionModes   map[string]bool
+	sessionModesMu sync.RWMutex // Protects sessionModes map for concurrent access
 }
 
 // NewConversationService creates a new instance of ConversationService.
@@ -42,6 +45,7 @@ func NewConversationService(aiProvider port.AIProvider, toolExecutor port.ToolEx
 		toolExecutor:  toolExecutor,
 		conversations: make(map[string]*entity.Conversation),
 		processing:    make(map[string]bool),
+		sessionModes:  make(map[string]bool),
 	}, nil
 }
 
@@ -264,6 +268,7 @@ func (cs *ConversationService) GetCurrentSession() (string, error) {
 }
 
 // EndConversation concludes a conversation session, performing cleanup if needed.
+// It removes session-specific state including processing flags and mode settings.
 func (cs *ConversationService) EndConversation(ctx context.Context, sessionID string) error {
 	select {
 	case <-ctx.Done():
@@ -283,6 +288,11 @@ func (cs *ConversationService) EndConversation(ctx context.Context, sessionID st
 
 	// Remove processing state
 	delete(cs.processing, sessionID)
+
+	// Remove mode state
+	cs.sessionModesMu.Lock()
+	delete(cs.sessionModes, sessionID)
+	cs.sessionModesMu.Unlock()
 
 	return nil
 }
@@ -340,4 +350,31 @@ func (cs *ConversationService) parseToolRequests(content string) []ToolRequest {
 	}
 
 	return requests
+}
+
+// SetPlanMode sets the plan mode state for a session.
+// When plan mode is enabled, tool executions are written to plan files instead of being executed.
+// The operation is thread-safe.
+func (cs *ConversationService) SetPlanMode(sessionID string, enabled bool) error {
+	_, exists := cs.conversations[sessionID]
+	if !exists {
+		return ErrConversationNotFound
+	}
+	cs.sessionModesMu.Lock()
+	cs.sessionModes[sessionID] = enabled
+	cs.sessionModesMu.Unlock()
+	return nil
+}
+
+// IsPlanMode returns whether plan mode is enabled for a session.
+// Returns false for non-existent sessions.
+// The operation is thread-safe for concurrent reads.
+func (cs *ConversationService) IsPlanMode(sessionID string) (bool, error) {
+	_, exists := cs.conversations[sessionID]
+	if !exists {
+		return false, ErrConversationNotFound
+	}
+	cs.sessionModesMu.RLock()
+	defer cs.sessionModesMu.RUnlock()
+	return cs.sessionModes[sessionID], nil
 }

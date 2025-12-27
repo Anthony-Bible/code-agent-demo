@@ -158,17 +158,8 @@ func (fm *LocalFileManager) validatePathBounds(path string) error {
 	if filepath.IsAbs(cleaned) {
 		fullPath = cleaned
 	} else {
-		// For relative paths, resolve them against the current working directory
-		// then validate against baseDir
-		absPath, err := filepath.Abs(cleaned)
-		if err != nil {
-			return &PathValidationError{
-				Path:   path,
-				Reason: "failed to resolve absolute path",
-				Cause:  err,
-			}
-		}
-		fullPath = absPath
+		// For relative paths, resolve them against baseDir
+		fullPath = filepath.Join(fm.baseDir, cleaned)
 	}
 
 	// Now check if the full path is within the base directory

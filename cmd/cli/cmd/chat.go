@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -63,14 +65,23 @@ func runChat(cmd *cobra.Command, args []string) error {
 		if handler != nil {
 			firstPressCh = handler.FirstPress()
 		}
-		// Start async input reader in a goroutine
-		inputCh := make(chan inputResult, 1)
+		
+		// Use a single input goroutine to avoid terminal state conflicts
+		var result inputResult
+		done := make(chan struct{})
 		go func() {
+			defer close(done)
+			// Defer a panic recovery to prevent goroutine from hanging
+			defer func() {
+				if r := recover(); r != nil {
+					result = inputResult{"", false}
+				}
+			}()
 			text, ok := uiAdapter.GetUserInput(ctx)
-			inputCh <- inputResult{text, ok}
+			result = inputResult{text, ok}
 		}()
 
-		// Wait for input OR signals
+		// Wait for input OR signals with timeout
 	waitLoop:
 		for {
 			select {
@@ -85,34 +96,62 @@ func runChat(cmd *cobra.Command, args []string) error {
 				// Set to nil to avoid receiving again on this channel
 				firstPressCh = nil
 				continue
-			case result := <-inputCh:
-				if !result.ok {
-					// User closed input stream
-					fmt.Printf("\n%s\n", cfg.GoodbyeMessage)
-					return nil
-				}
-
-				// Check if user wants to exit
-				if result.text == "exit" || result.text == "quit" || result.text == ":q" {
-					fmt.Printf("%s\n", cfg.GoodbyeMessage)
-					return nil
-				}
-
-				// Send message and get response
-				_, err = chatService.SendMessage(ctx, sessionID, result.text)
-				if err != nil {
-					// Check for context cancellation specifically
-					if errors.Is(err, context.Canceled) {
-						fmt.Fprintf(cmd.ErrOrStderr(), "\nOperation cancelled. Type 'exit' to quit or continue.\n")
-					} else {
-						errMsg := fmt.Sprintf("Error processing message: %v", err)
-						_ = uiAdapter.DisplayError(fmt.Errorf("%s", errMsg))
-						fmt.Fprintf(cmd.ErrOrStderr(), "%s\n", errMsg)
-					}
-				}
-				// Break out of waitLoop to start next iteration of main loop
+			case <-done:
+				// Input goroutine finished
+				break waitLoop
+			case <-time.After(30 * time.Second):
+				// Timeout safety - prevent indefinite hanging
+				fmt.Println("\nInput timed out, continuing...")
 				break waitLoop
 			}
 		}
+		if !result.ok {
+			// User closed input stream
+			fmt.Printf("\n%s\n", cfg.GoodbyeMessage)
+			return nil
+		}
+
+		// Check if user wants to exit
+		if result.text == "exit" || result.text == "quit" || result.text == ":q" {
+			fmt.Printf("%s\n", cfg.GoodbyeMessage)
+			return nil
+		}
+
+		// Check for :mode command to toggle plan mode
+		if strings.HasPrefix(result.text, ":mode") {
+			parts := strings.Fields(result.text)
+			var mode string
+			if len(parts) > 1 {
+				mode = parts[1]
+			} else {
+				mode = "toggle"
+			}
+			if err := chatService.HandleModeCommand(ctx, sessionID, mode); err != nil {
+				_ = uiAdapter.DisplayError(err)
+			} else {
+				// Display current mode status
+				convSvc := container.ConversationService()
+				if isPlanMode, _ := convSvc.IsPlanMode(sessionID); isPlanMode {
+					_ = uiAdapter.DisplaySystemMessage("Plan mode enabled: Tools will write plans to files instead of executing.")
+				} else {
+					_ = uiAdapter.DisplaySystemMessage("Plan mode disabled: Tools will execute normally.")
+				}
+			}
+			// Continue to next iteration (don't send to AI)
+			continue
+		}
+
+		// Send message and get response
+		_, err = chatService.SendMessage(ctx, sessionID, result.text)
+		if err != nil {
+			// Check for context cancellation specifically
+			if errors.Is(err, context.Canceled) {
+				fmt.Fprintf(cmd.ErrOrStderr(), "\nOperation cancelled. Type 'exit' to quit or continue.\n")
+			} else {
+				errMsg := fmt.Sprintf("Error processing message: %v", err)
+				_ = uiAdapter.DisplayError(fmt.Errorf("%s", errMsg))
+				fmt.Fprintf(cmd.ErrOrStderr(), "%s\n", errMsg)
+			}
+		}
+		}
 	}
-}

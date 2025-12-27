@@ -3,6 +3,8 @@ package service
 import (
 	"code-editing-agent/internal/domain/entity"
 	"code-editing-agent/internal/domain/port"
+	"code-editing-agent/internal/infrastructure/adapter/file"
+	"code-editing-agent/internal/infrastructure/adapter/tool"
 	"context"
 	"errors"
 	"testing"
@@ -714,4 +716,327 @@ func (m *mockToolExecutor) GetTool(name string) (entity.Tool, bool) {
 
 func (m *mockToolExecutor) ValidateToolInput(name string, input interface{}) error {
 	return nil
+}
+
+// =============================================================================
+// Mode Toggle Feature Tests (RED PHASE - Intentionally Failing)
+// These tests define the expected behavior of the session mode toggle feature.
+// The implementation does not exist yet, so these tests should fail.
+// =============================================================================
+
+func TestConversationService_SetPlanMode(t *testing.T) {
+	t.Run("enables plan mode for a session", func(t *testing.T) {
+		// Use real ExecutorAdapter and real FileManager with temp directory
+		tempDir := t.TempDir()
+		fileManager := file.NewLocalFileManager(tempDir)
+		executorAdapter := tool.NewExecutorAdapter(fileManager)
+
+		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		// Set plan mode to true for the session
+		err = service.SetPlanMode(sessionID, true)
+		if err != nil {
+			t.Errorf("Expected SetPlanMode to succeed, got error: %v", err)
+		}
+
+		// Verify plan mode is enabled
+		isPlanMode, err := service.IsPlanMode(sessionID)
+		if err != nil {
+			t.Errorf("Expected IsPlanMode to succeed, got error: %v", err)
+		}
+		if !isPlanMode {
+			t.Errorf("Expected plan mode to be enabled for session %s", sessionID)
+		}
+	})
+
+	t.Run("disables plan mode for a session", func(t *testing.T) {
+		tempDir := t.TempDir()
+		fileManager := file.NewLocalFileManager(tempDir)
+		executorAdapter := tool.NewExecutorAdapter(fileManager)
+
+		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		// Enable plan mode first
+		_ = service.SetPlanMode(sessionID, true)
+
+		// Disable plan mode
+		err = service.SetPlanMode(sessionID, false)
+		if err != nil {
+			t.Errorf("Expected SetPlanMode to succeed, got error: %v", err)
+		}
+
+		// Verify plan mode is disabled
+		isPlanMode, err := service.IsPlanMode(sessionID)
+		if err != nil {
+			t.Errorf("Expected IsPlanMode to succeed, got error: %v", err)
+		}
+		if isPlanMode {
+			t.Errorf("Expected plan mode to be disabled for session %s", sessionID)
+		}
+	})
+
+	t.Run("returns error for non-existent session", func(t *testing.T) {
+		tempDir := t.TempDir()
+		fileManager := file.NewLocalFileManager(tempDir)
+		executorAdapter := tool.NewExecutorAdapter(fileManager)
+
+		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		// Try to set plan mode for a non-existent session
+		err = service.SetPlanMode("non-existent-session", true)
+		if err == nil {
+			t.Errorf("Expected error for non-existent session")
+		}
+		if !errors.Is(err, ErrConversationNotFound) {
+			t.Errorf("Expected ErrConversationNotFound, got: %v", err)
+		}
+	})
+
+	t.Run("initial mode is not plan mode by default", func(t *testing.T) {
+		tempDir := t.TempDir()
+		fileManager := file.NewLocalFileManager(tempDir)
+		executorAdapter := tool.NewExecutorAdapter(fileManager)
+
+		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		// Verify default mode is not plan mode
+		isPlanMode, err := service.IsPlanMode(sessionID)
+		if err != nil {
+			t.Errorf("Expected IsPlanMode to succeed, got error: %v", err)
+		}
+		if isPlanMode {
+			t.Errorf("Expected plan mode to be disabled by default for session %s", sessionID)
+		}
+	})
+}
+
+func TestConversationService_IsPlanMode(t *testing.T) {
+	t.Run("returns correct mode after SetPlanMode", func(t *testing.T) {
+		tempDir := t.TempDir()
+		fileManager := file.NewLocalFileManager(tempDir)
+		executorAdapter := tool.NewExecutorAdapter(fileManager)
+
+		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		// Initial state should be false
+		isPlanMode, err := service.IsPlanMode(sessionID)
+		if err != nil {
+			t.Errorf("Expected IsPlanMode to succeed, got error: %v", err)
+		}
+		if isPlanMode {
+			t.Errorf("Expected initial plan mode to be false")
+		}
+
+		// Set to true
+		_ = service.SetPlanMode(sessionID, true)
+		isPlanMode, _ = service.IsPlanMode(sessionID)
+		if !isPlanMode {
+			t.Errorf("Expected plan mode to be true after SetPlanMode(true)")
+		}
+
+		// Toggle back to false
+		_ = service.SetPlanMode(sessionID, false)
+		isPlanMode, _ = service.IsPlanMode(sessionID)
+		if isPlanMode {
+			t.Errorf("Expected plan mode to be false after SetPlanMode(false)")
+		}
+	})
+
+	t.Run("returns error for non-existent session", func(t *testing.T) {
+		tempDir := t.TempDir()
+		fileManager := file.NewLocalFileManager(tempDir)
+		executorAdapter := tool.NewExecutorAdapter(fileManager)
+
+		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		// Try to check plan mode for a non-existent session
+		_, err = service.IsPlanMode("non-existent-session")
+		if err == nil {
+			t.Errorf("Expected error for non-existent session")
+		}
+		if !errors.Is(err, ErrConversationNotFound) {
+			t.Errorf("Expected ErrConversationNotFound, got: %v", err)
+		}
+	})
+}
+
+func TestConversationService_ModeStateIsolation(t *testing.T) {
+	t.Run("sessions have independent mode states", func(t *testing.T) {
+		tempDir := t.TempDir()
+		fileManager := file.NewLocalFileManager(tempDir)
+		executorAdapter := tool.NewExecutorAdapter(fileManager)
+
+		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionA, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation A: %v", err)
+		}
+		sessionB, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation B: %v", err)
+		}
+
+		// Enable plan mode for session A only
+		_ = service.SetPlanMode(sessionA, true)
+
+		// Verify session A is in plan mode
+		isPlanModeA, _ := service.IsPlanMode(sessionA)
+		if !isPlanModeA {
+			t.Errorf("Expected session A to be in plan mode")
+		}
+
+		// Verify session B is NOT in plan mode
+		isPlanModeB, _ := service.IsPlanMode(sessionB)
+		if isPlanModeB {
+			t.Errorf("Expected session B to NOT be in plan mode")
+		}
+
+		// Enable plan mode for session B
+		_ = service.SetPlanMode(sessionB, true)
+
+		// Both should now be in plan mode
+		isPlanModeA, _ = service.IsPlanMode(sessionA)
+		isPlanModeB, _ = service.IsPlanMode(sessionB)
+		if !isPlanModeA || !isPlanModeB {
+			t.Errorf("Expected both sessions to be in plan mode")
+		}
+
+		// Disable plan mode for session A only
+		_ = service.SetPlanMode(sessionA, false)
+
+		// Verify session A is not in plan mode
+		isPlanModeA, _ = service.IsPlanMode(sessionA)
+		isPlanModeB, _ = service.IsPlanMode(sessionB)
+		if isPlanModeA {
+			t.Errorf("Expected session A to NOT be in plan mode")
+		}
+		if !isPlanModeB {
+			t.Errorf("Expected session B to still be in plan mode")
+		}
+	})
+}
+
+func TestConversationService_ModeStatePersistence(t *testing.T) {
+	t.Run("mode persists across multiple sessions", func(t *testing.T) {
+		tempDir := t.TempDir()
+		fileManager := file.NewLocalFileManager(tempDir)
+		executorAdapter := tool.NewExecutorAdapter(fileManager)
+
+		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		// Set plan mode
+		_ = service.SetPlanMode(sessionID, true)
+
+		// Add a user message
+		_, _ = service.AddUserMessage(ctx, sessionID, "Hello")
+
+		// Check mode still persists
+		isPlanMode, _ := service.IsPlanMode(sessionID)
+		if !isPlanMode {
+			t.Errorf("Expected plan mode to persist after adding message")
+		}
+
+		// Get conversation state
+		_, _ = service.GetConversation(sessionID)
+
+		// Check mode still persists after GetConversation
+		isPlanMode, _ = service.IsPlanMode(sessionID)
+		if !isPlanMode {
+			t.Errorf("Expected plan mode to persist after GetConversation")
+		}
+	})
+
+	t.Run("mode persists after processing state changes", func(t *testing.T) {
+		tempDir := t.TempDir()
+		fileManager := file.NewLocalFileManager(tempDir)
+		executorAdapter := tool.NewExecutorAdapter(fileManager)
+
+		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		// Set plan mode
+		_ = service.SetPlanMode(sessionID, true)
+
+		// Change processing state
+		_ = service.SetProcessingState(sessionID, true)
+
+		// Check plan mode still persists
+		isPlanMode, _ := service.IsPlanMode(sessionID)
+		if !isPlanMode {
+			t.Errorf("Expected plan mode to persist after processing state change")
+		}
+
+		// Change processing state again
+		_ = service.SetProcessingState(sessionID, false)
+
+		// Check plan mode still persists
+		isPlanMode, _ = service.IsPlanMode(sessionID)
+		if !isPlanMode {
+			t.Errorf("Expected plan mode to persist after second processing state change")
+		}
+	})
 }

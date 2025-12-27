@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -215,7 +216,13 @@ func (cs *ChatService) SendMessage(
 
 	// Display the assistant message if there is text content
 	if resp.AssistantMsg != nil && resp.AssistantMsg.Content != "" {
-		_ = cs.userInterface.DisplayMessage(resp.AssistantMsg.Content, entity.RoleAssistant)
+		displayContent := resp.AssistantMsg.Content
+		// Add [PLAN MODE] prefix if in plan mode
+		isPlanMode, _ := cs.conversationService.IsPlanMode(sessionID)
+		if isPlanMode {
+			displayContent = "[PLAN MODE] " + displayContent
+		}
+		_ = cs.userInterface.DisplayMessage(displayContent, entity.RoleAssistant)
 	}
 
 	// Handle tool requests if present
@@ -385,7 +392,13 @@ func (cs *ChatService) continueAfterToolExecution(
 
 	// Display the assistant message if there is text content
 	if contResp.AssistantMsg != nil && contResp.AssistantMsg.Content != "" {
-		_ = cs.userInterface.DisplayMessage(contResp.AssistantMsg.Content, entity.RoleAssistant)
+		displayContent := contResp.AssistantMsg.Content
+		// Add [PLAN MODE] prefix if in plan mode
+		isPlanMode, _ := cs.conversationService.IsPlanMode(sessionID)
+		if isPlanMode {
+			displayContent = "[PLAN MODE] " + displayContent
+		}
+		_ = cs.userInterface.DisplayMessage(displayContent, entity.RoleAssistant)
 	}
 
 	return &dto.SendMessageResponse{
@@ -526,6 +539,63 @@ func (cs *ChatService) GetAIModel() string {
 //   - error: An error if model setting fails
 func (cs *ChatService) SetAIModel(model string) error {
 	return cs.aiProvider.SetModel(model)
+}
+
+// HandleModeCommand handles the :mode command for toggling plan mode.
+//
+// Parameters:
+//   - ctx: Context for the operation
+//   - sessionID: The session ID
+//   - mode: The mode to set ("plan", "normal", or "toggle")
+//
+// Returns:
+//   - error: An error if the command is invalid
+func (cs *ChatService) HandleModeCommand(ctx context.Context, sessionID string, mode string) error {
+	// Validate session exists first
+	_, err := cs.messageProcessUseCase.GetConversationState(sessionID)
+	if err != nil {
+		return errors.New("session not found")
+	}
+
+	// Normalize mode to lowercase
+	modeLower := strings.ToLower(mode)
+
+	switch modeLower {
+	case "plan":
+		// Set plan mode on both conversation service and tool executor
+		if err := cs.conversationService.SetPlanMode(sessionID, true); err != nil {
+			return err
+		}
+		// Also set plan mode on the tool executor if it supports it
+		if planner, ok := cs.toolExecutor.(interface{ SetPlanMode(string, bool) }); ok {
+			planner.SetPlanMode(sessionID, true)
+		}
+		return nil
+	case "normal":
+		// Set normal mode on both conversation service and tool executor
+		if err := cs.conversationService.SetPlanMode(sessionID, false); err != nil {
+			return err
+		}
+		// Also set plan mode on the tool executor if it supports it
+		if planner, ok := cs.toolExecutor.(interface{ SetPlanMode(string, bool) }); ok {
+			planner.SetPlanMode(sessionID, false)
+		}
+		return nil
+	case "toggle":
+		currentMode, _ := cs.conversationService.IsPlanMode(sessionID)
+		newMode := !currentMode
+		// Set plan mode on both conversation service and tool executor
+		if err := cs.conversationService.SetPlanMode(sessionID, newMode); err != nil {
+			return err
+		}
+		// Also set plan mode on the tool executor if it supports it
+		if planner, ok := cs.toolExecutor.(interface{ SetPlanMode(string, bool) }); ok {
+			planner.SetPlanMode(sessionID, newMode)
+		}
+		return nil
+	default:
+		return errors.New("invalid mode: must be 'plan', 'normal', or 'toggle'")
+	}
 }
 
 // GetPorts returns references to the internal ports for advanced use cases.
