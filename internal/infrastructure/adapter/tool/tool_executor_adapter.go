@@ -705,8 +705,11 @@ func (a *ExecutorAdapter) executeFetch(ctx context.Context, input json.RawMessag
 	// Set user agent
 	req.Header.Set("User-Agent", "code-editing-agent/1.0")
 
-	// Make HTTP request
-	resp, err := http.DefaultClient.Do(req)
+	// Make HTTP request using a dedicated client with timeout
+	client := &http.Client{
+		Timeout: defaultFetchTimeout,
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("HTTP request failed: %w", err)
 	}
