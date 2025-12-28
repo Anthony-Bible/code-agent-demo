@@ -40,7 +40,9 @@ Skills are modular capabilities that extend the AI agent's functionality. Each s
 
 ## Specification
 
-See [agentskills.io/specification](https://agentskills.io/specification) for complete details on the skill format, validation rules, and best practices.
+This implementation follows the [agentskills.io](https://agentskills.io) specification. For complete details on the skill format, validation rules, and best practices, see the specification documentation at [https://agentskills.io/specification](https://agentskills.io/specification).
+
+Note: The agentskills.io specification defines a standard format for AI agent skills that enables portability and interoperability between different agent implementations.
 
 ## Security Considerations
 
