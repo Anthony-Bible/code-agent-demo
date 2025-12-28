@@ -118,7 +118,7 @@ func (p *PlanningExecutorAdapter) ExecuteTool(ctx context.Context, name string, 
 	}
 
 	// Get session ID from context (if available)
-	sessionID := getSessionIDFromContext(ctx)
+	sessionID, _ := port.SessionIDFromContext(ctx)
 
 	// Check if we're in plan mode for this session
 	if sessionID != "" && p.IsPlanMode(sessionID) && !isReadOnlyTool(name) {
@@ -159,7 +159,7 @@ func (p *PlanningExecutorAdapter) handleEnterPlanMode(ctx context.Context, input
 	}
 
 	// Get session ID and enable plan mode
-	sessionID := getSessionIDFromContext(ctx)
+	sessionID, _ := port.SessionIDFromContext(ctx)
 	if sessionID != "" {
 		p.SetPlanMode(sessionID, true)
 	}
@@ -202,22 +202,4 @@ func (p *PlanningExecutorAdapter) writePlanEntry(sessionID, toolName string, inp
 	}
 
 	return fmt.Sprintf("[PLAN MODE] Tool execution '%s' written to plan file: %s", toolName, planPath), nil
-}
-
-// Context key for session ID.
-type contextKey string
-
-const sessionIDKey contextKey = "session_id"
-
-// WithSessionID adds a session ID to the context.
-func WithSessionID(ctx context.Context, sessionID string) context.Context {
-	return context.WithValue(ctx, sessionIDKey, sessionID)
-}
-
-// getSessionIDFromContext retrieves the session ID from context.
-func getSessionIDFromContext(ctx context.Context) string {
-	if sessionID, ok := ctx.Value(sessionIDKey).(string); ok {
-		return sessionID
-	}
-	return ""
 }
