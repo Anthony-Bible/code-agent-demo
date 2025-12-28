@@ -20,8 +20,9 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/net/html"
 	fileadapter "code-editing-agent/internal/infrastructure/adapter/file"
+
+	"golang.org/x/net/html"
 )
 
 // DangerousCommandCallback is called when a dangerous command is detected.
@@ -36,6 +37,7 @@ type CommandConfirmationCallback func(command string, isDangerous bool, reason s
 // ExecutorAdapter implements the ToolExecutor port using the FileManager for file operations.
 type ExecutorAdapter struct {
 	fileManager                 port.FileManager
+	skillManager                port.SkillManager
 	tools                       map[string]entity.Tool
 	mu                          sync.RWMutex
 	dangerousCommandCallback    DangerousCommandCallback
@@ -85,17 +87,25 @@ func wrapFileOperationError(operation string, err error) error {
 }
 
 // NewExecutorAdapter creates a new ExecutorAdapter with the provided FileManager.
-// It also registers the default tools (read_file, list_files, edit_file).
+// SkillManager can be provided via SetSkillManager for skill-related functionality.
+// It also registers the default tools (read_file, list_files, edit_file, bash, fetch, activate_skill).
 func NewExecutorAdapter(fileManager port.FileManager) *ExecutorAdapter {
 	adapter := &ExecutorAdapter{
-		fileManager: fileManager,
-		tools:       make(map[string]entity.Tool),
+		fileManager:  fileManager,
+		skillManager: nil,
+		tools:        make(map[string]entity.Tool),
 	}
 
 	// Register default tools
 	adapter.registerDefaultTools()
 
 	return adapter
+}
+
+// SetSkillManager sets the skill manager for skill-related functionality.
+// This should be called after creation to enable skill activation features.
+func (a *ExecutorAdapter) SetSkillManager(sm port.SkillManager) {
+	a.skillManager = sm
 }
 
 // SetDangerousCommandCallback sets the callback for dangerous command confirmation.
@@ -322,6 +332,25 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 		RequiredFields: []string{"url"},
 	}
 	a.tools[fetchTool.Name] = fetchTool
+
+	// Register activate_skill tool
+	activateSkillTool := entity.Tool{
+		ID:          "activate_skill",
+		Name:        "activate_skill",
+		Description: "Activates a skill by name and returns its full content. Use this to load detailed instructions for specific capabilities like code review, testing, migrations, etc.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"skill_name": map[string]interface{}{
+					"type":        "string",
+					"description": "The name of the skill to activate (e.g., code-review, test-skill)",
+				},
+			},
+			"required": []string{"skill_name"},
+		},
+		RequiredFields: []string{"skill_name"},
+	}
+	a.tools[activateSkillTool.Name] = activateSkillTool
 }
 
 // executeByName executes the appropriate tool function based on the tool name.
@@ -337,6 +366,8 @@ func (a *ExecutorAdapter) executeByName(ctx context.Context, name string, input 
 		return a.executeBash(ctx, input)
 	case "fetch":
 		return a.executeFetch(ctx, input)
+	case "activate_skill":
+		return a.executeActivateSkill(ctx, input)
 	default:
 		return "", fmt.Errorf("no implementation available for tool: %s", name)
 	}
@@ -536,6 +567,11 @@ type fetchInput struct {
 	IncludeMarkup bool   `json:"includeMarkup,omitempty"`
 }
 
+// activateSkillInput represents the input for the activate_skill tool.
+type activateSkillInput struct {
+	SkillName string `json:"skill_name"`
+}
+
 // bashOutput represents the output from the bash tool.
 type bashOutput struct {
 	Stdout   string `json:"stdout"`
@@ -678,7 +714,7 @@ const defaultFetchTimeout = 30 * time.Second
 // memory.
 const maxResponseSize = 10 << 20
 
-// isPrivateIP checks if an IP address is in a private/internal range
+// isPrivateIP checks if an IP address is in a private/internal range.
 func isPrivateIP(ip net.IP) bool {
 	if ip.IsLoopback() {
 		return true
@@ -695,7 +731,7 @@ func isPrivateIP(ip net.IP) bool {
 			{network: mustParseCIDR("192.168.0.0/16")}, // Private Class C
 			{network: mustParseCIDR("169.254.0.0/16")}, // Link-local
 			{network: mustParseCIDR("224.0.0.0/4")},    // Multicast
-			{network: mustParseCIDR("0.0.0.0/8")},       // This network
+			{network: mustParseCIDR("0.0.0.0/8")},      // This network
 		}
 
 		for _, r := range privateIPv4Ranges {
@@ -708,12 +744,12 @@ func isPrivateIP(ip net.IP) bool {
 		privateIPv6Ranges := []struct {
 			network *net.IPNet
 		}{
-			{network: mustParseCIDR("::1/128")},           // Loopback
-			{network: mustParseCIDR("fc00::/7")},           // Unique local
-			{network: mustParseCIDR("fe80::/10")},         // Link-local
-			{network: mustParseCIDR("ff00::/8")},           // Multicast
-			{network: mustParseCIDR("2000::/3")},           // Reserved for documentation
-			{network: mustParseCIDR("2001:db8::/32")},     // NET-TEST example
+			{network: mustParseCIDR("::1/128")},       // Loopback
+			{network: mustParseCIDR("fc00::/7")},      // Unique local
+			{network: mustParseCIDR("fe80::/10")},     // Link-local
+			{network: mustParseCIDR("ff00::/8")},      // Multicast
+			{network: mustParseCIDR("2000::/3")},      // Reserved for documentation
+			{network: mustParseCIDR("2001:db8::/32")}, // NET-TEST example
 		}
 
 		for _, r := range privateIPv6Ranges {
@@ -726,7 +762,7 @@ func isPrivateIP(ip net.IP) bool {
 	return false
 }
 
-// mustParseCIDR parses a CIDR string and panics on error
+// mustParseCIDR parses a CIDR string and panics on error.
 func mustParseCIDR(cidr string) *net.IPNet {
 	_, network, err := net.ParseCIDR(cidr)
 	if err != nil {
@@ -749,18 +785,18 @@ func validateURL(rawURL string) error {
 
 	// Ensure URL has a host
 	if parsedURL.Host == "" {
-		return fmt.Errorf("URL must have a host")
+		return errors.New("URL must have a host")
 	}
 
 	// Block credentials in URLs to prevent information disclosure
 	if parsedURL.User != nil {
-		return fmt.Errorf("URL contains credentials which are not allowed for security")
+		return errors.New("URL contains credentials which are not allowed for security")
 	}
 
 	// Resolve hostname to IP addresses to check for private ranges
 	host := parsedURL.Hostname()
 	if host == "" {
-		return fmt.Errorf("invalid hostname in URL")
+		return errors.New("invalid hostname in URL")
 	}
 
 	// Check if host is an IP address
@@ -768,7 +804,10 @@ func validateURL(rawURL string) error {
 	if hostIP != nil {
 		// Direct IP address - check if it's private
 		if isPrivateIP(hostIP) {
-			return fmt.Errorf("direct IP address %s is in a private/internal range and is blocked for security", hostIP.String())
+			return fmt.Errorf(
+				"direct IP address %s is in a private/internal range and is blocked for security",
+				hostIP.String(),
+			)
 		}
 	} else {
 		// Hostname - resolve to IPs and check each one
@@ -872,7 +911,7 @@ func (a *ExecutorAdapter) executeFetch(ctx context.Context, input json.RawMessag
 	}
 
 	// Create HTTP request with context
-	req, err := http.NewRequestWithContext(ctx, "GET", in.URL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, in.URL, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create HTTP request: %w", err)
 	}
@@ -887,14 +926,14 @@ func (a *ExecutorAdapter) executeFetch(ctx context.Context, input json.RawMessag
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			// Limit to maximum 3 redirects to prevent excessive request chains
 			if len(via) >= 3 {
-				return fmt.Errorf("stopped after 3 redirects")
+				return errors.New("stopped after 3 redirects")
 			}
-			
+
 			// Validate redirect URL to prevent SSRF attacks
 			if err := validateURL(req.URL.String()); err != nil {
 				return fmt.Errorf("redirect blocked due to security policy: %w", err)
 			}
-			
+
 			return nil
 		},
 	}
@@ -907,7 +946,7 @@ func (a *ExecutorAdapter) executeFetch(ctx context.Context, input json.RawMessag
 	// Check response status
 	if resp.StatusCode >= 400 {
 		respText := resp.Status
-		if resp.StatusCode == 403 {
+		if resp.StatusCode == http.StatusForbidden {
 			respText = "authorization required"
 		}
 		return "", fmt.Errorf("HTTP %d (%s)", resp.StatusCode, respText)
@@ -921,37 +960,37 @@ func (a *ExecutorAdapter) executeFetch(ctx context.Context, input json.RawMessag
 	// Read response body with size tracking
 	var bodyBuffer bytes.Buffer
 	const maxChunkSize = 4096 // 4KB chunks for efficient memory usage
-	
+
 	// Track total bytes read to enforce size limit
 	totalBytesRead := int64(0)
 	chunk := make([]byte, maxChunkSize)
-	
+
 	for {
 		// Calculate remaining bytes we can read
 		remainingBytes := maxResponseSize - totalBytesRead
 		if remainingBytes <= 0 {
 			break // Stop reading if we've hit the limit
 		}
-		
+
 		// Read next chunk, but limit it to remaining bytes
 		chunkSize := uint64(maxChunkSize)
 		if uint64(remainingBytes) < chunkSize {
 			chunkSize = uint64(remainingBytes)
 		}
-		
+
 		n, err := resp.Body.Read(chunk[:chunkSize])
 		if n > 0 {
 			bodyBuffer.Write(chunk[:n])
 			totalBytesRead += int64(n)
 		}
-		
+
 		if err != nil {
 			if err == io.EOF {
 				break
 			}
 			return "", fmt.Errorf("failed to read response body: %w", err)
 		}
-		
+
 		// If Content-Length was available and we've read all expected bytes, stop
 		if resp.ContentLength >= 0 && totalBytesRead >= resp.ContentLength {
 			break
@@ -960,7 +999,11 @@ func (a *ExecutorAdapter) executeFetch(ctx context.Context, input json.RawMessag
 
 	// Check if we hit the overall size limit while reading
 	if totalBytesRead >= maxResponseSize {
-		return "", fmt.Errorf("response truncated due to size limit (max: %d bytes, read: %d bytes)", maxResponseSize, totalBytesRead)
+		return "", fmt.Errorf(
+			"response truncated due to size limit (max: %d bytes, read: %d bytes)",
+			maxResponseSize,
+			totalBytesRead,
+		)
 	}
 
 	bodyBytes := bodyBuffer.Bytes()
@@ -977,4 +1020,67 @@ func (a *ExecutorAdapter) executeFetch(ctx context.Context, input json.RawMessag
 	}
 
 	return content, nil
+}
+
+// executeActivateSkill activates a skill by name and returns its full content.
+// This allows the AI to load detailed instructions for specific capabilities.
+// If no skill manager is set, returns an error.
+func (a *ExecutorAdapter) executeActivateSkill(ctx context.Context, input json.RawMessage) (string, error) {
+	// Check if skill manager is available
+	if a.skillManager == nil {
+		return "", errors.New("skill manager not available")
+	}
+
+	var in activateSkillInput
+	if err := json.Unmarshal(input, &in); err != nil {
+		return "", fmt.Errorf("failed to unmarshal activate_skill input: %w", err)
+	}
+
+	if in.SkillName == "" {
+		return "", errors.New("skill_name parameter is required but was empty")
+	}
+
+	// Try to load the skill metadata first (avoids redundant filesystem scans).
+	// If the skill is not found, refresh the discovered skills once and retry.
+	skill, err := a.skillManager.LoadSkillMetadata(ctx, in.SkillName)
+	if err != nil {
+		// Attempt to refresh the skills list once
+		if _, discoverErr := a.skillManager.DiscoverSkills(ctx); discoverErr != nil {
+			return "", fmt.Errorf("failed to discover skills: %w", discoverErr)
+		}
+
+		// Retry loading the skill metadata after refreshing
+		skill, err = a.skillManager.LoadSkillMetadata(ctx, in.SkillName)
+		if err != nil {
+			return "", fmt.Errorf("failed to load skill '%s': %w", in.SkillName, err)
+		}
+	}
+
+	// Verify we have the full content (safety check for progressive disclosure)
+	if skill.RawContent == "" {
+		return "", fmt.Errorf("skill '%s' content not loaded", in.SkillName)
+	}
+
+	// Build result with frontmatter and content
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("---\nname: %s\ndescription: %s", skill.Name, skill.Description))
+	if skill.License != "" {
+		result.WriteString(fmt.Sprintf("\nlicense: %s", skill.License))
+	}
+	if skill.Compatibility != "" {
+		result.WriteString(fmt.Sprintf("\ncompatibility: %s", skill.Compatibility))
+	}
+	if len(skill.AllowedTools) > 0 {
+		result.WriteString(fmt.Sprintf("\nallowed-tools: %s", strings.Join(skill.AllowedTools, " ")))
+	}
+	if len(skill.Metadata) > 0 {
+		result.WriteString("\nmetadata:")
+		for key, value := range skill.Metadata {
+			result.WriteString(fmt.Sprintf("\n  %s: %s", key, value))
+		}
+	}
+	result.WriteString("\n---\n")
+	result.WriteString(skill.RawContent)
+
+	return result.String(), nil
 }

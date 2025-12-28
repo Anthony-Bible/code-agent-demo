@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -45,8 +46,11 @@ var (
 // The struct maintains an internal Anthropic client and model configuration,
 // allowing for consistent model usage across all requests.
 type AnthropicAdapter struct {
-	client anthropic.Client
-	model  string
+	client             anthropic.Client
+	model              string
+	skillManager       port.SkillManager
+	cachedSystemPrompt string // Cached system prompt to avoid repeated skill discovery
+	skillsDiscovered   bool   // Whether skills have been discovered at least once
 }
 
 // NewAnthropicAdapter creates a new AnthropicAdapter with the specified model.
@@ -54,13 +58,15 @@ type AnthropicAdapter struct {
 //
 // Parameters:
 //   - model: The AI model to use (e.g., "hf:zai-org/GLM-4.6", "claude-3-5-sonnet-20241022")
+//   - skillManager: Optional skill manager for providing skill metadata to the system prompt
 //
 // Returns:
 //   - port.AIProvider: An implementation of the AIProvider interface
-func NewAnthropicAdapter(model string) port.AIProvider {
+func NewAnthropicAdapter(model string, skillManager port.SkillManager) port.AIProvider {
 	return &AnthropicAdapter{
-		client: anthropic.NewClient(),
-		model:  model,
+		client:       anthropic.NewClient(),
+		model:        model,
+		skillManager: skillManager,
 	}
 }
 
@@ -98,7 +104,10 @@ func (a *AnthropicAdapter) SendMessage(
 
 	// Convert port tools to Anthropic SDK tools
 	anthropicTools := a.convertTools(tools)
-	systemPrompt := "You are an AI assistant that helps users with code editing and explanations. Use the available tools when necessary to provide accurate and helpful responses."
+
+	// Build system prompt with skill metadata
+	systemPrompt := a.buildSystemPrompt()
+
 	// Call Anthropic API
 	response, err := a.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.Model(a.model),
@@ -114,6 +123,60 @@ func (a *AnthropicAdapter) SendMessage(
 
 	// Convert response to domain Message and extract tool info
 	return a.convertResponse(response)
+}
+
+// buildSystemPrompt constructs the system prompt with optional skill metadata.
+// If a skill manager is available, it includes available skills in the prompt
+// following the agentskills.io specification format.
+// The system prompt is cached after first discovery to avoid repeated filesystem scans.
+func (a *AnthropicAdapter) buildSystemPrompt() string {
+	basePrompt := "You are an AI assistant that helps users with code editing and explanations. Use the available tools when necessary to provide accurate and helpful responses."
+
+	// If no skill manager, return base prompt
+	if a.skillManager == nil {
+		return basePrompt
+	}
+
+	// Return cached prompt if skills have already been discovered
+	if a.skillsDiscovered && a.cachedSystemPrompt != "" {
+		return a.cachedSystemPrompt
+	}
+
+	// Try to discover skills (only done once per adapter instance)
+	skills, err := a.skillManager.DiscoverSkills(context.Background())
+	a.skillsDiscovered = true // Mark as discovered even on error to avoid retries
+
+	if err != nil || len(skills.Skills) == 0 {
+		a.cachedSystemPrompt = basePrompt
+		return basePrompt
+	}
+
+	// Build skills section following agentskills.io XML specification
+	var sb strings.Builder
+	sb.WriteString(basePrompt)
+	sb.WriteString("\n\n<available_skills>\n")
+
+	for _, skill := range skills.Skills {
+		sb.WriteString("  <skill>\n")
+		sb.WriteString(fmt.Sprintf("    <name>%s</name>\n", skill.Name))
+		sb.WriteString(fmt.Sprintf("    <description>%s</description>\n", skill.Description))
+		if skill.DirectoryPath != "" {
+			location := skill.DirectoryPath
+			if absDir, err := filepath.Abs(skill.DirectoryPath); err == nil {
+				location = absDir
+			}
+			sb.WriteString(fmt.Sprintf("    <location>%s</location>\n", filepath.Join(location, "SKILL.md")))
+		}
+		sb.WriteString("  </skill>\n")
+	}
+
+	sb.WriteString("</available_skills>\n\n")
+	sb.WriteString(
+		"Use the `activate_skill` tool to load the full content of a skill when its capabilities are needed for the task at hand.",
+	)
+
+	a.cachedSystemPrompt = sb.String()
+	return a.cachedSystemPrompt
 }
 
 // GenerateToolSchema returns an empty tool input schema.

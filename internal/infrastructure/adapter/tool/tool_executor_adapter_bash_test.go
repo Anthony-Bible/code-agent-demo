@@ -748,7 +748,7 @@ func TestFetchTool_ContextCancel(t *testing.T) {
 	if !strings.Contains(err.Error(), "context") && !strings.Contains(err.Error(), "deadline") {
 		t.Errorf("Expected error to contain context/deadline, got: %v", err)
 	}
-	
+
 	// Ensure it's not being blocked by SSRF protection
 	if strings.Contains(err.Error(), "private") || strings.Contains(err.Error(), "blocked") {
 		t.Errorf("Request should not be blocked by SSRF protection, got: %v", err)
@@ -831,7 +831,7 @@ func TestFetchTool_RedirectToPrivateIPBlocked(t *testing.T) {
 	// We'll use a test that simulates a redirect to a private IP
 	// Since we can't easily set up a server that redirects to private IPs,
 	// we'll test the validation logic indirectly
-	
+
 	// Test that the redirect URL validation works by checking a private IP URL directly
 	privateURL := "http://127.0.0.1:8080"
 	input := fmt.Sprintf(`{"url": "%s"}`, privateURL)
@@ -866,7 +866,7 @@ func TestFetchTool_ContentLengthHandling(t *testing.T) {
 	t.Run("Content-Length header present", func(t *testing.T) {
 		// Use a public test server that returns a reasonable sized response
 		serverURL := "https://httpbin.org/robots.txt"
-		
+
 		input := fmt.Sprintf(`{"url": "%s"}`, serverURL)
 		result, err := adapter.ExecuteTool(context.Background(), "fetch", input)
 		if err != nil {
@@ -877,7 +877,7 @@ func TestFetchTool_ContentLengthHandling(t *testing.T) {
 		if len(result) == 0 {
 			t.Error("Expected non-empty response")
 		}
-		
+
 		t.Logf("Successfully fetched %d bytes", len(result))
 	})
 
@@ -887,7 +887,7 @@ func TestFetchTool_ContentLengthHandling(t *testing.T) {
 		// Since we can't easily create a huge response with public servers,
 		// we'll test that the fetch tool at least handles responses normally
 		serverURL := "https://httpbin.org/bytes/1024" // 1KB response
-		
+
 		input := fmt.Sprintf(`{"url": "%s"}`, serverURL)
 		result, err := adapter.ExecuteTool(context.Background(), "fetch", input)
 		if err != nil {
@@ -898,7 +898,7 @@ func TestFetchTool_ContentLengthHandling(t *testing.T) {
 			t.Logf("Network error (acceptable): %v", err)
 			return
 		}
-		
+
 		// Should get exactly 1024 bytes
 		if len(result) != 1024 {
 			t.Errorf("Expected 1024 bytes, got %d", len(result))
@@ -1000,10 +1000,9 @@ func TestFetchTool_SSFRProtection_AllowPublicIPs(t *testing.T) {
 	// Test with a real public URL (httpbin.org for testing)
 	// This tests that public IPs/domains work correctly
 	testURL := "https://httpbin.org/user-agent"
-	
+
 	input := fmt.Sprintf(`{"url": "%s"}`, testURL)
 	_, err := adapter.ExecuteTool(context.Background(), "fetch", input)
-	
 	// This should not fail due to SSRF protection
 	// It might fail due to network issues, but should not be blocked for security
 	if err != nil {
@@ -1014,6 +1013,6 @@ func TestFetchTool_SSFRProtection_AllowPublicIPs(t *testing.T) {
 		t.Logf("Network error (acceptable): %v", err)
 		return
 	}
-	
+
 	t.Log("Successfully fetched from public URL without SSRF blocking")
 }
