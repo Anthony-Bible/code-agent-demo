@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -149,7 +150,11 @@ func (a *AnthropicAdapter) buildSystemPrompt() string {
 		sb.WriteString(fmt.Sprintf("    <name>%s</name>\n", skill.Name))
 		sb.WriteString(fmt.Sprintf("    <description>%s</description>\n", skill.Description))
 		if skill.DirectoryPath != "" {
-			sb.WriteString(fmt.Sprintf("    <location>%s</location>\n", skill.DirectoryPath))
+			location := skill.DirectoryPath
+			if absDir, err := filepath.Abs(skill.DirectoryPath); err == nil {
+				location = absDir
+			}
+			sb.WriteString(fmt.Sprintf("    <location>%s</location>\n", filepath.Join(location, "SKILL.md")))
 		}
 		sb.WriteString("  </skill>\n")
 	}
