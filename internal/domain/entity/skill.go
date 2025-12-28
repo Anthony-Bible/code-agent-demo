@@ -38,7 +38,14 @@ func (s *Skill) UnmarshalYAML(value *yaml.Node) error {
 		return err
 	}
 
-	// Handle basic string fields
+	s.parseStringFields(raw)
+	s.parseMetadata(raw)
+	s.parseAllowedTools(raw)
+
+	return nil
+}
+
+func (s *Skill) parseStringFields(raw map[string]interface{}) {
 	if v, ok := raw["name"].(string); ok {
 		s.Name = v
 	}
@@ -51,8 +58,9 @@ func (s *Skill) UnmarshalYAML(value *yaml.Node) error {
 	if v, ok := raw["compatibility"].(string); ok {
 		s.Compatibility = v
 	}
+}
 
-	// Handle metadata map
+func (s *Skill) parseMetadata(raw map[string]interface{}) {
 	if v, ok := raw["metadata"].(map[string]interface{}); ok {
 		s.Metadata = make(map[string]string)
 		for key, val := range v {
@@ -61,27 +69,29 @@ func (s *Skill) UnmarshalYAML(value *yaml.Node) error {
 			}
 		}
 	}
+}
 
-	// Handle allowed-tools - can be string or slice
-	if v, ok := raw["allowed-tools"]; ok {
-		switch tools := v.(type) {
-		case string:
-			if tools != "" {
-				s.AllowedTools = strings.Fields(tools)
-			}
-		case []interface{}:
-			s.AllowedTools = make([]string, 0, len(tools))
-			for _, tool := range tools {
-				if str, ok := tool.(string); ok {
-					s.AllowedTools = append(s.AllowedTools, str)
-				}
-			}
-		case []string:
-			s.AllowedTools = tools
-		}
+func (s *Skill) parseAllowedTools(raw map[string]interface{}) {
+	v, ok := raw["allowed-tools"]
+	if !ok {
+		return
 	}
 
-	return nil
+	switch tools := v.(type) {
+	case string:
+		if tools != "" {
+			s.AllowedTools = strings.Fields(tools)
+		}
+	case []interface{}:
+		s.AllowedTools = make([]string, 0, len(tools))
+		for _, tool := range tools {
+			if str, ok := tool.(string); ok {
+				s.AllowedTools = append(s.AllowedTools, str)
+			}
+		}
+	case []string:
+		s.AllowedTools = tools
+	}
 }
 
 // SkillMetadataEntity represents the complete metadata for a skill.
@@ -95,13 +105,53 @@ type SkillMetadataEntity struct {
 }
 
 // Validate checks if the skill has valid required fields.
-// Returns error if name or description is empty.
+// Returns error if name or description is empty or if name doesn't match the spec.
+// Per agentskills.io spec: name must be 1-64 lowercase alphanumeric characters
+// and hyphens, cannot start/end with hyphen or contain consecutive hyphens.
 func (s *Skill) Validate() error {
 	if s.Name == "" {
 		return errors.New("skill name cannot be empty")
 	}
+	if len(s.Name) > 64 {
+		return errors.New("skill name must be 64 characters or less")
+	}
+
+	// Validate name format: lowercase alphanumeric and hyphens only
+	// Cannot start/end with hyphen, cannot have consecutive hyphens
+	if s.Name[0] == '-' || s.Name[len(s.Name)-1] == '-' {
+		return errors.New("skill name cannot start or end with a hyphen")
+	}
+
+	prevChar := byte(0)
+	for i := range len(s.Name) {
+		c := s.Name[i]
+		// Check for consecutive hyphens
+		if c == '-' && prevChar == '-' {
+			return errors.New("skill name cannot contain consecutive hyphens")
+		}
+		// Check character is lowercase letter, digit, or hyphen
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+			return errors.New("skill name must contain only lowercase letters, numbers, and hyphens")
+		}
+		prevChar = c
+	}
+
 	if s.Description == "" {
 		return errors.New("skill description cannot be empty")
+	}
+	if len(s.Description) > 1024 {
+		return errors.New("skill description must be 1024 characters or less")
+	}
+
+	return nil
+}
+
+// ValidateDirectoryName checks if the skill name matches the directory name.
+// Per agentskills.io spec, the skill name must match the parent directory name.
+// This is called during skill discovery to ensure spec compliance.
+func (s *Skill) ValidateDirectoryName(dirName string) error {
+	if s.Name != dirName {
+		return fmt.Errorf("skill name '%s' must match directory name '%s'", s.Name, dirName)
 	}
 	return nil
 }
@@ -152,6 +202,63 @@ func ParseSkillFromYAML(content string) (*Skill, error) {
 	// Store raw values
 	skill.RawFrontmatter = frontmatter
 	skill.RawContent = rawContent
+
+	// Validate required fields
+	if skill.Name == "" {
+		return nil, errors.New("skill name is required")
+	}
+	if skill.Description == "" {
+		return nil, errors.New("skill description is required")
+	}
+
+	return &skill, nil
+}
+
+// ParseSkillMetadataFromYAML parses only the metadata from YAML frontmatter format.
+// This is used during skill discovery to efficiently load only metadata without the full content.
+// The input should be a string with YAML frontmatter between --- markers.
+// Unlike ParseSkillFromYAML, this function does NOT extract or store RawContent.
+// Example:
+// ---
+// name: skill-name
+// description: A description
+// ---
+// Content here (ignored).
+func ParseSkillMetadataFromYAML(content string) (*Skill, error) {
+	// Find the frontmatter boundaries (same logic as ParseSkillFromYAML)
+	content = strings.TrimSpace(content)
+	if !strings.HasPrefix(content, "---") {
+		return nil, errors.New("invalid YAML frontmatter: missing opening ---")
+	}
+
+	// Find the closing ---
+	firstLineEnd := strings.Index(content[3:], "\n---")
+	if firstLineEnd == -1 {
+		// Try to find it at the start of a line without the preceding newline
+		firstLineEnd = strings.Index(content, "\n---")
+		if firstLineEnd == -1 {
+			return nil, errors.New("invalid YAML frontmatter: missing closing ---")
+		}
+	}
+
+	// Get the frontmatter part
+	frontmatterEnd := firstLineEnd + 4
+	frontmatter := content[:frontmatterEnd]
+
+	// Remove the opening and closing --- from frontmatter
+	frontmatter = strings.TrimPrefix(frontmatter, "---")
+	frontmatter = strings.TrimSuffix(frontmatter, "\n---")
+	frontmatter = strings.TrimSpace(frontmatter)
+
+	// Parse YAML
+	var skill Skill
+	if err := yaml.Unmarshal([]byte(frontmatter), &skill); err != nil {
+		return nil, fmt.Errorf("failed to parse YAML frontmatter: %w", err)
+	}
+
+	// Store raw frontmatter but NOT raw content (progressive disclosure)
+	skill.RawFrontmatter = frontmatter
+	// RawContent is intentionally left empty
 
 	// Validate required fields
 	if skill.Name == "" {

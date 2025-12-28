@@ -271,3 +271,122 @@ func TestSkillMetadata_OptionalFields_Empty(t *testing.T) {
 		t.Errorf("SkillMetadata.Metadata = %v, want nil", metadata.Metadata)
 	}
 }
+
+func TestParseSkillMetadataFromYAML_OnlyMetadata(t *testing.T) {
+	yamlContent := `---
+name: test-skill
+description: A test skill
+license: MIT
+category: testing
+metadata:
+  author: Test Author
+  version: "1.0.0"
+---
+This content should be ignored and not stored in RawContent.
+More content here.
+`
+
+	skill, err := ParseSkillMetadataFromYAML(yamlContent)
+	if err != nil {
+		t.Fatalf("ParseSkillMetadataFromYAML() returned unexpected error: %v", err)
+	}
+
+	if skill == nil {
+		t.Fatal("ParseSkillMetadataFromYAML() returned nil skill")
+	}
+
+	// Verify metadata fields are parsed correctly
+	if skill.Name != "test-skill" {
+		t.Errorf("Name = %v, want 'test-skill'", skill.Name)
+	}
+
+	if skill.Description != "A test skill" {
+		t.Errorf("Description = %v, want 'A test skill'", skill.Description)
+	}
+
+	if skill.License != "MIT" {
+		t.Errorf("License = %v, want 'MIT'", skill.License)
+	}
+
+	// Verify metadata map is populated
+	if skill.Metadata == nil || len(skill.Metadata) != 2 {
+		t.Errorf("Metadata should have 2 entries, got %v", skill.Metadata)
+	} else {
+		if skill.Metadata["author"] != "Test Author" {
+			t.Errorf("Metadata[author] = %v, want 'Test Author'", skill.Metadata["author"])
+		}
+		if skill.Metadata["version"] != "1.0.0" {
+			t.Errorf("Metadata[version] = %v, want '1.0.0'", skill.Metadata["version"])
+		}
+	}
+
+	// Verify RawContent is empty (progressive disclosure - content not loaded)
+	if skill.RawContent != "" {
+		t.Errorf("RawContent should be empty for metadata-only parsing, got: %v", skill.RawContent)
+	}
+
+	// Verify RawFrontmatter is populated
+	if skill.RawFrontmatter == "" {
+		t.Error("RawFrontmatter should be populated")
+	}
+}
+
+func TestParseSkillMetadataFromYAML_EmptyContent(t *testing.T) {
+	yamlContent := `---
+name: minimal-skill
+description: A minimal skill
+---
+`
+
+	skill, err := ParseSkillMetadataFromYAML(yamlContent)
+	if err != nil {
+		t.Fatalf("ParseSkillMetadataFromYAML() returned unexpected error: %v", err)
+	}
+
+	if skill.RawContent != "" {
+		t.Errorf("RawContent should be empty, got: %v", skill.RawContent)
+	}
+}
+
+func TestSkill_ValidateDirectoryName_MatchingNames(t *testing.T) {
+	skill := Skill{
+		Name:        "test-skill",
+		Description: "A test skill",
+	}
+
+	err := skill.ValidateDirectoryName("test-skill")
+	if err != nil {
+		t.Errorf("ValidateDirectoryName() should return nil for matching names, got: %v", err)
+	}
+}
+
+func TestSkill_ValidateDirectoryName_NonMatchingNames(t *testing.T) {
+	skill := Skill{
+		Name:        "test-skill",
+		Description: "A test skill",
+	}
+
+	err := skill.ValidateDirectoryName("different-name")
+
+	if err == nil {
+		t.Error("ValidateDirectoryName() should return error for non-matching names, got nil")
+	}
+
+	expectedErr := "skill name 'test-skill' must match directory name 'different-name'"
+	if err != nil && err.Error() != expectedErr {
+		t.Errorf("ValidateDirectoryName() error = %v, want %v", err.Error(), expectedErr)
+	}
+}
+
+func TestSkill_ValidateDirectoryName_EmptyDirName(t *testing.T) {
+	skill := Skill{
+		Name:        "test-skill",
+		Description: "A test skill",
+	}
+
+	err := skill.ValidateDirectoryName("")
+
+	if err == nil {
+		t.Error("ValidateDirectoryName() should return error for empty directory name, got nil")
+	}
+}

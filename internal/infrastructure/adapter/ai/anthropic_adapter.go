@@ -139,25 +139,24 @@ func (a *AnthropicAdapter) buildSystemPrompt() string {
 		return basePrompt
 	}
 
-	// Build skills section
+	// Build skills section following agentskills.io XML specification
 	var sb strings.Builder
 	sb.WriteString(basePrompt)
-	sb.WriteString("\n\n## Available Skills\n\n")
+	sb.WriteString("\n\n<available_skills>\n")
 
 	for _, skill := range skills.Skills {
-		sb.WriteString(fmt.Sprintf("### %s\n", skill.Name))
-		sb.WriteString(fmt.Sprintf("%s\n", skill.Description))
-		if skill.License != "" {
-			sb.WriteString(fmt.Sprintf("License: %s\n", skill.License))
+		sb.WriteString("  <skill>\n")
+		sb.WriteString(fmt.Sprintf("    <name>%s</name>\n", skill.Name))
+		sb.WriteString(fmt.Sprintf("    <description>%s</description>\n", skill.Description))
+		if skill.DirectoryPath != "" {
+			sb.WriteString(fmt.Sprintf("    <location>%s</location>\n", skill.DirectoryPath))
 		}
-		if len(skill.AllowedTools) > 0 {
-			sb.WriteString(fmt.Sprintf("Allowed tools: %s\n", strings.Join(skill.AllowedTools, ", ")))
-		}
-		sb.WriteString("\n")
+		sb.WriteString("  </skill>\n")
 	}
 
+	sb.WriteString("</available_skills>\n\n")
 	sb.WriteString(
-		"You can use the `activate_skill` tool to load the full content of a skill when its capabilities are needed for the task at hand.",
+		"Use the `activate_skill` tool to load the full content of a skill when its capabilities are needed for the task at hand.",
 	)
 
 	return sb.String()

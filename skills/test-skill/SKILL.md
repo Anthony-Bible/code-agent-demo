@@ -4,6 +4,10 @@ description: A test skill for validation
 license: MIT
 compatibility: Go 1.21+
 allowed-tools: read_file list_files
+metadata:
+  author: Test Author
+  version: "1.0.0"
+  test-data: example-value
 ---
 # Test Skill
 

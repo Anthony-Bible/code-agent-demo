@@ -93,44 +93,14 @@ func (sm *LocalSkillManager) DiscoverSkills(_ context.Context) (*port.SkillDisco
 			return nil
 		}
 
-		// Look for SKILL.md files
+		// Look for SKILL.md files and process them
 		if info.Name() == "SKILL.md" && !info.IsDir() {
-			// Load and parse the skill
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return fmt.Errorf("failed to read SKILL.md at %s: %w", path, err)
+			if skillInfo := sm.processSkillFile(path); skillInfo != nil {
+				discoveredSkills = append(discoveredSkills, *skillInfo)
+				if skillInfo.IsActive {
+					activeCount++
+				}
 			}
-
-			skill, parseErr := entity.ParseSkillFromYAML(string(content))
-			// Intentionally skip invalid skills and continue discovering others
-			if parseErr != nil {
-				return nil //nolint:nilerr // Skip invalid skills while continuing discovery
-			}
-
-			// Set the path
-			absPath, _ := filepath.Abs(filepath.Dir(path))
-			skill.ScriptPath = absPath
-			skill.OriginalPath = filepath.Dir(path)
-
-			// Store the skill
-			sm.skills[skill.Name] = skill
-
-			// Check if active
-			isActive := sm.active[skill.Name]
-			if isActive {
-				activeCount++
-			}
-
-			discoveredSkills = append(discoveredSkills, port.SkillInfo{
-				Name:          skill.Name,
-				Description:   skill.Description,
-				License:       skill.License,
-				Compatibility: skill.Compatibility,
-				Metadata:      skill.Metadata,
-				AllowedTools:  skill.AllowedTools,
-				DirectoryPath: skill.OriginalPath,
-				IsActive:      isActive,
-			})
 		}
 
 		return nil
@@ -147,19 +117,75 @@ func (sm *LocalSkillManager) DiscoverSkills(_ context.Context) (*port.SkillDisco
 	}, nil
 }
 
+// processSkillFile processes a single SKILL.md file and returns skill info if valid.
+// Returns nil if the skill is invalid or cannot be processed.
+func (sm *LocalSkillManager) processSkillFile(path string) *port.SkillInfo {
+	// Load and parse the skill metadata only (progressive disclosure)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		// Skip file read errors and continue discovery
+		return nil
+	}
+
+	skill, parseErr := entity.ParseSkillMetadataFromYAML(string(content))
+	// Intentionally skip invalid skills and continue discovering others
+	if parseErr != nil {
+		return nil
+	}
+
+	// Validate the skill before storing
+	if err := skill.Validate(); err != nil {
+		// Skip invalid skill and continue discovery
+		return nil
+	}
+
+	// Validate directory name matches skill name (agentskills.io spec requirement)
+	dirName := filepath.Base(filepath.Dir(path))
+	if err := skill.ValidateDirectoryName(dirName); err != nil {
+		// Skip invalid skill and continue discovery
+		return nil
+	}
+
+	// Set the path
+	absPath, _ := filepath.Abs(filepath.Dir(path))
+	skill.ScriptPath = absPath
+	skill.OriginalPath = filepath.Dir(path)
+
+	// Store the skill
+	sm.skills[skill.Name] = skill
+
+	// Check if active
+	isActive := sm.active[skill.Name]
+
+	return &port.SkillInfo{
+		Name:          skill.Name,
+		Description:   skill.Description,
+		License:       skill.License,
+		Compatibility: skill.Compatibility,
+		Metadata:      skill.Metadata,
+		AllowedTools:  skill.AllowedTools,
+		DirectoryPath: skill.OriginalPath,
+		IsActive:      isActive,
+	}
+}
+
 // LoadSkillMetadata loads the metadata for a specific skill from its SKILL.md file.
 // The skillName should match the skill directory name.
 // Returns the skill entity with all parsed metadata.
+// If the skill was discovered with ParseSkillMetadataFromYAML (progressive disclosure),
+// this function will load the full content on-demand.
 func (sm *LocalSkillManager) LoadSkillMetadata(_ context.Context, skillName string) (*entity.Skill, error) {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
 	// Check if skill is already loaded
-	if skill, ok := sm.skills[skillName]; ok {
+	skill, exists := sm.skills[skillName]
+	if exists && skill.RawContent != "" {
+		// Skill exists and has full content loaded
 		return skill, nil
 	}
 
-	// Try to load from file
+	// If skill exists but has no content, or doesn't exist, load full content
 	skillPath := filepath.Join(sm.skillsDir, skillName, "SKILL.md")
 	content, err := os.ReadFile(skillPath)
 	if os.IsNotExist(err) {
@@ -168,12 +194,20 @@ func (sm *LocalSkillManager) LoadSkillMetadata(_ context.Context, skillName stri
 		return nil, fmt.Errorf("failed to read SKILL.md: %w", err)
 	}
 
-	skill, err := entity.ParseSkillFromYAML(string(content))
+	fullSkill, err := entity.ParseSkillFromYAML(string(content))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse skill: %w", err)
 	}
 
-	return skill, nil
+	if exists {
+		// Update the existing skill with full content while preserving path info
+		skill.RawContent = fullSkill.RawContent
+		skill.RawFrontmatter = fullSkill.RawFrontmatter
+		return skill, nil
+	}
+
+	// Return the newly parsed skill
+	return fullSkill, nil
 }
 
 // ActivateSkill activates a skill by name, making it available for use by the AI.

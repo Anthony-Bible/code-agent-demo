@@ -225,6 +225,87 @@ This skill is used to test the activate_skill tool.
 	}
 }
 
+// TestSkillActivationWithMetadata verifies that metadata is included in activate_skill output.
+func TestSkillActivationWithMetadata(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	skillsDir := filepath.Join(tempDir, "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatalf("Failed to create skills directory: %v", err)
+	}
+
+	// Change to temp dir for skill discovery
+	t.Chdir(tempDir)
+
+	// Create a test skill file with metadata
+	testSkillDir := filepath.Join(skillsDir, "metadata-test-skill")
+	if err := os.MkdirAll(testSkillDir, 0o755); err != nil {
+		t.Fatalf("Failed to create test skill directory: %v", err)
+	}
+
+	skillContent := `---
+name: metadata-test-skill
+description: A skill with metadata for testing
+metadata:
+  author: Test Author
+  version: "1.0.0"
+  category: test
+---
+# Metadata Test Skill
+
+This skill is used to test metadata serialization.
+`
+	skillPath := filepath.Join(testSkillDir, "SKILL.md")
+	if err := os.WriteFile(skillPath, []byte(skillContent), 0o644); err != nil {
+		t.Fatalf("Failed to write skill file: %v", err)
+	}
+
+	// Create components
+	fileManager := file.NewLocalFileManager(tempDir)
+	skillManager := skill.NewLocalSkillManager()
+
+	// Discover skills
+	_, err := skillManager.DiscoverSkills(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to discover skills: %v", err)
+	}
+
+	// Create tool executor and inject skill manager
+	toolExecutor := tool.NewExecutorAdapter(fileManager)
+	toolExecutor.SetSkillManager(skillManager)
+
+	// Execute activate_skill tool
+	input := map[string]interface{}{
+		"skill_name": "metadata-test-skill",
+	}
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("Failed to marshal input: %v", err)
+	}
+
+	result, err := toolExecutor.ExecuteTool(context.Background(), "activate_skill", inputJSON)
+	if err != nil {
+		t.Fatalf("Failed to execute activate_skill tool: %v", err)
+	}
+
+	// Verify metadata is included in the output
+	if !strings.Contains(result, "metadata:") {
+		t.Error("Expected result to contain 'metadata:' section")
+	}
+
+	if !strings.Contains(result, "author: Test Author") {
+		t.Error("Expected result to contain metadata author field")
+	}
+
+	if !strings.Contains(result, "version: 1.0.0") {
+		t.Error("Expected result to contain metadata version field")
+	}
+
+	if !strings.Contains(result, "category: test") {
+		t.Error("Expected result to contain metadata category field")
+	}
+}
+
 // TestSystemPromptWithSkills verifies that the system prompt includes skill metadata.
 func TestSystemPromptWithSkills(t *testing.T) {
 	// Create a temporary directory for testing
@@ -537,5 +618,88 @@ This skill tests the full lifecycle.
 	}
 	if !activated {
 		t.Error("Expected skill to be re-activated")
+	}
+}
+
+// TestProgressiveDisclosure verifies that skills are loaded with metadata only during discovery,
+// and full content is loaded on-demand when LoadSkillMetadata is called.
+func TestProgressiveDisclosure(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	skillsDir := filepath.Join(tempDir, "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatalf("Failed to create skills directory: %v", err)
+	}
+
+	// Change to temp dir for skill discovery
+	t.Chdir(tempDir)
+
+	// Create a test skill with content
+	testSkillDir := filepath.Join(skillsDir, "progressive-test")
+	if err := os.MkdirAll(testSkillDir, 0o755); err != nil {
+		t.Fatalf("Failed to create test skill directory: %v", err)
+	}
+
+	skillContent := `---
+name: progressive-test
+description: A skill for testing progressive disclosure
+license: MIT
+---
+# Full Skill Content
+
+This content should only be loaded when the skill is activated, not during discovery.
+
+## Section 1
+
+Detailed instructions and examples go here.
+
+## Section 2
+
+More detailed content that should not be loaded during discovery.
+`
+	skillPath := filepath.Join(testSkillDir, "SKILL.md")
+	if err := os.WriteFile(skillPath, []byte(skillContent), 0o644); err != nil {
+		t.Fatalf("Failed to write skill file: %v", err)
+	}
+
+	// Create skill manager and discover skills
+	skillManager := skill.NewLocalSkillManager()
+	result, err := skillManager.DiscoverSkills(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to discover skills: %v", err)
+	}
+
+	if result.TotalCount != 1 {
+		t.Errorf("Expected 1 skill, got %d", result.TotalCount)
+	}
+
+	// First LoadSkillMetadata call should load full content (on-demand loading)
+	skill, err := skillManager.LoadSkillMetadata(context.Background(), "progressive-test")
+	if err != nil {
+		t.Fatalf("Failed to load skill metadata: %v", err)
+	}
+
+	// Verify RawContent is now populated (progressive disclosure loaded it)
+	if skill.RawContent == "" {
+		t.Error("Expected RawContent to be populated after LoadSkillMetadata")
+	}
+
+	// Verify the content includes the full skill instructions (not just metadata)
+	if !strings.Contains(skill.RawContent, "Detailed instructions and examples") {
+		t.Error("Expected full content to include the detailed instructions")
+	}
+
+	if !strings.Contains(skill.RawContent, "More detailed content") {
+		t.Error("Expected full content to include all sections")
+	}
+
+	// Verify RawContent does NOT include the frontmatter
+	if strings.HasPrefix(strings.TrimSpace(skill.RawContent), "---") {
+		t.Error("RawContent should not include the YAML frontmatter")
+	}
+
+	// Verify metadata-only parsing by checking RawFrontmatter is separate
+	if skill.RawFrontmatter == "" {
+		t.Error("Expected RawFrontmatter to be populated")
 	}
 }

@@ -1052,6 +1052,11 @@ func (a *ExecutorAdapter) executeActivateSkill(ctx context.Context, input json.R
 		return "", fmt.Errorf("failed to load skill '%s': %w", in.SkillName, err)
 	}
 
+	// Verify we have the full content (safety check for progressive disclosure)
+	if skill.RawContent == "" {
+		return "", fmt.Errorf("skill '%s' content not loaded", in.SkillName)
+	}
+
 	// Build result with frontmatter and content
 	var result strings.Builder
 	result.WriteString(fmt.Sprintf("---\nname: %s\ndescription: %s", skill.Name, skill.Description))
@@ -1063,6 +1068,12 @@ func (a *ExecutorAdapter) executeActivateSkill(ctx context.Context, input json.R
 	}
 	if len(skill.AllowedTools) > 0 {
 		result.WriteString(fmt.Sprintf("\nallowed-tools: %s", strings.Join(skill.AllowedTools, " ")))
+	}
+	if len(skill.Metadata) > 0 {
+		result.WriteString("\nmetadata:")
+		for key, value := range skill.Metadata {
+			result.WriteString(fmt.Sprintf("\n  %s: %s", key, value))
+		}
 	}
 	result.WriteString("\n---\n")
 	result.WriteString(skill.RawContent)
