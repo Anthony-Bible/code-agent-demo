@@ -239,7 +239,9 @@ func (cs *ConversationService) ExecuteToolsInResponse(
 			continue
 		}
 
-		result, err := cs.toolExecutor.ExecuteTool(ctx, request.Name, request.Input)
+		// Add sessionID to context so PlanningExecutorAdapter can check plan mode
+		ctxWithSession := port.WithSessionID(ctx, sessionID)
+		result, err := cs.toolExecutor.ExecuteTool(ctxWithSession, request.Name, request.Input)
 		if err != nil {
 			return nil, err
 		}

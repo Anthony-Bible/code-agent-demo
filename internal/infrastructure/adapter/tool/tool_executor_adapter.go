@@ -351,6 +351,51 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 		RequiredFields: []string{"skill_name"},
 	}
 	a.tools[activateSkillTool.Name] = activateSkillTool
+
+	// Register enter_plan_mode tool
+	enterPlanModeTool := entity.Tool{
+		ID:   "enter_plan_mode",
+		Name: "enter_plan_mode",
+		Description: `Use this tool proactively when you're about to start a non-trivial implementation task. Getting user sign-off on your approach before writing code prevents wasted effort and ensures alignment.
+
+## When to Use This Tool
+
+Use enter_plan_mode when ANY of these conditions apply:
+
+1. **New Feature Implementation**: Adding meaningful new functionality
+2. **Multiple Valid Approaches**: The task can be solved in several different ways
+3. **Code Modifications**: Changes that affect existing behavior or structure
+4. **Architectural Decisions**: The task requires choosing between patterns or technologies
+5. **Multi-File Changes**: The task will likely touch more than 2-3 files
+6. **Unclear Requirements**: You need to explore before understanding the full scope
+
+## When NOT to Use This Tool
+
+- Single-line or few-line fixes (typos, obvious bugs, small tweaks)
+- Adding a single function with clear requirements
+- Tasks where the user has given very specific, detailed instructions
+- Pure research/exploration tasks
+
+## What Happens in Plan Mode
+
+In plan mode, you will:
+1. Explore the codebase using read_file, list_files, and read-only bash commands
+2. Mutating tools (edit_file, write commands) will write proposals to a plan file instead of executing
+3. Design an implementation approach and present it to the user
+4. Exit plan mode when ready to implement (user command)`,
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"reason": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief explanation of why plan mode is needed for this task",
+				},
+			},
+			"required": []string{"reason"},
+		},
+		RequiredFields: []string{"reason"},
+	}
+	a.tools[enterPlanModeTool.Name] = enterPlanModeTool
 }
 
 // executeByName executes the appropriate tool function based on the tool name.

@@ -67,6 +67,17 @@ func NewContainer(cfg *Config) (*Container, error) {
 		},
 	)
 
+	// Set up plan mode confirmation callback
+	// This prompts the user when the agent wants to enter plan mode
+	toolExecutor.SetPlanModeConfirmCallback(func(reason string) bool {
+		return uiAdapter.ConfirmBashCommand(
+			reason,
+			false,
+			"enter_plan_mode",
+			"Agent wants to enter plan mode:",
+		)
+	})
+
 	// Step 2: Create domain service (ConversationService)
 	// Note: ConversationService directly uses concrete adapter types
 	convService, err := service.NewConversationService(aiAdapter, toolExecutor)

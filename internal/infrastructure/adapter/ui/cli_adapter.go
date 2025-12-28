@@ -10,9 +10,8 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"syscall"
 
-	"github.com/c-bata/go-prompt"
+	"github.com/chzyer/readline"
 )
 
 // Key constants for special key handling.
@@ -33,15 +32,11 @@ type CLIAdapter struct {
 	historyFile        string
 	maxHistoryEntries  int
 	historyManager     *HistoryManager // Command history for interactive mode
+	readlineInstance   *readline.Instance
 	modeToggleCallback func()
 	planMode           bool
 	sessionID          string
 	mu                 sync.RWMutex
-}
-
-// emptyCompleter is a no-op completer for go-prompt (we don't use auto-completion).
-func emptyCompleter(prompt.Document) []prompt.Suggest {
-	return nil
 }
 
 // defaultColorScheme returns the default ANSI color scheme for CLI output.
@@ -110,7 +105,7 @@ func NewCLIAdapterWithHistory(historyFile string, maxEntries int) *CLIAdapter {
 }
 
 // GetUserInput gets input from the user with context support.
-// When in interactive mode, uses go-prompt for arrow key navigation and history.
+// When in interactive mode, uses readline for arrow key navigation and history.
 // When in non-interactive mode, uses bufio.Scanner for simple line input.
 func (c *CLIAdapter) GetUserInput(ctx context.Context) (string, bool) {
 	// Check if context is cancelled
@@ -121,58 +116,96 @@ func (c *CLIAdapter) GetUserInput(ctx context.Context) (string, bool) {
 		// Continue
 	}
 
-	// Use go-prompt for interactive mode with history support
+	// Use readline for interactive mode with history support
 	if c.useInteractive && c.historyManager != nil {
-		return c.getInteractiveInput()
+		return c.getInteractiveInput(ctx)
 	}
 
 	// Fall back to bufio.Scanner for non-interactive mode
 	return c.getScannerInput()
 }
 
-// getInteractiveInput uses go-prompt for feature-rich terminal input.
-func (c *CLIAdapter) getInteractiveInput() (string, bool) {
-	// Build history for go-prompt
-	var history []string
-	if c.historyManager != nil {
-		history = c.historyManager.History()
+// getInteractiveInput uses readline for feature-rich terminal input with context support.
+func (c *CLIAdapter) getInteractiveInput(ctx context.Context) (string, bool) {
+	// Initialize readline instance if not already created
+	if c.readlineInstance == nil {
+		config := &readline.Config{
+			Prompt:          c.colors.Prompt + "Claude: " + "\x1b[0m",
+			HistoryFile:     c.historyFile,
+			InterruptPrompt: "^C",
+			EOFPrompt:       "exit",
+		}
+
+		var err error
+		c.readlineInstance, err = readline.NewEx(config)
+		if err != nil {
+			// Fall back to scanner on error
+			return c.getScannerInput()
+		}
 	}
 
-	// Use prompt.Input for single-line input with history
-	// Note: Use go-prompt's built-in coloring (OptionPrefixTextColor) instead of
-	// manual ANSI codes in the prefix to avoid terminal rendering issues.
-	input := prompt.Input(
-		"Claude: ",
-		emptyCompleter,
-		prompt.OptionHistory(history),
-		prompt.OptionPrefixTextColor(prompt.Blue),
-		prompt.OptionAddKeyBind(prompt.KeyBind{
-			Key: prompt.ControlC,
-			Fn: func(*prompt.Buffer) {
-				// Send SIGINT to self so the signal handler receives it
-				_ = syscall.Kill(syscall.Getpid(), syscall.SIGINT)
-			},
-		}),
-	)
-
-	// Add to history if not empty
-	if strings.TrimSpace(input) != "" {
-		_ = c.historyManager.Add(input)
+	// Use a goroutine to read input and support context cancellation
+	type result struct {
+		line string
+		err  error
 	}
+	resultCh := make(chan result, 1)
 
-	return input, true
+	go func() {
+		line, err := c.readlineInstance.Readline()
+		resultCh <- result{line, err}
+	}()
+
+	// Wait for input or context cancellation
+	select {
+	case <-ctx.Done():
+		// Context cancelled - close readline to unblock the goroutine
+		_ = c.readlineInstance.Close()
+		c.readlineInstance = nil
+		return "", false
+	case res := <-resultCh:
+		if res.err != nil {
+			// EOF or error
+			return "", false
+		}
+
+		// Add to history if not empty
+		input := strings.TrimSpace(res.line)
+		if input != "" && c.historyManager != nil {
+			_ = c.historyManager.Add(input)
+		}
+
+		return res.line, true
+	}
 }
 
-// getInteractiveConfirmation uses go-prompt for Y/N confirmation in interactive mode.
+// getInteractiveConfirmation uses readline for Y/N confirmation in interactive mode.
 // Returns the user's input string (to be checked by caller).
 // Ctrl+C returns empty string, which is treated as "no" (safe default).
 func (c *CLIAdapter) getInteractiveConfirmation() string {
-	input := prompt.Input(
-		"Execute? [y/N]: ",
-		emptyCompleter,
-		prompt.OptionPrefixTextColor(prompt.Yellow),
-	)
-	return input
+	// Create a simple readline instance for confirmation
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          c.colors.Error + "Execute? [y/N]: " + "\x1b[0m",
+		InterruptPrompt: "^C",
+	})
+	if err != nil {
+		// Fall back to simple input
+		fmt.Fprint(c.output, "Execute? [y/N]: ")
+		if c.scanner == nil {
+			c.scanner = bufio.NewScanner(c.input)
+		}
+		if c.scanner.Scan() {
+			return c.scanner.Text()
+		}
+		return ""
+	}
+	defer rl.Close()
+
+	line, err := rl.Readline()
+	if err != nil {
+		return ""
+	}
+	return line
 }
 
 // getScannerInput uses bufio.Scanner for non-interactive input.

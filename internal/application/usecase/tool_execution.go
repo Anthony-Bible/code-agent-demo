@@ -175,8 +175,9 @@ func (uc *ToolExecutionUseCase) ExecuteToolsInSession(
 			}
 		}
 
-		// Execute the tool
-		result, err := uc.toolExecutor.ExecuteTool(ctx, toolReq.ToolName, toolReq.Input)
+		// Execute the tool with session ID in context for plan mode support
+		ctxWithSession := port.WithSessionID(ctx, sessionID)
+		result, err := uc.toolExecutor.ExecuteTool(ctxWithSession, toolReq.ToolName, toolReq.Input)
 		duration := time.Since(startTime)
 
 		if err != nil {

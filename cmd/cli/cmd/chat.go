@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -65,8 +64,8 @@ func runChat(cmd *cobra.Command, args []string) error {
 		if handler != nil {
 			firstPressCh = handler.FirstPress()
 		}
-		
-		// Use a single input goroutine to avoid terminal state conflicts
+
+		// Get user input with context support (readline handles goroutine internally)
 		var result inputResult
 		done := make(chan struct{})
 		go func() {
@@ -81,7 +80,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 			result = inputResult{text, ok}
 		}()
 
-		// Wait for input OR signals with timeout
+		// Wait for input OR signals (no timeout needed with readline context support)
 	waitLoop:
 		for {
 			select {
@@ -98,10 +97,6 @@ func runChat(cmd *cobra.Command, args []string) error {
 				continue
 			case <-done:
 				// Input goroutine finished
-				break waitLoop
-			case <-time.After(30 * time.Second):
-				// Timeout safety - prevent indefinite hanging
-				fmt.Println("\nInput timed out, continuing...")
 				break waitLoop
 			}
 		}
@@ -153,5 +148,5 @@ func runChat(cmd *cobra.Command, args []string) error {
 				fmt.Fprintf(cmd.ErrOrStderr(), "%s\n", errMsg)
 			}
 		}
-		}
 	}
+}
