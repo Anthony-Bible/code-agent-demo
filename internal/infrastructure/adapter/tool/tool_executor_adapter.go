@@ -1037,19 +1037,23 @@ func (a *ExecutorAdapter) executeActivateSkill(ctx context.Context, input json.R
 	}
 
 	if in.SkillName == "" {
-		return "", errors.New("skill_name is required")
+		return "", errors.New("skill_name parameter is required but was empty")
 	}
 
-	// First, discover skills to refresh the skill list
-	_, err := a.skillManager.DiscoverSkills(ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to discover skills: %w", err)
-	}
-
-	// Load the skill metadata which contains the full SKILL.md content
+	// Try to load the skill metadata first (avoids redundant filesystem scans).
+	// If the skill is not found, refresh the discovered skills once and retry.
 	skill, err := a.skillManager.LoadSkillMetadata(ctx, in.SkillName)
 	if err != nil {
-		return "", fmt.Errorf("failed to load skill '%s': %w", in.SkillName, err)
+		// Attempt to refresh the skills list once
+		if _, discoverErr := a.skillManager.DiscoverSkills(ctx); discoverErr != nil {
+			return "", fmt.Errorf("failed to discover skills: %w", discoverErr)
+		}
+
+		// Retry loading the skill metadata after refreshing
+		skill, err = a.skillManager.LoadSkillMetadata(ctx, in.SkillName)
+		if err != nil {
+			return "", fmt.Errorf("failed to load skill '%s': %w", in.SkillName, err)
+		}
 	}
 
 	// Verify we have the full content (safety check for progressive disclosure)

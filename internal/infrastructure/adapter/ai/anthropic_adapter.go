@@ -46,9 +46,11 @@ var (
 // The struct maintains an internal Anthropic client and model configuration,
 // allowing for consistent model usage across all requests.
 type AnthropicAdapter struct {
-	client       anthropic.Client
-	model        string
-	skillManager port.SkillManager
+	client             anthropic.Client
+	model              string
+	skillManager       port.SkillManager
+	cachedSystemPrompt string // Cached system prompt to avoid repeated skill discovery
+	skillsDiscovered   bool   // Whether skills have been discovered at least once
 }
 
 // NewAnthropicAdapter creates a new AnthropicAdapter with the specified model.
@@ -126,6 +128,7 @@ func (a *AnthropicAdapter) SendMessage(
 // buildSystemPrompt constructs the system prompt with optional skill metadata.
 // If a skill manager is available, it includes available skills in the prompt
 // following the agentskills.io specification format.
+// The system prompt is cached after first discovery to avoid repeated filesystem scans.
 func (a *AnthropicAdapter) buildSystemPrompt() string {
 	basePrompt := "You are an AI assistant that helps users with code editing and explanations. Use the available tools when necessary to provide accurate and helpful responses."
 
@@ -134,9 +137,17 @@ func (a *AnthropicAdapter) buildSystemPrompt() string {
 		return basePrompt
 	}
 
-	// Try to discover skills
+	// Return cached prompt if skills have already been discovered
+	if a.skillsDiscovered && a.cachedSystemPrompt != "" {
+		return a.cachedSystemPrompt
+	}
+
+	// Try to discover skills (only done once per adapter instance)
 	skills, err := a.skillManager.DiscoverSkills(context.Background())
+	a.skillsDiscovered = true // Mark as discovered even on error to avoid retries
+
 	if err != nil || len(skills.Skills) == 0 {
+		a.cachedSystemPrompt = basePrompt
 		return basePrompt
 	}
 
@@ -164,7 +175,8 @@ func (a *AnthropicAdapter) buildSystemPrompt() string {
 		"Use the `activate_skill` tool to load the full content of a skill when its capabilities are needed for the task at hand.",
 	)
 
-	return sb.String()
+	a.cachedSystemPrompt = sb.String()
+	return a.cachedSystemPrompt
 }
 
 // GenerateToolSchema returns an empty tool input schema.

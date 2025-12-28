@@ -31,7 +31,42 @@ import (
 var (
 	ErrSkillNotFound     = errors.New("skill not found")
 	ErrSkillFileNotFound = errors.New("SKILL.md file not found in skill directory")
+	ErrInvalidSkillName  = errors.New(
+		"invalid skill name: must contain only lowercase letters, numbers, and hyphens",
+	)
+	ErrSkillNameEmpty        = errors.New("skill name cannot be empty")
+	ErrSkillNameTooLong      = errors.New("skill name must be 64 characters or less")
+	ErrSkillNameHyphen       = errors.New("skill name cannot start or end with a hyphen")
+	ErrSkillNameConsecHyphen = errors.New("skill name cannot contain consecutive hyphens")
 )
+
+// validateSkillName validates a skill name to prevent path traversal attacks.
+// Skill names must match the agentskills.io spec: 1-64 lowercase alphanumeric
+// characters and hyphens, cannot start/end with hyphen or have consecutive hyphens.
+func validateSkillName(name string) error {
+	if name == "" {
+		return ErrSkillNameEmpty
+	}
+	if len(name) > 64 {
+		return ErrSkillNameTooLong
+	}
+	if name[0] == '-' || name[len(name)-1] == '-' {
+		return ErrSkillNameHyphen
+	}
+
+	prevChar := byte(0)
+	for i := range len(name) {
+		c := name[i]
+		if c == '-' && prevChar == '-' {
+			return ErrSkillNameConsecHyphen
+		}
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+			return ErrInvalidSkillName
+		}
+		prevChar = c
+	}
+	return nil
+}
 
 // LocalSkillManager implements the SkillManager port for managing local file system skills.
 // It discovers skills from the ./skills directory, loads their metadata, and manages
@@ -56,12 +91,21 @@ func NewLocalSkillManager() port.SkillManager {
 // DiscoverSkills scans the skills directory for available skills.
 // Skills are discovered from ./skills directory relative to working directory.
 // Returns information about all discovered skills including metadata.
+//
+// Note: Active skills (those in the active map) have their entities preserved
+// to avoid breaking external references. Their metadata is updated if changed.
 func (sm *LocalSkillManager) DiscoverSkills(_ context.Context) (*port.SkillDiscoveryResult, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	// Clear existing skills
-	sm.skills = make(map[string]*entity.Skill)
+	// Preserve active skills to maintain references, clear inactive ones
+	preservedSkills := make(map[string]*entity.Skill)
+	for name, skill := range sm.skills {
+		if sm.active[name] {
+			preservedSkills[name] = skill
+		}
+	}
+	sm.skills = preservedSkills
 
 	// Check if skills directory exists
 	info, err := os.Stat(sm.skillsDir)
@@ -146,10 +190,15 @@ func (sm *LocalSkillManager) processSkillFile(path string) *port.SkillInfo {
 		return nil
 	}
 
-	// Set the path
-	absPath, _ := filepath.Abs(filepath.Dir(path))
+	// Set the path with proper error handling for filepath.Abs
+	dirPath := filepath.Dir(path)
+	absPath, err := filepath.Abs(dirPath)
+	if err != nil {
+		// Fallback to the original (possibly relative) directory path
+		absPath = dirPath
+	}
 	skill.ScriptPath = absPath
-	skill.OriginalPath = filepath.Dir(path)
+	skill.OriginalPath = dirPath
 
 	// Store the skill
 	sm.skills[skill.Name] = skill
@@ -175,6 +224,12 @@ func (sm *LocalSkillManager) processSkillFile(path string) *port.SkillInfo {
 // If the skill was discovered with ParseSkillMetadataFromYAML (progressive disclosure),
 // this function will load the full content on-demand.
 func (sm *LocalSkillManager) LoadSkillMetadata(_ context.Context, skillName string) (*entity.Skill, error) {
+	// Validate skillName to prevent path traversal attacks
+	// Skill names must match the agentskills.io spec: lowercase alphanumeric and hyphens only
+	if err := validateSkillName(skillName); err != nil {
+		return nil, err
+	}
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 

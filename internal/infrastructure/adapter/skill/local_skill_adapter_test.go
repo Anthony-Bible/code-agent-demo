@@ -192,7 +192,9 @@ Test content`
 	}
 
 	// Activate the skill first
-	sm.ActivateSkill(context.Background(), "test-skill")
+	if _, err := sm.ActivateSkill(context.Background(), "test-skill"); err != nil {
+		t.Fatalf("ActivateSkill() returned unexpected error: %v", err)
+	}
 
 	// Deactivate the skill
 	deactivated, err := sm.DeactivateSkill(context.Background(), "test-skill")

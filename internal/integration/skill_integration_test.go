@@ -103,7 +103,7 @@ description: A skill that can be activated
 ---
 # Activatable Skill
 
-This skill should be loads its full content when activated.
+This skill should load its full content when activated.
 
 ## Features
 
@@ -355,16 +355,29 @@ This skill should appear in the system prompt.
 	// Note: We can't directly access the internal system prompt,
 	// but we can verify the AI adapter has the skill manager
 
-	// Test that the adapter can successfully send a message (without actual AI call)
-	// This verifies the skill manager is properly integrated
-	_, _, _ = ai.NewAnthropicAdapter("test-model", skillManager).SendMessage(
+	// Test that the adapter can be created with skill manager
+	// We can't test the actual system prompt content directly since it's internal,
+	// but we verify that the adapter is properly constructed with skill manager integration
+	adapter := ai.NewAnthropicAdapter("test-model", skillManager)
+
+	// Verify the adapter was created (non-nil)
+	if adapter == nil {
+		t.Fatal("Expected adapter to be created, got nil")
+	}
+
+	// Attempting to send a message will fail due to invalid model/API,
+	// but this verifies the skill manager is wired correctly
+	_, _, err = adapter.SendMessage(
 		context.Background(),
 		[]port.MessageParam{
 			{Role: "user", Content: "test message"},
 		},
 		nil,
 	)
-	// Expected to fail with model not found, but skill manager should be used
+	// We expect an error (API/model issue), but the test validates integration wiring
+	if err == nil {
+		t.Log("SendMessage succeeded unexpectedly - API may have been called")
+	}
 }
 
 // TestMultipleSkills verifies discovery and management of multiple skills.
