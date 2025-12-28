@@ -190,6 +190,17 @@ func (cs *ConversationService) ProcessAssistantResponse(
 		}
 	}
 
+	// Add plan mode info to context if enabled
+	isPlanMode, _ := cs.IsPlanMode(sessionID)
+	if isPlanMode {
+		planInfo := port.PlanModeInfo{
+			Enabled:   true,
+			SessionID: sessionID,
+			PlanPath:  fmt.Sprintf(".agent/plans/%s.md", sessionID),
+		}
+		ctx = port.WithPlanMode(ctx, planInfo)
+	}
+
 	// Send to AI provider
 	response, toolCalls, err := cs.aiProvider.SendMessage(ctx, messageParams, toolParams)
 	if err != nil {

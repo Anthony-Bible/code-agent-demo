@@ -105,8 +105,8 @@ func (a *AnthropicAdapter) SendMessage(
 	// Convert port tools to Anthropic SDK tools
 	anthropicTools := a.convertTools(tools)
 
-	// Build system prompt with skill metadata
-	systemPrompt := a.buildSystemPrompt()
+	// Get system prompt (may be modified if plan mode is active, includes skill metadata)
+	systemPrompt := a.getSystemPrompt(ctx)
 
 	// Call Anthropic API
 	response, err := a.client.Messages.New(ctx, anthropic.MessageNewParams{
@@ -125,11 +125,69 @@ func (a *AnthropicAdapter) SendMessage(
 	return a.convertResponse(response)
 }
 
-// buildSystemPrompt constructs the system prompt with optional skill metadata.
+// getSystemPrompt returns the system prompt for the AI.
+// If plan mode is active in the context, it returns a specialized prompt
+// that instructs the agent to write a markdown implementation plan.
+// Otherwise, it returns a base prompt with optional skill metadata.
+func (a *AnthropicAdapter) getSystemPrompt(ctx context.Context) string {
+	basePrompt := a.buildBasePromptWithSkills()
+
+	planInfo, ok := port.PlanModeFromContext(ctx)
+	if !ok || !planInfo.Enabled {
+		return basePrompt
+	}
+
+	return fmt.Sprintf(
+		`You are an AI assistant in PLAN MODE. Your job is to explore the codebase and write an implementation plan before making changes.
+
+## Your Role in Plan Mode
+
+You should:
+1. Use read_file and list_files to understand the existing code
+2. Use read-only bash commands (e.g., git status, ls, find) to explore
+3. Write your implementation plan to: %s
+
+## How to Write Your Plan
+
+Use the edit_file tool to write your plan to %s. Structure your plan as:
+
+### Summary
+Brief overview of what you're implementing
+
+### Files to Modify
+- path/to/file1.go - what changes are needed
+- path/to/file2.go - what changes are needed
+
+### Implementation Steps
+1. First step
+2. Second step
+...
+
+### Considerations
+- Any trade-offs or decisions to highlight
+
+## Important Rules
+
+- You CAN use edit_file to write to %s - this is your plan file
+- Other mutating tools (edit_file for other paths, destructive bash commands) will be blocked
+- If you try to use a blocked tool, you'll receive a reminder to write to your plan file instead
+- Focus on thorough exploration and detailed planning before implementation
+
+## When You're Done
+
+When your plan is complete, tell the user to exit plan mode with :mode normal to begin implementation.
+`,
+		planInfo.PlanPath,
+		planInfo.PlanPath,
+		planInfo.PlanPath,
+	)
+}
+
+// buildBasePromptWithSkills constructs the base system prompt with optional skill metadata.
 // If a skill manager is available, it includes available skills in the prompt
 // following the agentskills.io specification format.
 // The system prompt is cached after first discovery to avoid repeated filesystem scans.
-func (a *AnthropicAdapter) buildSystemPrompt() string {
+func (a *AnthropicAdapter) buildBasePromptWithSkills() string {
 	basePrompt := "You are an AI assistant that helps users with code editing and explanations. Use the available tools when necessary to provide accurate and helpful responses."
 
 	// If no skill manager, return base prompt

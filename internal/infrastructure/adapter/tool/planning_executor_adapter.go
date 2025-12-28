@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
-	"time"
 )
 
 // PlanModeConfirmCallback is called when the agent wants to enter plan mode.
@@ -27,14 +27,6 @@ type PlanningExecutorAdapter struct {
 	mu                          sync.RWMutex
 	planModeConfirmCallback     PlanModeConfirmCallback
 	commandConfirmationCallback CommandConfirmationCallback
-}
-
-// PlanEntry represents a single tool execution plan written to the plan file.
-type PlanEntry struct {
-	SessionID string      `json:"session_id"`
-	ToolName  string      `json:"tool_name"`
-	Input     interface{} `json:"input"`
-	Timestamp time.Time   `json:"timestamp"`
 }
 
 // NewPlanningExecutorAdapter creates a new PlanningExecutorAdapter wrapping the given base executor.
@@ -63,10 +55,17 @@ func (p *PlanningExecutorAdapter) SetCommandConfirmationCallback(cb CommandConfi
 }
 
 // SetPlanMode sets the plan mode for a given session.
+// When enabling plan mode, it also creates the plans directory.
 func (p *PlanningExecutorAdapter) SetPlanMode(sessionID string, enabled bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.sessionModes[sessionID] = enabled
+
+	// Create plans directory when enabling plan mode
+	if enabled {
+		plansDir := filepath.Join(p.workingDir, ".agent", "plans")
+		_ = os.MkdirAll(plansDir, 0o750)
+	}
 }
 
 // IsPlanMode returns whether plan mode is enabled for a given session.
@@ -110,7 +109,7 @@ func isReadOnlyTool(name string) bool {
 	return readOnlyTools[name]
 }
 
-// ExecuteTool executes a tool, or writes a plan entry if in plan mode for mutating tools.
+// ExecuteTool executes a tool, or blocks it if in plan mode and not allowed.
 func (p *PlanningExecutorAdapter) ExecuteTool(ctx context.Context, name string, input interface{}) (string, error) {
 	// Handle enter_plan_mode tool specially
 	if name == "enter_plan_mode" {
@@ -121,11 +120,13 @@ func (p *PlanningExecutorAdapter) ExecuteTool(ctx context.Context, name string, 
 	sessionID, _ := port.SessionIDFromContext(ctx)
 
 	// Check if we're in plan mode for this session
-	if sessionID != "" && p.IsPlanMode(sessionID) && !isReadOnlyTool(name) {
-		return p.writePlanEntry(sessionID, name, input)
+	if sessionID != "" && p.IsPlanMode(sessionID) {
+		if !p.isAllowedInPlanMode(name, input) {
+			return p.getPlanBlockedMessage(sessionID, name), nil
+		}
 	}
 
-	// Otherwise, execute normally
+	// Execute normally (either not in plan mode, or tool is allowed in plan mode)
 	return p.baseExecutor.ExecuteTool(ctx, name, input)
 }
 
@@ -170,36 +171,49 @@ func (p *PlanningExecutorAdapter) handleEnterPlanMode(ctx context.Context, input
 	), nil
 }
 
-// writePlanEntry writes a tool execution plan to the plan file.
-func (p *PlanningExecutorAdapter) writePlanEntry(sessionID, toolName string, input interface{}) (string, error) {
-	// Create plans directory
-	plansDir := filepath.Join(p.workingDir, ".agent", "plans")
-	if err := os.MkdirAll(plansDir, 0o750); err != nil {
-		return "", fmt.Errorf("failed to create plans directory: %w", err)
+// isAllowedInPlanMode checks if a tool execution is allowed in plan mode.
+// Allows read-only tools and writes to the plan file (.agent/plans/*.md).
+func (p *PlanningExecutorAdapter) isAllowedInPlanMode(name string, input interface{}) bool {
+	if isReadOnlyTool(name) {
+		return true
 	}
 
-	// Create plan entry
-	entry := PlanEntry{
-		SessionID: sessionID,
-		ToolName:  toolName,
-		Input:     input,
-		Timestamp: time.Now(),
+	// Allow edit_file to .agent/plans/*.md
+	if name == "edit_file" {
+		return p.isPlanFileEdit(input)
 	}
 
-	// Generate filename
-	filename := fmt.Sprintf("%s_%d.json", sessionID, time.Now().UnixNano())
-	planPath := filepath.Join(plansDir, filename)
+	return false
+}
 
-	// Marshal to JSON
-	data, err := json.MarshalIndent(entry, "", "  ")
+// isPlanFileEdit checks if an edit_file input targets a plan file.
+// Plan files are identified by having ".agent/plans/" in the path and ending with ".md".
+func (p *PlanningExecutorAdapter) isPlanFileEdit(input interface{}) bool {
+	var editInput struct {
+		Path string `json:"path"`
+	}
+
+	data, err := json.Marshal(input)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal plan entry: %w", err)
+		return false
 	}
 
-	// Write to file
-	if err := os.WriteFile(planPath, data, 0o600); err != nil {
-		return "", fmt.Errorf("failed to write plan file: %w", err)
+	if err := json.Unmarshal(data, &editInput); err != nil {
+		return false
 	}
 
-	return fmt.Sprintf("[PLAN MODE] Tool execution '%s' written to plan file: %s", toolName, planPath), nil
+	// Check if path contains .agent/plans/ and ends with .md
+	// This handles both relative paths (.agent/plans/x.md) and
+	// absolute paths (/tmp/xxx/.agent/plans/x.md)
+	return strings.Contains(editInput.Path, ".agent/plans/") &&
+		strings.HasSuffix(editInput.Path, ".md")
+}
+
+// getPlanBlockedMessage returns a message telling the agent to write to the plan file instead.
+func (p *PlanningExecutorAdapter) getPlanBlockedMessage(sessionID, toolName string) string {
+	planPath := fmt.Sprintf(".agent/plans/%s.md", sessionID)
+	return fmt.Sprintf(
+		"[PLAN MODE] Tool '%s' is blocked in plan mode. Write your planned changes to %s instead using edit_file.",
+		toolName, planPath,
+	)
 }
