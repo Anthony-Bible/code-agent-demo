@@ -321,6 +321,138 @@ func TestChatService_PlanModeResponse(t *testing.T) {
 // =============================================================================
 
 func TestChatService_ModeIntegration(t *testing.T) {
+	t.Run("tools are blocked when mode is plan with PlanningExecutorAdapter", func(t *testing.T) {
+		tempDir := t.TempDir()
+		fileManager := file.NewLocalFileManager(tempDir)
+
+		// Use the full planning executor adapter (the decorator)
+		baseExecutor := tool.NewExecutorAdapter(fileManager)
+		planningExecutor := tool.NewPlanningExecutorAdapter(baseExecutor, fileManager, tempDir)
+
+		uiOutput := &strings.Builder{}
+		userInterface := ui.NewCLIAdapterWithIO(strings.NewReader(""), uiOutput)
+
+		// AI provider that requests bash tool execution (should be blocked in plan mode)
+		toolCall := port.ToolCallInfo{
+			ToolID:    "tool_123",
+			ToolName:  "bash",
+			Input:     map[string]interface{}{"command": "ls -la"},
+			InputJSON: `{"command":"ls -la"}`,
+		}
+
+		aiProvider := &mockAIProviderForChat{
+			response: &entity.Message{
+				Role:    entity.RoleAssistant,
+				Content: "I'll run the command.",
+			},
+			toolCalls: []port.ToolCallInfo{toolCall},
+		}
+
+		convService, _ := serviceDomain.NewConversationService(aiProvider, planningExecutor)
+		chatService, _ := NewChatServiceFromDomain(
+			convService,
+			userInterface,
+			aiProvider,
+			planningExecutor,
+			fileManager,
+		)
+
+		ctx := context.Background()
+		startResp, _ := chatService.StartSession(ctx, "")
+		sessionID := startResp.SessionID
+
+		// Enable plan mode using HandleModeCommand (should set on both services)
+		err := chatService.HandleModeCommand(ctx, sessionID, "plan")
+		if err != nil {
+			t.Fatalf("Failed to set plan mode: %v", err)
+		}
+
+		// Verify plan mode is set on BOTH conversation service and tool executor
+		isPlanModeConv, _ := convService.IsPlanMode(sessionID)
+		isPlanModeExec := planningExecutor.IsPlanMode(sessionID)
+
+		if !isPlanModeConv {
+			t.Error("Plan mode not set on conversation service")
+		}
+		if !isPlanModeExec {
+			t.Error("Plan mode not set on planning executor")
+		}
+
+		// Send message that triggers bash tool execution
+		_, err = chatService.SendMessage(ctx, sessionID, "Run ls -la")
+		if err != nil {
+			t.Fatalf("Failed to send message: %v", err)
+		}
+
+		// The tool result should show [PLAN MODE] blocked message
+		output := uiOutput.String()
+		if !strings.Contains(output, "[PLAN MODE]") || !strings.Contains(output, "blocked") {
+			t.Errorf("Expected bash tool to be blocked in plan mode, got output: %s", output)
+		}
+	})
+
+	t.Run("read_file is allowed in plan mode", func(t *testing.T) {
+		tempDir := t.TempDir()
+		fileManager := file.NewLocalFileManager(tempDir)
+
+		// Create a test file
+		testFile := tempDir + "/test.txt"
+		_ = fileManager.WriteFile(testFile, "hello world")
+
+		baseExecutor := tool.NewExecutorAdapter(fileManager)
+		planningExecutor := tool.NewPlanningExecutorAdapter(baseExecutor, fileManager, tempDir)
+
+		uiOutput := &strings.Builder{}
+		userInterface := ui.NewCLIAdapterWithIO(strings.NewReader(""), uiOutput)
+
+		// AI provider that requests read_file (should be allowed)
+		toolCall := port.ToolCallInfo{
+			ToolID:    "tool_456",
+			ToolName:  "read_file",
+			Input:     map[string]interface{}{"path": testFile},
+			InputJSON: `{"path":"` + testFile + `"}`,
+		}
+
+		aiProvider := &mockAIProviderForChat{
+			response: &entity.Message{
+				Role:    entity.RoleAssistant,
+				Content: "Reading the file.",
+			},
+			toolCalls: []port.ToolCallInfo{toolCall},
+		}
+
+		convService, _ := serviceDomain.NewConversationService(aiProvider, planningExecutor)
+		chatService, _ := NewChatServiceFromDomain(
+			convService,
+			userInterface,
+			aiProvider,
+			planningExecutor,
+			fileManager,
+		)
+
+		ctx := context.Background()
+		startResp, _ := chatService.StartSession(ctx, "")
+		sessionID := startResp.SessionID
+
+		// Enable plan mode
+		_ = chatService.HandleModeCommand(ctx, sessionID, "plan")
+
+		// Send message that triggers read_file
+		_, err := chatService.SendMessage(ctx, sessionID, "Read the file")
+		if err != nil {
+			t.Fatalf("Failed to send message: %v", err)
+		}
+
+		// The output should contain the file contents, not a blocked message
+		output := uiOutput.String()
+		if strings.Contains(output, "blocked") {
+			t.Errorf("read_file should NOT be blocked in plan mode, got: %s", output)
+		}
+		if !strings.Contains(output, "hello world") {
+			t.Errorf("Expected file content in output, got: %s", output)
+		}
+	})
+
 	t.Run("tools write plans when mode is plan", func(t *testing.T) {
 		tempDir := t.TempDir()
 		fileManager := file.NewLocalFileManager(tempDir)
