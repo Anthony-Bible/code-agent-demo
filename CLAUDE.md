@@ -132,7 +132,7 @@ Each skill must contain a `SKILL.md` file with YAML frontmatter:
 name: skill-name
 description: A description of what this skill does and when to use it.
 license: MIT              # Optional
-compatibility: Go 1.21+   # Optional
+compatibility: Go 1.22+   # Optional
 metadata:
   key: value              # Optional map
 allowed-tools: read_file list_files  # Optional space-delimited list

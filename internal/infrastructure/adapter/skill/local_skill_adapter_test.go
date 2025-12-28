@@ -350,6 +350,95 @@ func TestLocalSkillManager_GetSkillByName_NotFound(t *testing.T) {
 	}
 }
 
+func TestValidateSkillName(t *testing.T) {
+	tests := []struct {
+		name      string
+		skillName string
+		wantErr   error
+	}{
+		// Valid names
+		{name: "valid simple name", skillName: "test-skill", wantErr: nil},
+		{name: "valid with numbers", skillName: "skill123", wantErr: nil},
+		{name: "valid all lowercase", skillName: "myskill", wantErr: nil},
+		{name: "valid with hyphen", skillName: "my-cool-skill", wantErr: nil},
+
+		// Path traversal attempts
+		{name: "path traversal with ../", skillName: "../etc/passwd", wantErr: ErrInvalidSkillName},
+		{name: "path traversal with ..", skillName: "..skill", wantErr: ErrInvalidSkillName},
+		{name: "path traversal with /", skillName: "skill/subdir", wantErr: ErrInvalidSkillName},
+		{name: "absolute path", skillName: "/etc/passwd", wantErr: ErrInvalidSkillName},
+		{name: "windows path", skillName: "C:\\Windows", wantErr: ErrInvalidSkillName},
+		{name: "backslash", skillName: "skill\\name", wantErr: ErrInvalidSkillName},
+		{name: "null byte", skillName: "skill\x00name", wantErr: ErrInvalidSkillName},
+
+		// Invalid characters
+		{name: "uppercase letters", skillName: "MySkill", wantErr: ErrInvalidSkillName},
+		{name: "spaces", skillName: "my skill", wantErr: ErrInvalidSkillName},
+		{name: "underscore", skillName: "my_skill", wantErr: ErrInvalidSkillName},
+		{name: "dot", skillName: "my.skill", wantErr: ErrInvalidSkillName},
+
+		// Hyphen rules
+		{name: "starts with hyphen", skillName: "-skill", wantErr: ErrSkillNameHyphen},
+		{name: "ends with hyphen", skillName: "skill-", wantErr: ErrSkillNameHyphen},
+		{name: "consecutive hyphens", skillName: "my--skill", wantErr: ErrSkillNameConsecHyphen},
+
+		// Length and empty
+		{name: "empty name", skillName: "", wantErr: ErrSkillNameEmpty},
+		{
+			name:      "too long name",
+			skillName: "a123456789012345678901234567890123456789012345678901234567890123456789",
+			wantErr:   ErrSkillNameTooLong,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateSkillName(tt.skillName)
+			if tt.wantErr == nil {
+				if err != nil {
+					t.Errorf("validateSkillName(%q) unexpected error: %v", tt.skillName, err)
+				}
+			} else {
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("validateSkillName(%q) error = %v, want %v", tt.skillName, err, tt.wantErr)
+				}
+			}
+		})
+	}
+}
+
+func TestLocalSkillManager_LoadSkillMetadata_PathTraversalPrevention(t *testing.T) {
+	sm := NewLocalSkillManager()
+
+	pathTraversalAttempts := []struct {
+		name      string
+		skillName string
+	}{
+		{name: "parent directory", skillName: "../etc/passwd"},
+		{name: "double parent", skillName: "../../secret"},
+		{name: "absolute path", skillName: "/etc/passwd"},
+		{name: "encoded slash", skillName: "skill%2F..%2Fetc"},
+		{name: "dot dot", skillName: ".."},
+		{name: "hidden file", skillName: ".hidden"},
+	}
+
+	for _, tt := range pathTraversalAttempts {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := sm.LoadSkillMetadata(context.Background(), tt.skillName)
+			if err == nil {
+				t.Errorf("LoadSkillMetadata(%q) should have blocked path traversal attempt", tt.skillName)
+			}
+			// The error should be related to invalid skill name, not file not found
+			if errors.Is(err, ErrSkillFileNotFound) {
+				t.Errorf(
+					"LoadSkillMetadata(%q) returned file not found instead of blocking path traversal",
+					tt.skillName,
+				)
+			}
+		})
+	}
+}
+
 func TestLocalSkillManager_ValidateSkills(t *testing.T) {
 	// Create a temporary skills directory
 	tempDir := t.TempDir()

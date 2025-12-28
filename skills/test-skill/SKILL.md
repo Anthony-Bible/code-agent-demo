@@ -2,7 +2,7 @@
 name: test-skill
 description: A test skill for validation
 license: MIT
-compatibility: Go 1.21+
+compatibility: Go 1.22+
 allowed-tools: read_file list_files
 metadata:
   author: Test Author
