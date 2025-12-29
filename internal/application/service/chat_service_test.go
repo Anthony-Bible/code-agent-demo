@@ -443,13 +443,14 @@ func TestChatService_ModeIntegration(t *testing.T) {
 			t.Fatalf("Failed to send message: %v", err)
 		}
 
-		// The output should contain the file contents, not a blocked message
+		// The output should show the compact read indicator, not a blocked message
 		output := uiOutput.String()
 		if strings.Contains(output, "blocked") {
 			t.Errorf("read_file should NOT be blocked in plan mode, got: %s", output)
 		}
-		if !strings.Contains(output, "hello world") {
-			t.Errorf("Expected file content in output, got: %s", output)
+		// Compact display shows "read(path)" instead of full contents
+		if !strings.Contains(output, "read(") {
+			t.Errorf("Expected compact read indicator in output, got: %s", output)
 		}
 	})
 

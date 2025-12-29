@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"code-editing-agent/internal/domain/port"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -267,9 +269,20 @@ func (c *CLIAdapter) DisplayError(err error) error {
 // The bash tool receives special handling: its JSON output (containing stdout, stderr,
 // and exit_code fields) is parsed, and stdout/stderr are truncated independently
 // before the JSON is reassembled. Other tools use plain text truncation.
+//
+// File read operations (read_file, list_files) display compact indicators like
+// read(path) or list(path) instead of full contents to keep the screen clean.
 func (c *CLIAdapter) DisplayToolResult(toolName string, input string, result string) error {
-	truncatedResult := c.truncateToolOutput(toolName, result)
+	// Compact display for file/directory read operations
+	switch toolName {
+	case "read_file":
+		return c.displayCompactFileRead(input)
+	case "list_files":
+		return c.displayCompactListFiles(input)
+	}
 
+	// Default behavior for other tools
+	truncatedResult := c.truncateToolOutput(toolName, result)
 	_, err := fmt.Fprintf(c.output, "%sTool [%s] on %s\x1b[0m\n%s\x1b[0m\n",
 		c.colors.Tool, toolName, input, truncatedResult)
 	return err
@@ -337,6 +350,53 @@ func (c *CLIAdapter) truncateToolOutput(toolName, result string) string {
 	}
 	truncated, _ := TruncateOutput(result, c.truncationConfig)
 	return truncated
+}
+
+// displayCompactFileRead displays a compact indicator for file read operations.
+// Shows "read(path)" or "read(path:start-end)" for line ranges.
+func (c *CLIAdapter) displayCompactFileRead(input string) error {
+	var readInput struct {
+		Path      string `json:"path"`
+		StartLine *int   `json:"start_line,omitempty"`
+		EndLine   *int   `json:"end_line,omitempty"`
+	}
+
+	if err := json.Unmarshal([]byte(input), &readInput); err != nil {
+		_, err := fmt.Fprintf(c.output, "%sread(%s)\x1b[0m\n", c.colors.Tool, input)
+		return err
+	}
+
+	display := readInput.Path
+	if readInput.StartLine != nil || readInput.EndLine != nil {
+		start := 1
+		end := "end"
+		if readInput.StartLine != nil {
+			start = *readInput.StartLine
+		}
+		if readInput.EndLine != nil {
+			end = strconv.Itoa(*readInput.EndLine)
+		}
+		display = fmt.Sprintf("%s:%d-%s", readInput.Path, start, end)
+	}
+
+	_, err := fmt.Fprintf(c.output, "%sread(%s)\x1b[0m\n", c.colors.Tool, display)
+	return err
+}
+
+// displayCompactListFiles displays a compact indicator for directory listing operations.
+// Shows "list(path)" instead of the full directory contents.
+func (c *CLIAdapter) displayCompactListFiles(input string) error {
+	var listInput struct {
+		Path string `json:"path"`
+	}
+
+	if err := json.Unmarshal([]byte(input), &listInput); err != nil {
+		_, err := fmt.Fprintf(c.output, "%slist(%s)\x1b[0m\n", c.colors.Tool, input)
+		return err
+	}
+
+	_, err := fmt.Fprintf(c.output, "%slist(%s)\x1b[0m\n", c.colors.Tool, listInput.Path)
+	return err
 }
 
 // SetTruncationConfig sets the truncation configuration for tool output display.

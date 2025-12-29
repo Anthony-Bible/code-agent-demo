@@ -790,14 +790,14 @@ func TestCLIAdapter_DisplayToolResult_BashToolHandling(t *testing.T) {
 		output := &strings.Builder{}
 		adapter := ui.NewCLIAdapterWithIO(input, output)
 
-		// Create JSON that looks like bash output but for a different tool
+		// Create output for a different tool (edit_file uses regular truncation)
 		var lines []string
 		for i := 1; i <= 50; i++ {
 			lines = append(lines, fmt.Sprintf("line %d", i))
 		}
 		result := strings.Join(lines, "\n")
 
-		err := adapter.DisplayToolResult("read_file", "/path/to/file", result)
+		err := adapter.DisplayToolResult("edit_file", `{"path": "/path/to/file"}`, result)
 
 		require.NoError(t, err)
 		outputStr := output.String()
@@ -805,6 +805,99 @@ func TestCLIAdapter_DisplayToolResult_BashToolHandling(t *testing.T) {
 		// Should truncate with regular TruncateOutput, not bash-specific
 		assert.Contains(t, outputStr, "truncated",
 			"should use regular truncation for non-bash tools")
+	})
+}
+
+func TestCLIAdapter_DisplayToolResult_CompactDisplay(t *testing.T) {
+	t.Run("read_file shows compact output with path only", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		err := adapter.DisplayToolResult("read_file", `{"path": "src/main.go"}`, "file contents here...")
+
+		require.NoError(t, err)
+		outputStr := output.String()
+		assert.Contains(t, outputStr, "read(src/main.go)")
+		assert.NotContains(t, outputStr, "file contents here")
+	})
+
+	t.Run("read_file shows compact output with line range", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		err := adapter.DisplayToolResult(
+			"read_file",
+			`{"path": "src/main.go", "start_line": 10, "end_line": 50}`,
+			"lines 10-50...",
+		)
+
+		require.NoError(t, err)
+		outputStr := output.String()
+		assert.Contains(t, outputStr, "read(src/main.go:10-50)")
+	})
+
+	t.Run("read_file shows start line only when end_line missing", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		err := adapter.DisplayToolResult("read_file", `{"path": "src/main.go", "start_line": 5}`, "from line 5...")
+
+		require.NoError(t, err)
+		outputStr := output.String()
+		assert.Contains(t, outputStr, "read(src/main.go:5-end)")
+	})
+
+	t.Run("list_files shows compact output", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		err := adapter.DisplayToolResult("list_files", `{"path": "src/"}`, "file1.go\nfile2.go\nfile3.go")
+
+		require.NoError(t, err)
+		outputStr := output.String()
+		assert.Contains(t, outputStr, "list(src/)")
+		assert.NotContains(t, outputStr, "file1.go")
+	})
+
+	t.Run("read_file handles invalid JSON gracefully", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		err := adapter.DisplayToolResult("read_file", "not valid json", "file contents")
+
+		require.NoError(t, err)
+		outputStr := output.String()
+		assert.Contains(t, outputStr, "read(not valid json)")
+	})
+
+	t.Run("list_files handles invalid JSON gracefully", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		err := adapter.DisplayToolResult("list_files", "not valid json", "file list")
+
+		require.NoError(t, err)
+		outputStr := output.String()
+		assert.Contains(t, outputStr, "list(not valid json)")
+	})
+
+	t.Run("other tools still show full output", func(t *testing.T) {
+		input := strings.NewReader("")
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(input, output)
+
+		err := adapter.DisplayToolResult("edit_file", `{"path": "file.go"}`, "edit result content")
+
+		require.NoError(t, err)
+		outputStr := output.String()
+		assert.Contains(t, outputStr, "Tool [edit_file]")
+		assert.Contains(t, outputStr, "edit result content")
 	})
 }
 
