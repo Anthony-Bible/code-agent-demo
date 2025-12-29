@@ -54,10 +54,11 @@ func NewContainer(cfg *Config) (*Container, error) {
 	uiAdapter := ui.NewCLIAdapterWithHistory(cfg.HistoryFile, cfg.HistoryMaxEntries)
 	skillManager := skill.NewLocalSkillManager()
 	aiAdapter := ai.NewAnthropicAdapter(cfg.AIModel, skillManager)
-	toolExecutor := tool.NewExecutorAdapter(fileManager)
 
-	// Set skill manager on tool executor for skill activation
-	toolExecutor.SetSkillManager(skillManager)
+	// Create base executor and wrap with planning decorator
+	baseExecutor := tool.NewExecutorAdapter(fileManager)
+	baseExecutor.SetSkillManager(skillManager)
+	toolExecutor := tool.NewPlanningExecutorAdapter(baseExecutor, fileManager, cfg.WorkingDir)
 
 	// Set up bash command confirmation callback
 	// This prompts the user before executing any bash command
