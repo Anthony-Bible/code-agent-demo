@@ -38,7 +38,15 @@ var (
 )
 
 // getValidTransitions returns the allowed state transitions for the investigation state machine.
+//
+// The investigation lifecycle follows this state diagram:
+//
+//	started --> running --> completed
+//	               |-----> failed
+//	               |-----> escalated
+//
 // The key is the current status, and the value is a list of valid target statuses.
+// Terminal states (completed, failed, escalated) have no outgoing transitions.
 func getValidTransitions() map[string][]string {
 	return map[string][]string{
 		InvestigationStatusStarted: {InvestigationStatusRunning},
@@ -47,7 +55,7 @@ func getValidTransitions() map[string][]string {
 			InvestigationStatusFailed,
 			InvestigationStatusEscalated,
 		},
-		// Terminal states (completed, failed, escalated) have no valid transitions
+		// Terminal states have no valid transitions - they are end states
 	}
 }
 
@@ -272,7 +280,14 @@ func isValidInvestigationStatus(s string) bool {
 }
 
 // CanTransitionTo checks if a transition to newStatus is valid from the current status.
-// Returns false if the transition is not allowed or if newStatus equals current status.
+//
+// A transition is valid if:
+//   - The newStatus differs from the current status (no self-transitions)
+//   - The current status has outgoing transitions defined (not a terminal state)
+//   - The newStatus is in the list of allowed target statuses for the current state
+//
+// Use this method to check transition validity before calling TransitionTo to avoid errors.
+// Returns false if the transition is not allowed.
 func (i *Investigation) CanTransitionTo(newStatus string) bool {
 	if i.status == newStatus {
 		return false
@@ -291,7 +306,15 @@ func (i *Investigation) CanTransitionTo(newStatus string) bool {
 }
 
 // TransitionTo attempts to transition the investigation to a new status.
-// Returns ErrInvalidTransition if the transition is not allowed.
+//
+// This method enforces the state machine rules. Valid transitions are:
+//   - started -> running
+//   - running -> completed, failed, or escalated
+//
+// Returns ErrInvalidTransition if:
+//   - The transition is not allowed by the state machine
+//   - The investigation is already in the target status
+//   - The investigation is in a terminal state (completed, failed, escalated)
 func (i *Investigation) TransitionTo(newStatus string) error {
 	if !i.CanTransitionTo(newStatus) {
 		return ErrInvalidTransition
@@ -301,7 +324,13 @@ func (i *Investigation) TransitionTo(newStatus string) error {
 }
 
 // Start transitions the investigation from started to running status.
-// Returns ErrInvalidTransition if not in started status.
+//
+// This is a convenience method equivalent to TransitionTo(InvestigationStatusRunning).
+// It should be called once when the investigation begins active execution.
+//
+// Returns ErrInvalidTransition if the investigation is not in "started" status,
+// indicating that Start() was either called multiple times or the investigation
+// has already progressed beyond the initial state.
 func (i *Investigation) Start() error {
 	return i.TransitionTo(InvestigationStatusRunning)
 }

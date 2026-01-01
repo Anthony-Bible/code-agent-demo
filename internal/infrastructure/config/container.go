@@ -110,6 +110,14 @@ func NewContainer(cfg *Config) (*Container, error) {
 	}
 
 	// Step 4: Create investigation use case and alert handling components
+	// This sets up the automated alert investigation framework which allows
+	// the agent to investigate alerts autonomously within defined safety constraints.
+
+	// Configure investigation safety limits:
+	// - MaxActions: Prevents runaway investigations consuming excessive resources
+	// - MaxDuration: Ensures investigations complete in reasonable time
+	// - AllowedTools: Restricts which tools investigations can execute
+	// - BlockedCommands: Prevents dangerous shell commands from being executed
 	invConfig := usecase.AlertInvestigationUseCaseConfig{
 		MaxActions:      20,
 		MaxDuration:     15 * time.Minute,
@@ -119,21 +127,25 @@ func NewContainer(cfg *Config) (*Container, error) {
 	}
 	investigationUseCase := usecase.NewAlertInvestigationUseCaseWithConfig(invConfig)
 
-	// Wire prompt builders
+	// Wire prompt builders - these generate AI prompts tailored to different alert types
+	// (e.g., high CPU, disk space, memory issues)
 	promptRegistry := usecase.NewPromptBuilderRegistry()
 	investigationUseCase.SetPromptBuilderRegistry(promptRegistry)
 
-	// Wire escalation handler
+	// Wire escalation handler - determines how to handle investigations that
+	// cannot be resolved automatically (e.g., logging, notifications)
 	escalationHandler := usecase.NewLogEscalationHandler()
 	investigationUseCase.SetEscalationHandler(escalationHandler)
 
-	// Create alert handler
+	// Create alert handler - bridges incoming alerts to the investigation use case
+	// with severity-based routing (critical alerts auto-investigate, warnings do not)
 	alertHandler := usecase.NewAlertHandler(investigationUseCase, usecase.AlertHandlerConfig{
 		AutoInvestigateCritical: true,
 		AutoInvestigateWarning:  false,
 	})
 
-	// Create alert source manager
+	// Create alert source manager - manages registration and lifecycle of alert sources
+	// (e.g., Prometheus Alertmanager webhooks, custom integrations)
 	alertSourceManager := alert.NewLocalAlertSourceManager()
 	alertSourceManager.SetAlertHandler(alertHandler.HandleEntityAlert)
 
