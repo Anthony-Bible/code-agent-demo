@@ -303,6 +303,10 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 					"type":        "integer",
 					"description": "Timeout in milliseconds (default: 30000)",
 				},
+				"dangerous": map[string]interface{}{
+					"type":        "boolean",
+					"description": "Whether this command is potentially dangerous",
+				},
 			},
 			"required": []string{"command"},
 		},
