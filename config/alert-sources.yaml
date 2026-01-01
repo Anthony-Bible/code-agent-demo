@@ -1,0 +1,19 @@
+# Alert Sources Configuration
+# This file configures alert sources for the webhook server.
+
+# Server address (optional, default: ":8080")
+addr: ":8080"
+
+# Alert sources to register
+sources:
+  # Prometheus Alertmanager webhook
+  - type: prometheus
+    name: prometheus-prod
+    webhook_path: /alerts/prometheus
+
+  # Example: Multiple Prometheus instances
+  # - type: prometheus
+  #   name: prometheus-staging
+  #   webhook_path: /alerts/prometheus-staging
+  #   extra:
+  #     cluster: staging-us-east

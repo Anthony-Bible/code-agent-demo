@@ -16,6 +16,13 @@ import (
 	"testing"
 )
 
+// newTestSkillManager creates a skill manager for testing with only the specified directory.
+func newTestSkillManager(skillsDir string) port.SkillManager {
+	return skill.NewLocalSkillManagerWithDirs([]skill.DirConfig{
+		{Path: skillsDir, SourceType: "project"},
+	})
+}
+
 // TestEndToEndSkillDiscovery verifies that skills can be discovered from the filesystem.
 func TestEndToEndSkillDiscovery(t *testing.T) {
 	// Create a temporary directory for testing
@@ -52,8 +59,8 @@ Use this skill when you need to test the integration.
 		t.Fatalf("Failed to write skill file: %v", err)
 	}
 
-	// Create skill manager
-	skillManager := skill.NewLocalSkillManager()
+	// Create skill manager with only the test skills directory
+	skillManager := newTestSkillManager(skillsDir)
 
 	// Discover skills
 	result, err := skillManager.DiscoverSkills(context.Background())
@@ -116,7 +123,7 @@ This skill should load its full content when activated.
 	}
 
 	// Create skill manager
-	skillManager := skill.NewLocalSkillManager()
+	skillManager := newTestSkillManager(skillsDir)
 
 	// Discover skills
 	_, err := skillManager.DiscoverSkills(context.Background())
@@ -189,7 +196,7 @@ This skill is used to test the activate_skill tool.
 
 	// Create components
 	fileManager := file.NewLocalFileManager(tempDir)
-	skillManager := skill.NewLocalSkillManager()
+	skillManager := newTestSkillManager(skillsDir)
 
 	// Discover skills
 	_, err := skillManager.DiscoverSkills(context.Background())
@@ -262,7 +269,7 @@ This skill is used to test metadata serialization.
 
 	// Create components
 	fileManager := file.NewLocalFileManager(tempDir)
-	skillManager := skill.NewLocalSkillManager()
+	skillManager := newTestSkillManager(skillsDir)
 
 	// Discover skills
 	_, err := skillManager.DiscoverSkills(context.Background())
@@ -339,7 +346,7 @@ This skill should appear in the system prompt.
 	}
 
 	// Create skill manager
-	skillManager := skill.NewLocalSkillManager()
+	skillManager := newTestSkillManager(skillsDir)
 
 	// Discover skills
 	_, err := skillManager.DiscoverSkills(context.Background())
@@ -425,7 +432,7 @@ Content for ` + s.name + `.
 	}
 
 	// Create skill manager
-	skillManager := skill.NewLocalSkillManager()
+	skillManager := newTestSkillManager(skillsDir)
 
 	// Discover skills
 	result, err := skillManager.DiscoverSkills(context.Background())
@@ -510,7 +517,7 @@ This skill has valid YAML.
 	}
 
 	// Create skill manager
-	skillManager := skill.NewLocalSkillManager()
+	skillManager := newTestSkillManager(skillsDir)
 
 	// Discover skills - invalid skill should be skipped
 	result, err := skillManager.DiscoverSkills(context.Background())
@@ -561,7 +568,7 @@ This skill tests the full lifecycle.
 	}
 
 	// Create skill manager
-	skillManager := skill.NewLocalSkillManager()
+	skillManager := newTestSkillManager(skillsDir)
 
 	// Discover skills
 	result, err := skillManager.DiscoverSkills(context.Background())
@@ -676,7 +683,7 @@ More detailed content that should not be loaded during discovery.
 	}
 
 	// Create skill manager and discover skills
-	skillManager := skill.NewLocalSkillManager()
+	skillManager := newTestSkillManager(skillsDir)
 	result, err := skillManager.DiscoverSkills(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to discover skills: %v", err)

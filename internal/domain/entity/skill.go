@@ -15,6 +15,18 @@ type SkillMetadata struct {
 	Metadata      map[string]string `yaml:"metadata,omitempty"`      // Additional metadata as key-value pairs
 }
 
+// SkillSourceType indicates where a skill was discovered from.
+type SkillSourceType string
+
+const (
+	// SkillSourceUser indicates a skill from ~/.claude/skills (user global).
+	SkillSourceUser SkillSourceType = "user"
+	// SkillSourceProjectClaude indicates a skill from ./.claude/skills (project .claude directory).
+	SkillSourceProjectClaude SkillSourceType = "project-claude"
+	// SkillSourceProject indicates a skill from ./skills (project root, highest priority).
+	SkillSourceProject SkillSourceType = "project"
+)
+
 // Skill represents an agent skill from the agentskills.io specification.
 // Skills are directories with SKILL.md files containing YAML frontmatter.
 type Skill struct {
@@ -28,6 +40,7 @@ type Skill struct {
 	OriginalPath   string            `yaml:"-"`                       // Original path (relative or absolute)
 	RawFrontmatter string            `yaml:"-"`                       // Raw YAML frontmatter
 	RawContent     string            `yaml:"-"`                       // Content after frontmatter
+	SourceType     SkillSourceType   `yaml:"-"`                       // Where the skill was discovered from
 }
 
 // UnmarshalYAML implements custom YAML unmarshaling to handle allowed-tools as either a string or slice.

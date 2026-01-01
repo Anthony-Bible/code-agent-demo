@@ -7,20 +7,21 @@ import (
 
 // SkillInfo represents information about a discovered skill.
 type SkillInfo struct {
-	Name          string            `json:"name"`           // Name of the skill
-	Description   string            `json:"description"`    // Description of what the skill does
-	License       string            `json:"license"`        // License information
-	Compatibility string            `json:"compatibility"`  // Compatibility information
-	Metadata      map[string]string `json:"metadata"`       // Additional metadata
-	AllowedTools  []string          `json:"allowed_tools"`  // Allowed tools for this skill
-	DirectoryPath string            `json:"directory_path"` // Path to skill directory
-	IsActive      bool              `json:"is_active"`      // Whether the skill is currently active
+	Name          string                 `json:"name"`           // Name of the skill
+	Description   string                 `json:"description"`    // Description of what the skill does
+	License       string                 `json:"license"`        // License information
+	Compatibility string                 `json:"compatibility"`  // Compatibility information
+	Metadata      map[string]string      `json:"metadata"`       // Additional metadata
+	AllowedTools  []string               `json:"allowed_tools"`  // Allowed tools for this skill
+	DirectoryPath string                 `json:"directory_path"` // Path to skill directory
+	IsActive      bool                   `json:"is_active"`      // Whether the skill is currently active
+	SourceType    entity.SkillSourceType `json:"source_type"`    // Where the skill was discovered from
 }
 
 // SkillDiscoveryResult represents the result of a skill discovery operation.
 type SkillDiscoveryResult struct {
 	Skills      []SkillInfo `json:"skills"`       // Discovered skills
-	SkillsDir   string      `json:"skills_dir"`   // Directory where skills were discovered
+	SkillsDirs  []string    `json:"skills_dirs"`  // All directories that were searched for skills
 	TotalCount  int         `json:"total_count"`  // Total number of skills discovered
 	ActiveCount int         `json:"active_count"` // Number of active skills
 }

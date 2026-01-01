@@ -12,6 +12,7 @@ import (
 	"code-editing-agent/internal/infrastructure/adapter/skill"
 	"code-editing-agent/internal/infrastructure/adapter/tool"
 	"code-editing-agent/internal/infrastructure/adapter/ui"
+	"code-editing-agent/internal/infrastructure/adapter/webhook"
 	"errors"
 	"time"
 
@@ -38,6 +39,7 @@ type Container struct {
 	skillManager         port.SkillManager
 	alertSourceManager   port.AlertSourceManager
 	investigationUseCase *usecase.AlertInvestigationUseCase
+	webhookAdapter       *webhook.HTTPAdapter
 }
 
 // NewContainer creates a new DI container and wires all dependencies.
@@ -149,6 +151,11 @@ func NewContainer(cfg *Config) (*Container, error) {
 	alertSourceManager := alert.NewLocalAlertSourceManager()
 	alertSourceManager.SetAlertHandler(alertHandler.HandleEntityAlert)
 
+	// Create webhook HTTP adapter for receiving alerts via HTTP webhooks
+	webhookConfig := webhook.DefaultConfig()
+	webhookAdapter := webhook.NewHTTPAdapter(alertSourceManager, webhookConfig)
+	webhookAdapter.SetAlertHandler(alertHandler.HandleEntityAlert)
+
 	return &Container{
 		config:               cfg,
 		chatService:          chatService,
@@ -160,6 +167,7 @@ func NewContainer(cfg *Config) (*Container, error) {
 		skillManager:         skillManager,
 		alertSourceManager:   alertSourceManager,
 		investigationUseCase: investigationUseCase,
+		webhookAdapter:       webhookAdapter,
 	}, nil
 }
 
@@ -220,4 +228,10 @@ func (c *Container) AlertSourceManager() port.AlertSourceManager {
 // Useful for managing alert investigations.
 func (c *Container) InvestigationUseCase() *usecase.AlertInvestigationUseCase {
 	return c.investigationUseCase
+}
+
+// WebhookAdapter returns the webhook HTTP adapter.
+// Useful for starting the webhook server to receive alerts via HTTP.
+func (c *Container) WebhookAdapter() *webhook.HTTPAdapter {
+	return c.webhookAdapter
 }

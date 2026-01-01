@@ -101,7 +101,6 @@ func TestNewSkillService_ValidSkillManager(t *testing.T) {
 func TestSkillService_DiscoverSkills(t *testing.T) {
 	expectedResult := &port.SkillDiscoveryResult{
 		Skills:      []port.SkillInfo{{Name: "test-skill"}},
-		SkillsDir:   "./skills",
 		TotalCount:  1,
 		ActiveCount: 0,
 	}

@@ -119,15 +119,17 @@ code-editing-agent/
 │   │   └── usecase/             # Use case implementations
 │   ├── domain/
 │   │   ├── entity/              # Domain entities (Conversation, Message, Tool)
-│   │   ├── port/                # Port interfaces (AI, File, Tool, UI)
+│   │   ├── port/                # Port interfaces (AI, File, Tool, UI, Skill)
 │   │   └── service/             # Domain services
 │   └── infrastructure/
 │       ├── adapter/             # Port implementations
 │       │   ├── ai/              # AI provider adapters
 │       │   ├── file/            # File manager adapters
+│       │   ├── skill/           # Skill manager adapters
 │       │   ├── tool/            # Tool executor adapters
 │       │   └── ui/              # User interface adapters
 │       └── config/              # Configuration & DI container
+├── skills/                      # Project-specific skills (agentskills.io spec)
 ├── CLAUDE.md                    # Project development guide
 ├── go.mod                       # Go module definition
 └── go.sum                       # Dependency checksums
@@ -209,6 +211,53 @@ New session started: 3a1b2c3d4e5f6789...
 - **Path Traversal Protection**: All file operations are sandboxed within the working directory
 - **Dangerous Command Detection**: Commands like `rm -rf`, `dd`, format operations require confirmation
 - **Graceful Shutdown**: Double Ctrl+C to exit, single press shows help message
+
+### Skills
+
+Skills extend the agent's capabilities with specialized knowledge, workflows, or tool integrations. They follow the [agentskills.io](https://agentskills.io) specification.
+
+#### Skill Discovery Locations
+
+Skills are discovered from three directories in **priority order**:
+
+| Priority | Directory | Description |
+|----------|-----------|-------------|
+| 1 (highest) | `./skills` | Project-specific skills in project root |
+| 2 | `./.claude/skills` | Project-specific skills in .claude directory |
+| 3 (lowest) | `~/.claude/skills` | User's global skills (shared across projects) |
+
+When the same skill name exists in multiple directories, the **highest priority** version is used. This allows you to override global skills with project-specific versions.
+
+#### Skill Structure
+
+Each skill is a directory containing a `SKILL.md` file with YAML frontmatter:
+
+```
+skills/
+├── code-review/
+│   └── SKILL.md
+└── my-custom-skill/
+    ├── SKILL.md
+    ├── scripts/       # Optional executable scripts
+    └── references/    # Optional documentation
+```
+
+**Example SKILL.md:**
+```yaml
+---
+name: code-review
+description: Reviews code for best practices, errors, and improvements
+allowed-tools: read_file list_files
+---
+
+# Code Review Skill
+
+Instructions for how the AI should perform code reviews...
+```
+
+#### Using Skills
+
+Skills are automatically discovered at startup and listed in the AI's context. The AI can activate a skill when its capabilities are needed using the `activate_skill` tool.
 
 ### Configuration
 

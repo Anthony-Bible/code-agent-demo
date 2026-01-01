@@ -52,9 +52,9 @@ Content here
 
 	// Create skill manager with temp directory
 	sm := &LocalSkillManager{
-		skillsDir: skillsDir,
-		skills:    make(map[string]*entity.Skill),
-		active:    make(map[string]bool),
+		skillsDirs: []DirConfig{{Path: skillsDir, SourceType: entity.SkillSourceProject}},
+		skills:     make(map[string]*entity.Skill),
+		active:     make(map[string]bool),
 	}
 
 	// Discover skills

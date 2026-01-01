@@ -108,12 +108,23 @@ Mock implementations of ports for isolated testing - see `conversation_service_t
 
 This agent supports skills following the [agentskills.io](https://agentskills.io) specification.
 
+### Skill Discovery Locations
+
+Skills are discovered from three directories in priority order:
+
+1. `./skills` (project root, **highest priority**)
+2. `./.claude/skills` (project .claude directory)
+3. `~/.claude/skills` (user global, **lowest priority**)
+
+When the same skill name exists in multiple directories, the highest priority version is used.
+Each discovered skill includes a `source_type` field indicating its origin ("project", "project-claude", or "user").
+
 ### Skill Directory Structure
 
-Skills are discovered from the `./skills` directory:
+Each skill directory follows the [agentskills.io](https://agentskills.io) specification:
 
 ```
-skills/
+skills/                    # or ~/.claude/skills/ or ./.claude/skills/
 ├── skill-name/
 │   └── SKILL.md          # Required
 ├── other-skill/
@@ -121,7 +132,7 @@ skills/
 │   ├── scripts/          # Optional - executable code
 │   ├── references/       # Optional - documentation
 │   └── assets/           # Optional - static resources
-└── README.md             # This file
+└── README.md             # Optional
 ```
 
 ### SKILL.md Format
