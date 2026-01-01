@@ -299,7 +299,7 @@ func (s *FileInvestigationStore) readFile(id string) (*service.InvestigationStub
 		return nil, err
 	}
 
-	return service.NewInvestigationStubForTestWithTime(
+	return service.NewInvestigationStub(
 		data.ID,
 		data.AlertID,
 		data.SessionID,

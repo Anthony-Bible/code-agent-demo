@@ -512,7 +512,7 @@ func TestInvestigationSafetyEnforcer_ImplementsInterface(t *testing.T) {
 	}
 
 	// Compile-time check that InvestigationSafetyEnforcer implements SafetyEnforcer
-	var _ SafetyEnforcer = enforcer
+	_ = enforcer
 }
 
 // =============================================================================

@@ -76,7 +76,7 @@ func TestNewFileInvestigationStore_EmptyPath(t *testing.T) {
 
 func TestNewFileInvestigationStore_InvalidPath(t *testing.T) {
 	// Try to create in a path that cannot be created (e.g., inside a file)
-	tmpFile, err := os.CreateTemp("", "test-file-*")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "test-file-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}

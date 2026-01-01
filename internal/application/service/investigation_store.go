@@ -45,6 +45,18 @@ type InvestigationStub struct {
 	startedAt time.Time // When the investigation began
 }
 
+// NewInvestigationStub creates a new InvestigationStub with the given parameters.
+// This is the primary constructor for creating investigation stubs.
+func NewInvestigationStub(id, alertID, sessionID, status string, startedAt time.Time) *InvestigationStub {
+	return &InvestigationStub{
+		id:        id,
+		alertID:   alertID,
+		sessionID: sessionID,
+		status:    status,
+		startedAt: startedAt,
+	}
+}
+
 // ID returns the unique investigation identifier.
 func (i *InvestigationStub) ID() string { return i.id }
 
