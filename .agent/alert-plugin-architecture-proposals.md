@@ -2756,7 +2756,79 @@ Phase 3 (Wire It All Together) has been completed with container wiring and inte
 - No persistent alert/investigation storage
 
 **Next Steps:**
-Phase 4 (Safety & Production) will implement actual AI-driven investigations, metrics, and production-ready safety features.
+Phase 4 (Safety & Production) has been completed with safety enforcement and persistent investigation storage. See Phase 4 completion summary below.
+
+#### Phase 4 Completion Summary
+
+**Date Completed:** 2026-01-01
+**Development Approach:** Test-Driven Development (TDD)
+
+**What Was Implemented:**
+1. **SafetyEnforcer** (`internal/application/service/safety_enforcer.go`)
+   - Interface-based safety policy enforcement
+   - InvestigationSafetyEnforcer implementation using InvestigationConfig
+   - CheckToolAllowed() verifies tools against whitelist
+   - CheckCommandAllowed() blocks dangerous command patterns
+   - CheckActionBudget() enforces maximum actions per investigation
+   - CheckTimeout() validates context hasn't expired
+   - 67 passing tests with comprehensive edge cases
+
+2. **FileInvestigationStore** (`internal/infrastructure/adapter/investigation/file_store.go`)
+   - Persistent file-based investigation storage
+   - Hybrid design: in-memory index + lazy-loading from disk
+   - JSON serialization for portability
+   - Thread-safe with sync.RWMutex
+   - Full CRUD: Store, Get, Update, Delete operations
+   - Query support with filters (AlertID, SessionID, Status, time ranges)
+   - Graceful shutdown with Close()
+   - File corruption handling
+   - 45 passing tests including concurrent access scenarios
+
+3. **Integration with AlertInvestigationUseCase**
+   - SetSafetyEnforcer() method for injecting safety policy
+   - SetInvestigationStore() method for persistent storage
+   - Safety checks integrated in HandleAlert workflow
+   - Automatic escalation when all tools blocked
+   - Investigation persistence on start and completion
+
+**What Was NOT Implemented (Deferred to Phase 5+):**
+- Human approval queue (UI/notification required)
+- Metrics collection (investigations_safety_violations, etc.)
+- Directory allowlist enforcement (CheckDirectoryAllowed exists in config but not enforced)
+- Approval gate middleware (RequireHumanApproval patterns exist but not implemented)
+
+**Test Quality:**
+- 112 new tests (67 safety_enforcer + 45 file_store)
+- All tests follow table-driven pattern
+- No skipped tests in Phase 4 code
+- Comprehensive coverage: error cases, edge cases, concurrent access
+- Race condition testing for file store
+- Context cancellation testing
+
+**Architecture Compliance:**
+- Strict hexagonal architecture maintained
+- SafetyEnforcer is a pure interface (domain-agnostic)
+- FileInvestigationStore implements InvestigationStore interface
+- Dependency injection pattern (no global state)
+- Thread-safe implementations with proper locking
+- Clean error handling with sentinel errors
+
+**Known Limitations:**
+- FileInvestigationStore is NOT production-scale (no indexing, no transactions)
+- Safety checks are synchronous (no async approval workflow)
+- No metrics/observability for safety violations
+- Human approval queue deferred to Phase 5
+- Directory allowlist exists but not enforced in actual tool execution
+
+**Production Recommendations:**
+- Replace FileInvestigationStore with PostgreSQL/SQLite for production
+- Add metrics for safety_violations_total, blocked_tools_count, etc.
+- Implement async approval queue with timeout
+- Add audit logging for all safety decisions
+- Consider write-ahead log for investigation persistence
+
+**Next Steps:**
+Phase 5 will focus on human-in-the-loop workflows, approval queues, and production observability.
 
 ### Phase 3: Wire It All Together - COMPLETED 2026-01-01
 - [x] Update `internal/infrastructure/config/container.go`
@@ -2764,13 +2836,13 @@ Phase 4 (Safety & Production) will implement actual AI-driven investigations, me
 - [x] Create investigation state machine (Started → Running → Completed/Escalated/Failed) (entity in Phase 2)
 - [ ] Add metrics: investigations_started, investigations_completed, investigations_escalated (deferred)
 
-### Phase 4: Safety & Production
-- [ ] Implement tool whitelisting
-- [ ] Implement command blacklisting
-- [ ] Implement human approval queue
-- [ ] Add investigation timeout handling
-- [ ] Add action budget enforcement
-- [ ] Add persistent investigation storage (not in-memory)
+### Phase 4: Safety & Production - COMPLETED 2026-01-01
+- [x] Implement tool whitelisting
+- [x] Implement command blacklisting
+- [x] Add investigation timeout handling
+- [x] Add action budget enforcement
+- [x] Add persistent investigation storage (not in-memory)
+- [ ] Implement human approval queue (DEFERRED to Phase 5)
 
 ---
 
