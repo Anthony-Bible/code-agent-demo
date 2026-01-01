@@ -33,7 +33,23 @@ var (
 	ErrInvalidStatus = errors.New("invalid investigation status")
 	// ErrInvalidConfidence is returned when confidence is outside the valid range [0.0, 1.0].
 	ErrInvalidConfidence = errors.New("confidence must be between 0.0 and 1.0")
+	// ErrInvalidTransition is returned when attempting an invalid state transition.
+	ErrInvalidTransition = errors.New("invalid state transition")
 )
+
+// getValidTransitions returns the allowed state transitions for the investigation state machine.
+// The key is the current status, and the value is a list of valid target statuses.
+func getValidTransitions() map[string][]string {
+	return map[string][]string{
+		InvestigationStatusStarted: {InvestigationStatusRunning},
+		InvestigationStatusRunning: {
+			InvestigationStatusCompleted,
+			InvestigationStatusFailed,
+			InvestigationStatusEscalated,
+		},
+		// Terminal states (completed, failed, escalated) have no valid transitions
+	}
+}
 
 // InvestigationFinding represents a discovery made during an investigation.
 // Findings capture important observations, potential root causes, or diagnostic
@@ -253,4 +269,39 @@ func isValidInvestigationStatus(s string) bool {
 		return true
 	}
 	return false
+}
+
+// CanTransitionTo checks if a transition to newStatus is valid from the current status.
+// Returns false if the transition is not allowed or if newStatus equals current status.
+func (i *Investigation) CanTransitionTo(newStatus string) bool {
+	if i.status == newStatus {
+		return false
+	}
+	transitions := getValidTransitions()
+	allowedTargets, exists := transitions[i.status]
+	if !exists {
+		return false
+	}
+	for _, target := range allowedTargets {
+		if target == newStatus {
+			return true
+		}
+	}
+	return false
+}
+
+// TransitionTo attempts to transition the investigation to a new status.
+// Returns ErrInvalidTransition if the transition is not allowed.
+func (i *Investigation) TransitionTo(newStatus string) error {
+	if !i.CanTransitionTo(newStatus) {
+		return ErrInvalidTransition
+	}
+	i.status = newStatus
+	return nil
+}
+
+// Start transitions the investigation from started to running status.
+// Returns ErrInvalidTransition if not in started status.
+func (i *Investigation) Start() error {
+	return i.TransitionTo(InvestigationStatusRunning)
 }

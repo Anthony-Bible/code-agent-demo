@@ -3,13 +3,17 @@
 package config
 
 import (
+	"code-editing-agent/internal/application/usecase"
 	"code-editing-agent/internal/domain/port"
 	"code-editing-agent/internal/domain/service"
 	"code-editing-agent/internal/infrastructure/adapter/ai"
+	"code-editing-agent/internal/infrastructure/adapter/alert"
 	"code-editing-agent/internal/infrastructure/adapter/file"
 	"code-editing-agent/internal/infrastructure/adapter/skill"
 	"code-editing-agent/internal/infrastructure/adapter/tool"
 	"code-editing-agent/internal/infrastructure/adapter/ui"
+	"errors"
+	"time"
 
 	appsvc "code-editing-agent/internal/application/service"
 )
@@ -24,14 +28,16 @@ import (
 // - Creating application services (application layer)
 // - Providing accessors for all dependencies.
 type Container struct {
-	config       *Config
-	chatService  *appsvc.ChatService
-	convService  *service.ConversationService
-	fileManager  port.FileManager
-	uiAdapter    port.UserInterface
-	aiAdapter    port.AIProvider
-	toolExecutor port.ToolExecutor
-	skillManager port.SkillManager
+	config               *Config
+	chatService          *appsvc.ChatService
+	convService          *service.ConversationService
+	fileManager          port.FileManager
+	uiAdapter            port.UserInterface
+	aiAdapter            port.AIProvider
+	toolExecutor         port.ToolExecutor
+	skillManager         port.SkillManager
+	alertSourceManager   port.AlertSourceManager
+	investigationUseCase *usecase.AlertInvestigationUseCase
 }
 
 // NewContainer creates a new DI container and wires all dependencies.
@@ -48,6 +54,10 @@ type Container struct {
 //   - *Container: A fully wired dependency container
 //   - error: An error if any dependency creation fails
 func NewContainer(cfg *Config) (*Container, error) {
+	if cfg == nil {
+		return nil, errors.New("config cannot be nil")
+	}
+
 	// Step 1: Create infrastructure adapters
 	// Note: order matters - skillManager must be created before aiAdapter
 	fileManager := file.NewLocalFileManager(cfg.WorkingDir)
@@ -99,15 +109,45 @@ func NewContainer(cfg *Config) (*Container, error) {
 		return nil, err
 	}
 
+	// Step 4: Create investigation use case and alert handling components
+	invConfig := usecase.AlertInvestigationUseCaseConfig{
+		MaxActions:      20,
+		MaxDuration:     15 * time.Minute,
+		MaxConcurrent:   5,
+		AllowedTools:    []string{"bash", "read_file", "list_files"},
+		BlockedCommands: []string{"rm -rf", "dd if=", "mkfs"},
+	}
+	investigationUseCase := usecase.NewAlertInvestigationUseCaseWithConfig(invConfig)
+
+	// Wire prompt builders
+	promptRegistry := usecase.NewPromptBuilderRegistry()
+	investigationUseCase.SetPromptBuilderRegistry(promptRegistry)
+
+	// Wire escalation handler
+	escalationHandler := usecase.NewLogEscalationHandler()
+	investigationUseCase.SetEscalationHandler(escalationHandler)
+
+	// Create alert handler
+	alertHandler := usecase.NewAlertHandler(investigationUseCase, usecase.AlertHandlerConfig{
+		AutoInvestigateCritical: true,
+		AutoInvestigateWarning:  false,
+	})
+
+	// Create alert source manager
+	alertSourceManager := alert.NewLocalAlertSourceManager()
+	alertSourceManager.SetAlertHandler(alertHandler.HandleEntityAlert)
+
 	return &Container{
-		config:       cfg,
-		chatService:  chatService,
-		convService:  convService,
-		fileManager:  fileManager,
-		uiAdapter:    uiAdapter,
-		aiAdapter:    aiAdapter,
-		toolExecutor: toolExecutor,
-		skillManager: skillManager,
+		config:               cfg,
+		chatService:          chatService,
+		convService:          convService,
+		fileManager:          fileManager,
+		uiAdapter:            uiAdapter,
+		aiAdapter:            aiAdapter,
+		toolExecutor:         toolExecutor,
+		skillManager:         skillManager,
+		alertSourceManager:   alertSourceManager,
+		investigationUseCase: investigationUseCase,
 	}, nil
 }
 
@@ -156,4 +196,16 @@ func (c *Container) ToolExecutor() port.ToolExecutor {
 // Useful for direct skill discovery and activation operations.
 func (c *Container) SkillManager() port.SkillManager {
 	return c.skillManager
+}
+
+// AlertSourceManager returns the alert source manager port implementation.
+// Useful for registering and managing alert sources.
+func (c *Container) AlertSourceManager() port.AlertSourceManager {
+	return c.alertSourceManager
+}
+
+// InvestigationUseCase returns the alert investigation use case.
+// Useful for managing alert investigations.
+func (c *Container) InvestigationUseCase() *usecase.AlertInvestigationUseCase {
+	return c.investigationUseCase
 }
