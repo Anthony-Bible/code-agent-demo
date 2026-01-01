@@ -9,6 +9,60 @@ import (
 	"time"
 )
 
+// SafetyEnforcer defines the interface for safety checks during investigations.
+// This is defined locally in usecase to avoid import cycles with service package.
+type SafetyEnforcer interface {
+	CheckToolAllowed(tool string) error
+	CheckCommandAllowed(cmd string) error
+	CheckActionBudget(currentActions int) error
+	CheckTimeout(ctx context.Context) error
+}
+
+// InvestigationStubData is a minimal interface for investigation persistence.
+// Matches the InvestigationStub type from service package.
+type InvestigationStubData interface {
+	ID() string
+	AlertID() string
+	SessionID() string
+	Status() string
+	StartedAt() time.Time
+}
+
+// InvestigationStoreWriter defines the write interface for investigation persistence.
+// This avoids needing to import the full service.InvestigationStore interface.
+type InvestigationStoreWriter interface {
+	Store(ctx context.Context, inv InvestigationStubData) error
+	Get(ctx context.Context, id string) (InvestigationStubData, error)
+	Update(ctx context.Context, inv InvestigationStubData) error
+}
+
+// simpleInvestigationStub is a minimal implementation of InvestigationStubData.
+type simpleInvestigationStub struct {
+	id, alertID, sessionID, status string
+	startedAt                      time.Time
+}
+
+func (s *simpleInvestigationStub) ID() string        { return s.id }
+func (s *simpleInvestigationStub) AlertID() string   { return s.alertID }
+func (s *simpleInvestigationStub) SessionID() string { return s.sessionID }
+func (s *simpleInvestigationStub) Status() string    { return s.status }
+func (s *simpleInvestigationStub) StartedAt() time.Time {
+	if s.startedAt.IsZero() {
+		return time.Now()
+	}
+	return s.startedAt
+}
+
+func newSimpleInvestigationStub(id, alertID, sessionID, status string) *simpleInvestigationStub {
+	return &simpleInvestigationStub{
+		id:        id,
+		alertID:   alertID,
+		sessionID: sessionID,
+		status:    status,
+		startedAt: time.Now(),
+	}
+}
+
 // Sentinel errors for AlertInvestigationUseCase operations.
 // These errors indicate various failure conditions during investigation.
 var (
@@ -108,6 +162,8 @@ type AlertInvestigationUseCase struct {
 	alertToInvestigation  map[string]string               // Maps alert ID to investigation ID
 	escalationHandler     EscalationHandler               // Handler for escalations
 	promptBuilderRegistry PromptBuilderRegistry           // Generates investigation prompts
+	safetyEnforcer        SafetyEnforcer                  // Safety policy enforcer
+	investigationStore    InvestigationStoreWriter        // Persistence for investigations
 	shutdown              bool                            // True after Shutdown is called
 	idCounter             int64                           // Counter for generating unique IDs
 }
@@ -174,6 +230,36 @@ func (uc *AlertInvestigationUseCase) HandleAlert(
 		return nil, err
 	}
 
+	// Check if safety enforcer blocks all investigation tools
+	uc.mu.RLock()
+	enforcer := uc.safetyEnforcer
+	allowedTools := uc.config.AllowedTools
+	uc.mu.RUnlock()
+
+	if enforcer != nil && len(allowedTools) > 0 {
+		allBlocked := true
+		for _, tool := range allowedTools {
+			if enforcer.CheckToolAllowed(tool) == nil {
+				allBlocked = false
+				break
+			}
+		}
+		if allBlocked {
+			// All tools are blocked - escalate
+			return &InvestigationResultStub{
+				InvestigationID: invID,
+				AlertID:         alert.ID(),
+				Status:          "failed",
+				Findings:        []string{},
+				ActionsTaken:    0,
+				Duration:        time.Since(time.Now()),
+				Confidence:      0.0,
+				Escalated:       true,
+				EscalateReason:  "all investigation tools are blocked by safety policy",
+			}, nil
+		}
+	}
+
 	// Simulate investigation completion
 	// TODO: Implement actual investigation loop with AI interaction
 	result := &InvestigationResultStub{
@@ -184,6 +270,16 @@ func (uc *AlertInvestigationUseCase) HandleAlert(
 		ActionsTaken:    0,
 		Duration:        time.Since(time.Now()),
 		Confidence:      0.8,
+	}
+
+	// Update store with final status if configured
+	uc.mu.RLock()
+	store := uc.investigationStore
+	uc.mu.RUnlock()
+
+	if store != nil {
+		stub := newSimpleInvestigationStub(invID, alert.ID(), "", result.Status)
+		_ = store.Update(ctx, stub)
 	}
 
 	return result, nil
@@ -240,6 +336,12 @@ func (uc *AlertInvestigationUseCase) StartInvestigation(
 	uc.activeInvestigations[invID] = inv
 	uc.alertToInvestigation[alert.ID()] = invID
 
+	// Persist to store if configured
+	if uc.investigationStore != nil {
+		stub := newSimpleInvestigationStub(invID, alert.ID(), "", "started")
+		_ = uc.investigationStore.Store(ctx, stub)
+	}
+
 	return invID, nil
 }
 
@@ -261,6 +363,12 @@ func (uc *AlertInvestigationUseCase) StopInvestigation(ctx context.Context, invI
 
 	if inv.cancel != nil {
 		inv.cancel()
+	}
+
+	// Update store with stopped status if configured
+	if uc.investigationStore != nil {
+		stub := newSimpleInvestigationStub(invID, inv.alertID, "", "stopped")
+		_ = uc.investigationStore.Update(ctx, stub)
 	}
 
 	delete(uc.activeInvestigations, invID)
@@ -332,6 +440,20 @@ func (uc *AlertInvestigationUseCase) SetPromptBuilderRegistry(registry PromptBui
 	uc.mu.Lock()
 	defer uc.mu.Unlock()
 	uc.promptBuilderRegistry = registry
+}
+
+// SetSafetyEnforcer configures the safety enforcer for tool and command validation.
+func (uc *AlertInvestigationUseCase) SetSafetyEnforcer(enforcer SafetyEnforcer) {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
+	uc.safetyEnforcer = enforcer
+}
+
+// SetInvestigationStore configures the store for investigation persistence.
+func (uc *AlertInvestigationUseCase) SetInvestigationStore(store InvestigationStoreWriter) {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
+	uc.investigationStore = store
 }
 
 // IsToolAllowed checks if a tool name is in the allowed list.
