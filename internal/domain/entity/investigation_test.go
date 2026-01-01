@@ -6,76 +6,18 @@ import (
 	"time"
 )
 
-// =============================================================================
-// Investigation Entity Tests - RED PHASE
-// These tests define the expected behavior of the Investigation entity.
-// All tests should FAIL until the implementation is complete.
-// =============================================================================
-
-// Sentinel errors expected to be defined in investigation.go.
+// Re-export errors for test assertions.
 var (
-	ErrEmptyInvestigationID = errors.New("investigation ID cannot be empty")
-	ErrEmptySessionID       = errors.New("session ID cannot be empty")
-	ErrInvalidStatus        = errors.New("invalid investigation status")
-	ErrInvalidConfidence    = errors.New("confidence must be between 0.0 and 1.0")
+	_ = ErrEmptyInvestigationID
+	_ = ErrEmptySessionID
+	_ = ErrInvalidStatus
+	_ = ErrInvalidConfidence
 )
 
-// Investigation status constants expected to be defined in investigation.go.
-const (
-	InvestigationStatusStarted   = "started"
-	InvestigationStatusRunning   = "running"
-	InvestigationStatusCompleted = "completed"
-	InvestigationStatusFailed    = "failed"
-	InvestigationStatusEscalated = "escalated"
-)
-
-// InvestigationFinding represents a finding from the investigation.
-type InvestigationFinding struct {
-	Type        string
-	Description string
-	Severity    string
-	Timestamp   time.Time
-}
-
-// InvestigationAction represents an action taken during investigation.
-type InvestigationAction struct {
-	ToolName  string
-	Input     map[string]interface{}
-	Output    string
-	Timestamp time.Time
-	Duration  time.Duration
-}
-
-// Investigation represents an ongoing or completed investigation of an alert.
-type Investigation struct{}
-
-// Stub function - to be implemented.
-func NewInvestigation(_, _, _ string) (*Investigation, error) {
-	return nil, errors.New("not implemented")
-}
-
-// Stub methods - to be implemented.
-func (i *Investigation) ID() string                       { return "" }
-func (i *Investigation) AlertID() string                  { return "" }
-func (i *Investigation) SessionID() string                { return "" }
-func (i *Investigation) Status() string                   { return "" }
-func (i *Investigation) Findings() []InvestigationFinding { return nil }
-func (i *Investigation) Actions() []InvestigationAction   { return nil }
-func (i *Investigation) ActionCount() int                 { return 0 }
-func (i *Investigation) Confidence() float64              { return 0 }
-func (i *Investigation) IsEscalated() bool                { return false }
-func (i *Investigation) StartedAt() time.Time             { return time.Time{} }
-func (i *Investigation) CompletedAt() time.Time           { return time.Time{} }
-func (i *Investigation) Duration() time.Duration          { return 0 }
-func (i *Investigation) IsComplete() bool                 { return false }
-func (i *Investigation) SetStatus(_ string) error         { return errors.New("not implemented") }
-func (i *Investigation) AddFinding(_ InvestigationFinding) {
-}
-func (i *Investigation) AddAction(_ InvestigationAction) {}
-func (i *Investigation) SetConfidence(_ float64) error   { return errors.New("not implemented") }
-func (i *Investigation) Complete()                       {}
-func (i *Investigation) Fail(_ string)                   {}
-func (i *Investigation) Escalate(_ string)               {}
+// =============================================================================
+// Investigation Entity Tests
+// These tests verify the behavior of the Investigation entity.
+// =============================================================================
 
 func TestNewInvestigation_WithValidFields(t *testing.T) {
 	inv, err := NewInvestigation("inv-001", "alert-001", "session-001")

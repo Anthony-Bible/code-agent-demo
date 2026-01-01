@@ -1,144 +1,14 @@
 package config
 
 import (
-	"errors"
 	"testing"
 	"time"
 )
 
 // =============================================================================
-// InvestigationConfig Tests - RED PHASE
-// These tests define the expected behavior of the InvestigationConfig.
-// All tests should FAIL until the implementation is complete.
+// InvestigationConfig Tests
+// These tests verify the behavior of InvestigationConfig.
 // =============================================================================
-
-// Sentinel errors expected to be defined in investigation_config.go.
-var (
-	ErrInvalidMaxActions             = errors.New("max actions must be positive")
-	ErrInvalidMaxDuration            = errors.New("max duration must be positive")
-	ErrInvalidMaxConcurrent          = errors.New("max concurrent investigations must be positive")
-	ErrInvalidConfidenceThreshold    = errors.New("confidence threshold must be between 0.0 and 1.0")
-	ErrInvalidErrorThreshold         = errors.New("error threshold must be positive")
-	ErrEmptyAllowedTools             = errors.New("allowed tools list cannot be empty")
-	ErrBlockedCommandContainsAllowed = errors.New("blocked command overlaps with allowed tools")
-)
-
-// InvestigationConfig holds safety and operational limits for investigations.
-// This is a stub struct - the real implementation should be in investigation_config.go.
-type InvestigationConfig struct{}
-
-// Stub functions - to be implemented in investigation_config.go.
-func NewInvestigationConfig() *InvestigationConfig {
-	return nil
-}
-
-func DefaultInvestigationConfig() *InvestigationConfig {
-	return nil
-}
-
-func (c *InvestigationConfig) MaxActionsPerInvestigation() int {
-	return 0
-}
-
-func (c *InvestigationConfig) MaxDuration() time.Duration {
-	return 0
-}
-
-func (c *InvestigationConfig) MaxConcurrentInvestigations() int {
-	return 0
-}
-
-func (c *InvestigationConfig) AllowedTools() []string {
-	return nil
-}
-
-func (c *InvestigationConfig) BlockedCommands() []string {
-	return nil
-}
-
-func (c *InvestigationConfig) AllowedDirectories() []string {
-	return nil
-}
-
-func (c *InvestigationConfig) RequireHumanApprovalPatterns() []string {
-	return nil
-}
-
-func (c *InvestigationConfig) ConfirmBeforeRestart() bool {
-	return false
-}
-
-func (c *InvestigationConfig) ConfirmBeforeDelete() bool {
-	return false
-}
-
-func (c *InvestigationConfig) EscalateOnConfidenceBelow() float64 {
-	return 0
-}
-
-func (c *InvestigationConfig) EscalateOnMultipleErrors() int {
-	return 0
-}
-
-func (c *InvestigationConfig) SetMaxActions(_ int) error {
-	return errors.New("not implemented")
-}
-
-func (c *InvestigationConfig) SetMaxDuration(_ time.Duration) error {
-	return errors.New("not implemented")
-}
-
-func (c *InvestigationConfig) SetMaxConcurrent(_ int) error {
-	return errors.New("not implemented")
-}
-
-func (c *InvestigationConfig) SetAllowedTools(_ []string) error {
-	return errors.New("not implemented")
-}
-
-func (c *InvestigationConfig) SetBlockedCommands(_ []string) error {
-	return errors.New("not implemented")
-}
-
-func (c *InvestigationConfig) SetAllowedDirectories(_ []string) {
-}
-
-func (c *InvestigationConfig) SetRequireHumanApprovalPatterns(_ []string) {
-}
-
-func (c *InvestigationConfig) SetConfirmBeforeRestart(_ bool) {
-}
-
-func (c *InvestigationConfig) SetConfirmBeforeDelete(_ bool) {
-}
-
-func (c *InvestigationConfig) SetEscalateOnConfidenceBelow(_ float64) error {
-	return errors.New("not implemented")
-}
-
-func (c *InvestigationConfig) SetEscalateOnMultipleErrors(_ int) error {
-	return errors.New("not implemented")
-}
-
-func (c *InvestigationConfig) IsToolAllowed(_ string) bool {
-	return false
-}
-
-func (c *InvestigationConfig) IsCommandBlocked(_ string) bool {
-	return false
-}
-
-func (c *InvestigationConfig) IsDirectoryAllowed(_ string) bool {
-	return false
-}
-
-func (c *InvestigationConfig) RequiresHumanApproval(_ string) bool {
-	return false
-}
-
-func (c *InvestigationConfig) Validate() error {
-	return errors.New("not implemented")
-}
 
 // =============================================================================
 // Default Config Tests
