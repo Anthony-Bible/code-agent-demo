@@ -754,3 +754,400 @@ func TestAlertInvestigationErrors_HaveMessages(t *testing.T) {
 		t.Error("ErrCommandBlocked should have a message")
 	}
 }
+
+// =============================================================================
+// Safety Enforcer Integration Tests (Phase 4)
+// These tests verify that AlertInvestigationUseCase integrates with SafetyEnforcer.
+// =============================================================================
+
+func TestAlertInvestigationUseCase_SetSafetyEnforcer(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
+	}
+
+	enforcer := NewMockSafetyEnforcer()
+	if enforcer == nil {
+		t.Skip("NewMockSafetyEnforcer() returned nil")
+	}
+
+	// Should not panic
+	uc.SetSafetyEnforcer(enforcer)
+}
+
+func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_BlockedTool(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
+	}
+
+	// Create a mock enforcer that blocks all tools
+	enforcer := NewMockSafetyEnforcerWithBlockedTools([]string{"bash", "read_file", "list_files"})
+	if enforcer == nil {
+		t.Skip("NewMockSafetyEnforcerWithBlockedTools() returned nil")
+	}
+	uc.SetSafetyEnforcer(enforcer)
+
+	alert := &AlertForInvestigation{
+		id:       "alert-blocked-tool",
+		source:   "prometheus",
+		severity: "warning",
+		title:    "Test Alert",
+	}
+
+	result, err := uc.HandleAlert(context.Background(), alert)
+	// Should fail or escalate due to blocked tools
+	if err == nil && result != nil && result.Status == "completed" {
+		t.Error("HandleAlert() with blocked tools should not complete successfully")
+	}
+	if result != nil && !result.Escalated && result.Status != "failed" {
+		t.Error("HandleAlert() with blocked tools should either escalate or fail")
+	}
+}
+
+func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_BlockedCommand(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
+	}
+
+	// Create a mock enforcer that blocks dangerous commands
+	enforcer := NewMockSafetyEnforcerWithBlockedCommands([]string{"rm -rf", "dd if="})
+	if enforcer == nil {
+		t.Skip("NewMockSafetyEnforcerWithBlockedCommands() returned nil")
+	}
+	uc.SetSafetyEnforcer(enforcer)
+
+	alert := &AlertForInvestigation{
+		id:       "alert-blocked-command",
+		source:   "prometheus",
+		severity: "warning",
+		title:    "Test Alert",
+	}
+
+	// The investigation itself should start, but if it tries to execute
+	// a blocked command, it should be rejected
+	result, err := uc.HandleAlert(context.Background(), alert)
+	// We're testing that the enforcer is wired in - actual behavior depends on implementation
+	if err != nil {
+		t.Logf("HandleAlert() with enforcer error = %v (may be expected)", err)
+	}
+	if result != nil {
+		t.Logf("HandleAlert() status = %v", result.Status)
+	}
+}
+
+func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_ActionBudgetExhausted(t *testing.T) {
+	config := AlertInvestigationUseCaseConfig{
+		MaxActions:    3, // Very low action budget
+		MaxDuration:   15 * time.Minute,
+		MaxConcurrent: 5,
+		AllowedTools:  []string{"bash", "read_file"},
+	}
+
+	uc := NewAlertInvestigationUseCaseWithConfig(config)
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
+	}
+
+	// Create a mock enforcer with the same low action budget
+	enforcer := NewMockSafetyEnforcerWithActionBudget(3)
+	if enforcer == nil {
+		t.Skip("NewMockSafetyEnforcerWithActionBudget() returned nil")
+	}
+	uc.SetSafetyEnforcer(enforcer)
+
+	alert := &AlertForInvestigation{
+		id:       "alert-budget-test",
+		source:   "prometheus",
+		severity: "warning",
+		title:    "Test Alert",
+	}
+
+	result, err := uc.HandleAlert(context.Background(), alert)
+	// When action budget is exhausted, investigation should stop
+	if result != nil && result.ActionsTaken > 3 {
+		t.Errorf("HandleAlert() ActionsTaken = %d, should not exceed budget of 3", result.ActionsTaken)
+	}
+	if err != nil {
+		t.Logf("HandleAlert() with budget limit error = %v (may be expected)", err)
+	}
+}
+
+func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_Timeout(t *testing.T) {
+	config := AlertInvestigationUseCaseConfig{
+		MaxDuration:   50 * time.Millisecond, // Very short timeout
+		MaxConcurrent: 5,
+		AllowedTools:  []string{"bash", "read_file"},
+	}
+
+	uc := NewAlertInvestigationUseCaseWithConfig(config)
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
+	}
+
+	// Create a mock enforcer that respects timeout
+	enforcer := NewMockSafetyEnforcer()
+	if enforcer == nil {
+		t.Skip("NewMockSafetyEnforcer() returned nil")
+	}
+	uc.SetSafetyEnforcer(enforcer)
+
+	alert := &AlertForInvestigation{
+		id:       "alert-timeout-test",
+		source:   "prometheus",
+		severity: "warning",
+		title:    "Test Alert",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	result, err := uc.HandleAlert(ctx, alert)
+	// Should timeout or complete quickly
+	if err != nil {
+		t.Logf("HandleAlert() with timeout error = %v (expected for timeout)", err)
+	}
+	if result != nil && result.Status == "running" {
+		t.Error("HandleAlert() should not still be running after timeout")
+	}
+}
+
+// =============================================================================
+// Investigation Store Integration Tests (Phase 4)
+// These tests verify that AlertInvestigationUseCase integrates with InvestigationStore.
+// =============================================================================
+
+func TestAlertInvestigationUseCase_SetInvestigationStore(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
+	}
+
+	store := NewMockInvestigationStore()
+	if store == nil {
+		t.Skip("NewMockInvestigationStore() returned nil")
+	}
+
+	// Should not panic
+	uc.SetInvestigationStore(store)
+}
+
+func TestAlertInvestigationUseCase_HandleAlert_WithStore_PersistsInvestigation(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
+	}
+
+	store := NewMockInvestigationStore()
+	if store == nil {
+		t.Skip("NewMockInvestigationStore() returned nil")
+	}
+	uc.SetInvestigationStore(store)
+
+	alert := &AlertForInvestigation{
+		id:       "alert-persist-test",
+		source:   "prometheus",
+		severity: "warning",
+		title:    "Test Alert",
+	}
+
+	result, err := uc.HandleAlert(context.Background(), alert)
+	if err != nil {
+		t.Fatalf("HandleAlert() error = %v", err)
+	}
+
+	// Verify the investigation was persisted to the store
+	stored, err := store.Get(context.Background(), result.InvestigationID)
+	if err != nil {
+		t.Errorf("Store.Get() error = %v, investigation should be persisted", err)
+	}
+	if stored == nil {
+		t.Error("Store.Get() returned nil, investigation should be persisted")
+	}
+	if stored != nil && stored.AlertID() != "alert-persist-test" {
+		t.Errorf("Stored investigation AlertID = %v, want alert-persist-test", stored.AlertID())
+	}
+}
+
+func TestAlertInvestigationUseCase_HandleAlert_WithStore_UpdatesStatus(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
+	}
+
+	store := NewMockInvestigationStore()
+	if store == nil {
+		t.Skip("NewMockInvestigationStore() returned nil")
+	}
+	uc.SetInvestigationStore(store)
+
+	alert := &AlertForInvestigation{
+		id:       "alert-status-update",
+		source:   "prometheus",
+		severity: "warning",
+		title:    "Test Alert",
+	}
+
+	result, err := uc.HandleAlert(context.Background(), alert)
+	if err != nil {
+		t.Fatalf("HandleAlert() error = %v", err)
+	}
+
+	// Verify the final status was updated in the store
+	stored, err := store.Get(context.Background(), result.InvestigationID)
+	if err != nil {
+		t.Fatalf("Store.Get() error = %v", err)
+	}
+
+	// Status should match the result status
+	if stored != nil && stored.Status() != result.Status {
+		t.Errorf("Stored status = %v, result status = %v, should match", stored.Status(), result.Status)
+	}
+}
+
+func TestAlertInvestigationUseCase_StartInvestigation_WithStore_PersistsInitialState(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
+	}
+
+	store := NewMockInvestigationStore()
+	if store == nil {
+		t.Skip("NewMockInvestigationStore() returned nil")
+	}
+	uc.SetInvestigationStore(store)
+
+	alert := &AlertForInvestigation{
+		id:       "alert-initial-state",
+		source:   "prometheus",
+		severity: "warning",
+		title:    "Test Alert",
+	}
+
+	invID, err := uc.StartInvestigation(context.Background(), alert)
+	if err != nil {
+		t.Fatalf("StartInvestigation() error = %v", err)
+	}
+
+	// Verify investigation was stored with "started" or "running" status
+	stored, err := store.Get(context.Background(), invID)
+	if err != nil {
+		t.Fatalf("Store.Get() error = %v", err)
+	}
+
+	if stored == nil {
+		t.Fatal("Store.Get() returned nil")
+	}
+
+	status := stored.Status()
+	if status != "started" && status != "running" {
+		t.Errorf("Initial status = %v, want 'started' or 'running'", status)
+	}
+}
+
+func TestAlertInvestigationUseCase_StopInvestigation_WithStore_UpdatesStatus(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
+	}
+
+	store := NewMockInvestigationStore()
+	if store == nil {
+		t.Skip("NewMockInvestigationStore() returned nil")
+	}
+	uc.SetInvestigationStore(store)
+
+	alert := &AlertForInvestigation{
+		id:       "alert-stop-update",
+		source:   "prometheus",
+		severity: "warning",
+		title:    "Test Alert",
+	}
+
+	invID, err := uc.StartInvestigation(context.Background(), alert)
+	if err != nil {
+		t.Fatalf("StartInvestigation() error = %v", err)
+	}
+
+	err = uc.StopInvestigation(context.Background(), invID)
+	if err != nil {
+		t.Fatalf("StopInvestigation() error = %v", err)
+	}
+
+	// Verify status was updated to stopped/cancelled
+	stored, err := store.Get(context.Background(), invID)
+	if err != nil {
+		t.Fatalf("Store.Get() error = %v", err)
+	}
+
+	if stored == nil {
+		t.Fatal("Store.Get() returned nil")
+	}
+
+	status := stored.Status()
+	if status != "stopped" && status != "cancelled" && status != "completed" {
+		t.Errorf("Status after stop = %v, want 'stopped', 'cancelled', or 'completed'", status)
+	}
+}
+
+// =============================================================================
+// Combined Safety Enforcer + Store Integration Tests
+// =============================================================================
+
+func TestAlertInvestigationUseCase_WithEnforcerAndStore_Integration(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
+	}
+
+	store := NewMockInvestigationStore()
+	if store == nil {
+		t.Skip("NewMockInvestigationStore() returned nil")
+	}
+	uc.SetInvestigationStore(store)
+
+	enforcer := NewMockSafetyEnforcer()
+	if enforcer == nil {
+		t.Skip("NewMockSafetyEnforcer() returned nil")
+	}
+	uc.SetSafetyEnforcer(enforcer)
+
+	alert := &AlertForInvestigation{
+		id:       "alert-full-integration",
+		source:   "prometheus",
+		severity: "critical",
+		title:    "Full Integration Test",
+	}
+
+	result, err := uc.HandleAlert(context.Background(), alert)
+	if err != nil {
+		t.Logf("HandleAlert() error = %v (may be expected)", err)
+	}
+
+	if result != nil {
+		// Verify both enforcer and store were used
+		stored, storeErr := store.Get(context.Background(), result.InvestigationID)
+		if storeErr != nil {
+			t.Errorf("Store.Get() error = %v", storeErr)
+		}
+		if stored != nil {
+			t.Logf("Investigation persisted with status: %v", stored.Status())
+		}
+	}
+}
+
+// =============================================================================
+// Mock Types for Testing (These will be implemented in GREEN phase)
+// =============================================================================
+
+// MockSafetyEnforcer is a test double for SafetyEnforcer interface.
+// It will be created in the GREEN phase.
+// func NewMockSafetyEnforcer() *MockSafetyEnforcer
+// func NewMockSafetyEnforcerWithBlockedTools(tools []string) *MockSafetyEnforcer
+// func NewMockSafetyEnforcerWithBlockedCommands(commands []string) *MockSafetyEnforcer
+// func NewMockSafetyEnforcerWithActionBudget(budget int) *MockSafetyEnforcer
+
+// MockInvestigationStore is a test double for InvestigationStore interface.
+// It will be created in the GREEN phase.
+// func NewMockInvestigationStore() *MockInvestigationStore
