@@ -4,13 +4,23 @@ import (
 	"code-editing-agent/internal/domain/port"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 )
 
-// ErrorCallback is called when a source reports an error.
+// Manager errors for source registration and lookup.
+var (
+	errSourceAlreadyRegistered = errors.New("source already registered")
+	errSourceNotFound          = errors.New("source not found")
+	errFailedToCloseSources    = errors.New("failed to close one or more sources")
+)
+
+// ErrorCallback is called when a source reports an error during operation.
+// The source parameter contains the name of the source that encountered the error.
 type ErrorCallback func(source string, err error)
 
-// LocalAlertSourceManager manages alert sources locally.
+// LocalAlertSourceManager implements port.AlertSourceManager for local/in-process alert handling.
+// It maintains a thread-safe registry of alert sources and manages their lifecycle.
 type LocalAlertSourceManager struct {
 	mu            sync.RWMutex
 	sources       map[string]port.AlertSource
@@ -28,28 +38,30 @@ func NewLocalAlertSourceManager() *LocalAlertSourceManager {
 	}
 }
 
-// RegisterSource registers an alert source.
+// RegisterSource adds an alert source to the manager's registry.
+// Returns an error if a source with the same name is already registered.
 func (m *LocalAlertSourceManager) RegisterSource(source port.AlertSource) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	name := source.Name()
 	if _, exists := m.sources[name]; exists {
-		return errors.New("source already registered: " + name)
+		return fmt.Errorf("%w: %s", errSourceAlreadyRegistered, name)
 	}
 
 	m.sources[name] = source
 	return nil
 }
 
-// UnregisterSource unregisters and closes an alert source.
+// UnregisterSource removes an alert source from the registry and closes it.
+// Returns an error if the source is not found or if closing fails.
 func (m *LocalAlertSourceManager) UnregisterSource(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	source, exists := m.sources[name]
 	if !exists {
-		return errors.New("source not found: " + name)
+		return fmt.Errorf("%w: %s", errSourceNotFound, name)
 	}
 
 	delete(m.sources, name)
@@ -61,20 +73,22 @@ func (m *LocalAlertSourceManager) UnregisterSource(name string) error {
 	return nil
 }
 
-// GetSource returns a registered source by name.
+// GetSource retrieves a registered source by name.
+// Returns an error if the source is not found.
 func (m *LocalAlertSourceManager) GetSource(name string) (port.AlertSource, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	source, exists := m.sources[name]
 	if !exists {
-		return nil, errors.New("source not found: " + name)
+		return nil, fmt.Errorf("%w: %s", errSourceNotFound, name)
 	}
 
 	return source, nil
 }
 
-// ListSources returns all registered sources.
+// ListSources returns a slice of all registered alert sources.
+// The returned slice is a copy; modifications do not affect the registry.
 func (m *LocalAlertSourceManager) ListSources() []port.AlertSource {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -86,21 +100,24 @@ func (m *LocalAlertSourceManager) ListSources() []port.AlertSource {
 	return sources
 }
 
-// SetAlertHandler sets the handler for incoming alerts.
+// SetAlertHandler sets the callback function for processing incoming alerts.
+// The handler is called for each alert received from any registered source.
 func (m *LocalAlertSourceManager) SetAlertHandler(handler port.AlertHandler) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.alertHandler = handler
 }
 
-// SetErrorCallback sets the callback for source errors.
+// SetErrorCallback sets the callback function for source error notifications.
+// The callback is invoked when any registered source encounters an error.
 func (m *LocalAlertSourceManager) SetErrorCallback(callback ErrorCallback) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.errorCallback = callback
 }
 
-// Start starts the manager.
+// Start initializes the manager with the given context.
+// The context is used to control the lifecycle of background operations.
 func (m *LocalAlertSourceManager) Start(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -111,7 +128,8 @@ func (m *LocalAlertSourceManager) Start(ctx context.Context) error {
 	return nil
 }
 
-// Shutdown stops the manager and closes all sources.
+// Shutdown stops the manager and closes all registered sources.
+// Returns an error if any source fails to close.
 func (m *LocalAlertSourceManager) Shutdown() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -120,17 +138,17 @@ func (m *LocalAlertSourceManager) Shutdown() error {
 		m.cancel()
 	}
 
-	var errs []error
+	var closeErrors []error
 	for name, source := range m.sources {
 		if err := source.Close(); err != nil {
-			errs = append(errs, errors.New(name+": "+err.Error()))
+			closeErrors = append(closeErrors, fmt.Errorf("%s: %w", name, err))
 		}
 	}
 
 	m.started = false
 
-	if len(errs) > 0 {
-		return errors.New("failed to close sources")
+	if len(closeErrors) > 0 {
+		return errFailedToCloseSources
 	}
 
 	return nil

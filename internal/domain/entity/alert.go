@@ -1,3 +1,5 @@
+// Package entity contains the core domain entities for the code-editing-agent.
+// These entities represent the fundamental business objects and their behaviors.
 package entity
 
 import (
@@ -6,21 +8,33 @@ import (
 	"time"
 )
 
-// Severity constants.
+// Alert severity levels define the urgency of an alert.
+// Use these constants when creating new alerts to ensure valid severity values.
 const (
+	// SeverityCritical indicates an urgent issue requiring immediate attention.
 	SeverityCritical = "critical"
-	SeverityWarning  = "warning"
-	SeverityInfo     = "info"
+	// SeverityWarning indicates a potential issue that should be investigated.
+	SeverityWarning = "warning"
+	// SeverityInfo indicates an informational notification.
+	SeverityInfo = "info"
 )
 
-// Sentinel errors.
+// Sentinel errors for Alert validation.
+// These errors are returned by NewAlert and Validate when validation fails.
 var (
-	ErrEmptyAlertID     = errors.New("alert ID cannot be empty")
+	// ErrEmptyAlertID is returned when an alert ID is empty or whitespace-only.
+	ErrEmptyAlertID = errors.New("alert ID cannot be empty")
+	// ErrEmptyAlertSource is returned when an alert source is empty or whitespace-only.
 	ErrEmptyAlertSource = errors.New("alert source cannot be empty")
-	ErrEmptyAlertTitle  = errors.New("alert title cannot be empty")
-	ErrInvalidSeverity  = errors.New("invalid severity level")
+	// ErrEmptyAlertTitle is returned when an alert title is empty or whitespace-only.
+	ErrEmptyAlertTitle = errors.New("alert title cannot be empty")
+	// ErrInvalidSeverity is returned when an alert severity is not one of the valid constants.
+	ErrInvalidSeverity = errors.New("invalid severity level")
 )
 
+// Alert represents a notification from an alerting system such as Prometheus Alertmanager.
+// It is an immutable entity once created, with optional fields set via builder methods.
+// Alert implements defensive copying for mutable fields like labels.
 type Alert struct {
 	id          string
 	source      string
@@ -32,6 +46,9 @@ type Alert struct {
 	rawPayload  []byte
 }
 
+// NewAlert creates a new Alert with the required fields.
+// The id, source, and title fields are trimmed of leading/trailing whitespace.
+// Returns an error if validation fails (empty required fields or invalid severity).
 func NewAlert(id, source, severity, title string) (*Alert, error) {
 	a := &Alert{
 		id:        strings.TrimSpace(id),
@@ -47,6 +64,8 @@ func NewAlert(id, source, severity, title string) (*Alert, error) {
 	return a, nil
 }
 
+// Validate checks that all required fields are set and valid.
+// Returns the first validation error encountered, or nil if the alert is valid.
 func (a *Alert) Validate() error {
 	if a.id == "" {
 		return ErrEmptyAlertID
@@ -129,6 +148,7 @@ func (a *Alert) WithRawPayload(payload []byte) *Alert {
 	return a
 }
 
+// isValidSeverity checks if the given string is a valid severity level.
 func isValidSeverity(s string) bool {
 	switch s {
 	case SeverityCritical, SeverityWarning, SeverityInfo:
