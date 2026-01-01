@@ -16,7 +16,7 @@ import (
 // All tests should FAIL until the implementation is complete.
 // =============================================================================
 
-// mockAlertSource is a test double for port.AlertSource
+// mockAlertSource is a test double for port.AlertSource.
 type mockAlertSource struct {
 	name       string
 	sourceType port.SourceType
@@ -44,9 +44,10 @@ func (m *mockAlertSource) Close() error {
 	return m.closeErr
 }
 
-// mockWebhookSource is a test double for port.WebhookAlertSource
+// mockWebhookSource is a test double for port.WebhookAlertSource.
 type mockWebhookSource struct {
 	*mockAlertSource
+
 	webhookPath  string
 	handleFunc   func(ctx context.Context, payload []byte) ([]*entity.Alert, error)
 	handledCalls int
@@ -296,7 +297,7 @@ func TestLocalAlertSourceManager_ListSources(t *testing.T) {
 	t.Run("should return all registered sources", func(t *testing.T) {
 		manager := NewLocalAlertSourceManager()
 
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			source := newMockAlertSource(
 				"source-"+string(rune('a'+i)),
 				port.SourceTypeWebhook,
@@ -494,7 +495,7 @@ func TestLocalAlertSourceManager_Concurrency(t *testing.T) {
 		var wg sync.WaitGroup
 		numGoroutines := 10
 
-		for i := 0; i < numGoroutines; i++ {
+		for i := range numGoroutines {
 			wg.Add(1)
 			go func(id int) {
 				defer wg.Done()
@@ -518,7 +519,7 @@ func TestLocalAlertSourceManager_Concurrency(t *testing.T) {
 		manager := NewLocalAlertSourceManager()
 
 		// Pre-register sources
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			source := newMockAlertSource(
 				"source-"+string(rune('a'+i)),
 				port.SourceTypeWebhook,
@@ -530,7 +531,7 @@ func TestLocalAlertSourceManager_Concurrency(t *testing.T) {
 		numReaders := 50
 		errors := make(chan error, numReaders)
 
-		for i := 0; i < numReaders; i++ {
+		for range numReaders {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -557,11 +558,11 @@ func TestLocalAlertSourceManager_Concurrency(t *testing.T) {
 		var failedGets int32
 
 		// Start some readers
-		for i := 0; i < 20; i++ {
+		for range 20 {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				for j := 0; j < 10; j++ {
+				for range 10 {
 					_, err := manager.GetSource("target-source")
 					if err == nil {
 						atomic.AddInt32(&successfulGets, 1)
@@ -594,7 +595,7 @@ func TestLocalAlertSourceManager_Concurrency(t *testing.T) {
 		manager := NewLocalAlertSourceManager()
 
 		// Pre-register some sources
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			source := newMockAlertSource(
 				"source-"+string(rune('a'+i)),
 				port.SourceTypeWebhook,
@@ -605,7 +606,7 @@ func TestLocalAlertSourceManager_Concurrency(t *testing.T) {
 		var wg sync.WaitGroup
 		numReaders := 100
 
-		for i := 0; i < numReaders; i++ {
+		for range numReaders {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()

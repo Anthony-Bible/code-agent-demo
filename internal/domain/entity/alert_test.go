@@ -1,6 +1,7 @@
 package entity
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -142,7 +143,7 @@ func TestNewAlert_Validation(t *testing.T) {
 				if got != nil {
 					t.Errorf("NewAlert() returned non-nil alert on error: %+v", got)
 				}
-				if tt.expectedErr != nil && err != tt.expectedErr {
+				if tt.expectedErr != nil && !errors.Is(err, tt.expectedErr) {
 					t.Errorf("NewAlert() error = %v, expected %v", err, tt.expectedErr)
 				}
 			} else {

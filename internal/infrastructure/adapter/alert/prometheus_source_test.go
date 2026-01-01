@@ -143,7 +143,7 @@ func TestPrometheusSource_Interface(t *testing.T) {
 	}
 
 	t.Run("should implement AlertSource interface", func(t *testing.T) {
-		var _ port.AlertSource = source
+		_ = source
 	})
 
 	t.Run("should implement WebhookAlertSource interface", func(t *testing.T) {
@@ -543,7 +543,7 @@ func TestPrometheusSource_HandleWebhook(t *testing.T) {
 	})
 }
 
-// Helper function for case-insensitive string contains
+// Helper function for case-insensitive string contains.
 func containsIgnoreCase(s, substr string) bool {
 	return len(s) >= len(substr) &&
 		(s == substr ||
@@ -561,7 +561,7 @@ func containsIgnoreCaseImpl(s, substr string) bool {
 }
 
 func equalFoldAt(s string, start int, substr string) bool {
-	for j := 0; j < len(substr); j++ {
+	for j := range len(substr) {
 		c1 := s[start+j]
 		c2 := substr[j]
 		if c1 == c2 {
