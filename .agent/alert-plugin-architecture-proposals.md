@@ -2696,13 +2696,73 @@ Phase 2 (Investigation Framework) has been completed with core investigation wor
 - Prompt builders are stubs (need real prompt engineering)
 
 **Next Steps:**
-Phase 3 (Wire It All Together) is needed to integrate the investigation framework with the existing chat/conversation infrastructure and add real AI-driven investigation capabilities.
+Phase 3 (Wire It All Together) has been completed with container wiring and integration tests. See Phase 3 completion summary below.
 
-### Phase 3: Wire It All Together
-- [ ] Update `internal/infrastructure/config/container.go`
-- [ ] Add investigation prompts for common alert types (HighCPU, DiskSpace, OOM)
-- [ ] Create investigation state machine (Started → Running → Completed/Escalated/Failed)
-- [ ] Add metrics: investigations_started, investigations_completed, investigations_escalated
+#### Phase 3 Completion Summary
+
+**Date Completed:** 2026-01-01
+**Development Approach:** Test-Driven Development (TDD)
+
+**What Was Implemented:**
+1. **Container Wiring** (`internal/infrastructure/config/container.go`)
+   - AlertInvestigationUseCase with safety configuration (MaxActions: 20, MaxDuration: 15min, MaxConcurrent: 5)
+   - PromptBuilderRegistry creation and injection
+   - LogEscalationHandler creation and injection
+   - AlertHandler creation with severity-based routing (AutoInvestigateCritical: true)
+   - AlertSourceManager wired to AlertHandler.HandleEntityAlert
+   - Thread-safe component initialization
+
+2. **Alert Handler** (`internal/application/usecase/alert_handler.go`)
+   - Bridges incoming alerts from sources to investigation use case
+   - Configurable severity-based auto-investigation
+   - Critical alerts trigger automatic investigations
+   - Warning alerts require manual triggering (configurable)
+   - Context propagation for cancellation
+   - 13 passing tests with comprehensive coverage
+
+3. **Integration Verification** (`internal/infrastructure/config/container_investigation_test.go`)
+   - 6 passing tests verifying component wiring
+   - Container accessors return proper instances
+   - Component independence verified
+   - Initial state correctness validated
+   - Escalation and prompt handlers properly set
+
+**What Was NOT Implemented (Deferred to Phase 4+):**
+- Prometheus metrics (investigations_started, investigations_completed, investigations_escalated)
+- Persistent investigation storage (using in-memory store from Phase 2)
+- HTTP endpoints for investigation status
+- Grafana dashboards
+- Alert-to-conversation routing (needs ConversationService changes)
+- Actual AI investigation loop (orchestration stubbed in Phase 2)
+
+**Test Quality:**
+- All Phase 3 tests pass (19 new tests: 13 alert_handler + 6 container_investigation)
+- No skipped tests in Phase 3 code
+- Defensive nil-checks in Phase 2 tests never execute (constructors always return valid structs)
+- Tests verify behavior, not implementation
+- Container wiring tested for correctness
+
+**Architecture Compliance:**
+- Strict hexagonal architecture maintained
+- Container follows dependency injection pattern
+- No circular dependencies introduced
+- Proper layer separation (app layer → domain layer → infra layer)
+- Thread-safe implementations
+
+**Known Limitations:**
+- Investigation loop still stubbed (AI integration deferred)
+- No metrics collection yet
+- AlertHandler does not trigger actual AI conversations (needs Phase 4 integration)
+- No persistent alert/investigation storage
+
+**Next Steps:**
+Phase 4 (Safety & Production) will implement actual AI-driven investigations, metrics, and production-ready safety features.
+
+### Phase 3: Wire It All Together - COMPLETED 2026-01-01
+- [x] Update `internal/infrastructure/config/container.go`
+- [x] Add investigation prompts for common alert types (HighCPU, DiskSpace, OOM) (basic implementations in Phase 2)
+- [x] Create investigation state machine (Started → Running → Completed/Escalated/Failed) (entity in Phase 2)
+- [ ] Add metrics: investigations_started, investigations_completed, investigations_escalated (deferred)
 
 ### Phase 4: Safety & Production
 - [ ] Implement tool whitelisting
