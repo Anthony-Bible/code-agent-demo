@@ -35,18 +35,26 @@ type InvestigationQuery struct {
 	Limit     int       // Maximum results to return (0 = unlimited)
 }
 
-// InvestigationStub represents a lightweight investigation record for storage.
-// It contains only the essential fields needed for persistence and querying.
+// InvestigationStub represents an investigation record for storage.
+// It contains fields for both metadata and full investigation results.
 type InvestigationStub struct {
 	id        string    // Unique identifier
 	alertID   string    // Associated alert ID
 	sessionID string    // Session context
 	status    string    // Current status
 	startedAt time.Time // When the investigation began
+	// Full result fields
+	completedAt    time.Time // When the investigation finished
+	findings       []string  // Summary of findings discovered
+	actionsTaken   int       // Number of tool executions performed
+	durationNanos  int64     // Duration in nanoseconds (serializable)
+	confidence     float64   // Confidence level [0.0, 1.0]
+	escalated      bool      // Whether escalated to human
+	escalateReason string    // Reason for escalation
 }
 
 // NewInvestigationStub creates a new InvestigationStub with the given parameters.
-// This is the primary constructor for creating investigation stubs.
+// This is the primary constructor for creating investigation stubs with minimal metadata.
 func NewInvestigationStub(id, alertID, sessionID, status string, startedAt time.Time) *InvestigationStub {
 	return &InvestigationStub{
 		id:        id,
@@ -54,6 +62,34 @@ func NewInvestigationStub(id, alertID, sessionID, status string, startedAt time.
 		sessionID: sessionID,
 		status:    status,
 		startedAt: startedAt,
+	}
+}
+
+// NewInvestigationStubWithResult creates an InvestigationStub with full result data.
+// Use this constructor when storing completed investigation results.
+func NewInvestigationStubWithResult(
+	id, alertID, sessionID, status string,
+	startedAt, completedAt time.Time,
+	findings []string,
+	actionsTaken int,
+	duration time.Duration,
+	confidence float64,
+	escalated bool,
+	escalateReason string,
+) *InvestigationStub {
+	return &InvestigationStub{
+		id:             id,
+		alertID:        alertID,
+		sessionID:      sessionID,
+		status:         status,
+		startedAt:      startedAt,
+		completedAt:    completedAt,
+		findings:       findings,
+		actionsTaken:   actionsTaken,
+		durationNanos:  int64(duration),
+		confidence:     confidence,
+		escalated:      escalated,
+		escalateReason: escalateReason,
 	}
 }
 
@@ -77,6 +113,28 @@ func (i *InvestigationStub) StartedAt() time.Time {
 	}
 	return i.startedAt
 }
+
+// CompletedAt returns when the investigation finished.
+// Returns zero time if the investigation is still in progress.
+func (i *InvestigationStub) CompletedAt() time.Time { return i.completedAt }
+
+// Findings returns the summary findings discovered during the investigation.
+func (i *InvestigationStub) Findings() []string { return i.findings }
+
+// ActionsTaken returns the number of tool executions performed.
+func (i *InvestigationStub) ActionsTaken() int { return i.actionsTaken }
+
+// Duration returns the total investigation duration.
+func (i *InvestigationStub) Duration() time.Duration { return time.Duration(i.durationNanos) }
+
+// Confidence returns the confidence level in the investigation outcome [0.0, 1.0].
+func (i *InvestigationStub) Confidence() float64 { return i.confidence }
+
+// Escalated returns true if the investigation was escalated to a human.
+func (i *InvestigationStub) Escalated() bool { return i.escalated }
+
+// EscalateReason returns the reason for escalation, if applicable.
+func (i *InvestigationStub) EscalateReason() string { return i.escalateReason }
 
 // InvestigationStore defines the interface for investigation persistence.
 // Implementations must be safe for concurrent access from multiple goroutines.

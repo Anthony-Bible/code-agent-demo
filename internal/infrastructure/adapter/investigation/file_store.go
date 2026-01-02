@@ -14,11 +14,18 @@ import (
 
 // investigationJSON is the JSON representation of an investigation for file storage.
 type investigationJSON struct {
-	ID        string    `json:"id"`
-	AlertID   string    `json:"alert_id"`
-	SessionID string    `json:"session_id"`
-	Status    string    `json:"status"`
-	StartedAt time.Time `json:"started_at"`
+	ID             string    `json:"id"`
+	AlertID        string    `json:"alert_id"`
+	SessionID      string    `json:"session_id"`
+	Status         string    `json:"status"`
+	StartedAt      time.Time `json:"started_at"`
+	CompletedAt    time.Time `json:"completed_at,omitempty"`
+	Findings       []string  `json:"findings,omitempty"`
+	ActionsTaken   int       `json:"actions_taken,omitempty"`
+	DurationNanos  int64     `json:"duration_nanos,omitempty"`
+	Confidence     float64   `json:"confidence,omitempty"`
+	Escalated      bool      `json:"escalated,omitempty"`
+	EscalateReason string    `json:"escalate_reason,omitempty"`
 }
 
 // FileInvestigationStore implements InvestigationStore with file-based persistence.
@@ -263,11 +270,18 @@ func (s *FileInvestigationStore) Close() error {
 // writeFile writes an investigation to disk as JSON.
 func (s *FileInvestigationStore) writeFile(inv *service.InvestigationStub) error {
 	data := investigationJSON{
-		ID:        inv.ID(),
-		AlertID:   inv.AlertID(),
-		SessionID: inv.SessionID(),
-		Status:    inv.Status(),
-		StartedAt: inv.StartedAt(),
+		ID:             inv.ID(),
+		AlertID:        inv.AlertID(),
+		SessionID:      inv.SessionID(),
+		Status:         inv.Status(),
+		StartedAt:      inv.StartedAt(),
+		CompletedAt:    inv.CompletedAt(),
+		Findings:       inv.Findings(),
+		ActionsTaken:   inv.ActionsTaken(),
+		DurationNanos:  int64(inv.Duration()),
+		Confidence:     inv.Confidence(),
+		Escalated:      inv.Escalated(),
+		EscalateReason: inv.EscalateReason(),
 	}
 
 	bytes, err := json.Marshal(data)
@@ -299,12 +313,19 @@ func (s *FileInvestigationStore) readFile(id string) (*service.InvestigationStub
 		return nil, err
 	}
 
-	return service.NewInvestigationStub(
+	return service.NewInvestigationStubWithResult(
 		data.ID,
 		data.AlertID,
 		data.SessionID,
 		data.Status,
 		data.StartedAt,
+		data.CompletedAt,
+		data.Findings,
+		data.ActionsTaken,
+		time.Duration(data.DurationNanos),
+		data.Confidence,
+		data.Escalated,
+		data.EscalateReason,
 	), nil
 }
 

@@ -251,11 +251,18 @@ func (r *InvestigationRunner) Run(
 	// Persist result to store if configured
 	if r.store != nil && result != nil {
 		stub := &investigationStubForStore{
-			id:        result.InvestigationID,
-			alertID:   result.AlertID,
-			sessionID: rc.sessionID,
-			status:    result.Status,
-			startedAt: rc.startTime,
+			id:             result.InvestigationID,
+			alertID:        result.AlertID,
+			sessionID:      rc.sessionID,
+			status:         result.Status,
+			startedAt:      rc.startTime,
+			completedAt:    time.Now(),
+			findings:       result.Findings,
+			actionsTaken:   result.ActionsTaken,
+			durationNanos:  int64(result.Duration),
+			confidence:     result.Confidence,
+			escalated:      result.Escalated,
+			escalateReason: result.EscalateReason,
 		}
 		_ = r.store.Store(ctx, stub)
 	}
@@ -267,6 +274,13 @@ func (r *InvestigationRunner) Run(
 type investigationStubForStore struct {
 	id, alertID, sessionID, status string
 	startedAt                      time.Time
+	completedAt                    time.Time
+	findings                       []string
+	actionsTaken                   int
+	durationNanos                  int64
+	confidence                     float64
+	escalated                      bool
+	escalateReason                 string
 }
 
 func (s *investigationStubForStore) ID() string        { return s.id }
@@ -279,6 +293,13 @@ func (s *investigationStubForStore) StartedAt() time.Time {
 	}
 	return s.startedAt
 }
+func (s *investigationStubForStore) CompletedAt() time.Time  { return s.completedAt }
+func (s *investigationStubForStore) Findings() []string      { return s.findings }
+func (s *investigationStubForStore) ActionsTaken() int       { return s.actionsTaken }
+func (s *investigationStubForStore) Duration() time.Duration { return time.Duration(s.durationNanos) }
+func (s *investigationStubForStore) Confidence() float64     { return s.confidence }
+func (s *investigationStubForStore) Escalated() bool         { return s.escalated }
+func (s *investigationStubForStore) EscalateReason() string  { return s.escalateReason }
 
 func (r *InvestigationRunner) validateInputs(ctx context.Context, alert *AlertForInvestigation, invID string) error {
 	if alert == nil {

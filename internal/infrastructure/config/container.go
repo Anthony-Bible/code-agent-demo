@@ -9,15 +9,49 @@ import (
 	"code-editing-agent/internal/infrastructure/adapter/ai"
 	"code-editing-agent/internal/infrastructure/adapter/alert"
 	"code-editing-agent/internal/infrastructure/adapter/file"
+	"code-editing-agent/internal/infrastructure/adapter/investigation"
 	"code-editing-agent/internal/infrastructure/adapter/skill"
 	"code-editing-agent/internal/infrastructure/adapter/tool"
 	"code-editing-agent/internal/infrastructure/adapter/ui"
 	"code-editing-agent/internal/infrastructure/adapter/webhook"
+	"context"
 	"errors"
+	"path/filepath"
 	"time"
 
 	appsvc "code-editing-agent/internal/application/service"
 )
+
+// investigationStoreAdapter adapts FileInvestigationStore to the usecase.InvestigationStoreWriter interface.
+// This is needed because FileInvestigationStore uses concrete *service.InvestigationStub types
+// while the usecase interface uses InvestigationStubData interface types.
+type investigationStoreAdapter struct {
+	store *investigation.FileInvestigationStore
+}
+
+func (a *investigationStoreAdapter) Store(ctx context.Context, inv usecase.InvestigationStubData) error {
+	stub := appsvc.NewInvestigationStubWithResult(
+		inv.ID(), inv.AlertID(), inv.SessionID(), inv.Status(),
+		inv.StartedAt(), inv.CompletedAt(),
+		inv.Findings(), inv.ActionsTaken(), inv.Duration(),
+		inv.Confidence(), inv.Escalated(), inv.EscalateReason(),
+	)
+	return a.store.Store(ctx, stub)
+}
+
+func (a *investigationStoreAdapter) Get(ctx context.Context, id string) (usecase.InvestigationStubData, error) {
+	return a.store.Get(ctx, id)
+}
+
+func (a *investigationStoreAdapter) Update(ctx context.Context, inv usecase.InvestigationStubData) error {
+	stub := appsvc.NewInvestigationStubWithResult(
+		inv.ID(), inv.AlertID(), inv.SessionID(), inv.Status(),
+		inv.StartedAt(), inv.CompletedAt(),
+		inv.Findings(), inv.ActionsTaken(), inv.Duration(),
+		inv.Confidence(), inv.Escalated(), inv.EscalateReason(),
+	)
+	return a.store.Update(ctx, stub)
+}
 
 // Container holds all application dependencies wired together.
 // It provides a single point of access to all services and ports,
@@ -111,66 +145,13 @@ func NewContainer(cfg *Config) (*Container, error) {
 		return nil, err
 	}
 
-	// Step 4: Create investigation use case and alert handling components
-	// This sets up the automated alert investigation framework which allows
-	// the agent to investigate alerts autonomously within defined safety constraints.
-
-	// Configure investigation safety limits:
-	// - MaxActions: Prevents runaway investigations consuming excessive resources
-	// - MaxDuration: Ensures investigations complete in reasonable time
-	// - AllowedTools: Restricts which tools investigations can execute
-	// - BlockedCommands: Prevents dangerous shell commands from being executed
-	invConfig := usecase.AlertInvestigationUseCaseConfig{
-		MaxActions:    20,
-		MaxDuration:   15 * time.Minute,
-		MaxConcurrent: 5,
-		AllowedTools: []string{
-			"bash",
-			"read_file",
-			"list_files",
-			"activate_skill",
-			"complete_investigation",
-			"escalate_investigation",
-		},
-		BlockedCommands: []string{"rm -rf", "dd if=", "mkfs"},
+	// Step 4: Create investigation and alert handling components
+	investigationUseCase, alertSourceManager, webhookAdapter, err := createInvestigationComponents(
+		cfg, convService, toolExecutor,
+	)
+	if err != nil {
+		return nil, err
 	}
-	investigationUseCase := usecase.NewAlertInvestigationUseCaseWithConfig(invConfig)
-
-	// Wire conversation service and tool executor for investigation loop
-	investigationUseCase.SetConversationService(convService)
-	investigationUseCase.SetToolExecutor(toolExecutor)
-
-	// Wire prompt builders - these generate AI prompts tailored to different alert types
-	// (e.g., high CPU, disk space, memory issues)
-	promptRegistry := usecase.NewPromptBuilderRegistry()
-	_ = promptRegistry.Register(usecase.NewHighCPUPromptBuilder())
-	_ = promptRegistry.Register(usecase.NewDiskSpacePromptBuilder())
-	_ = promptRegistry.Register(usecase.NewMemoryPromptBuilder())
-	_ = promptRegistry.Register(usecase.NewOOMPromptBuilder())
-	_ = promptRegistry.Register(usecase.NewGenericPromptBuilder()) // Fallback for unknown alert types
-	investigationUseCase.SetPromptBuilderRegistry(promptRegistry)
-
-	// Wire escalation handler - determines how to handle investigations that
-	// cannot be resolved automatically (e.g., logging, notifications)
-	escalationHandler := usecase.NewLogEscalationHandler()
-	investigationUseCase.SetEscalationHandler(escalationHandler)
-
-	// Create alert handler - bridges incoming alerts to the investigation use case
-	// with severity-based routing (critical alerts auto-investigate, warnings do not)
-	alertHandler := usecase.NewAlertHandler(investigationUseCase, usecase.AlertHandlerConfig{
-		AutoInvestigateCritical: true,
-		AutoInvestigateWarning:  false,
-	})
-
-	// Create alert source manager - manages registration and lifecycle of alert sources
-	// (e.g., Prometheus Alertmanager webhooks, custom integrations)
-	alertSourceManager := alert.NewLocalAlertSourceManager()
-	alertSourceManager.SetAlertHandler(alertHandler.HandleEntityAlert)
-
-	// Create webhook HTTP adapter for receiving alerts via HTTP webhooks
-	webhookConfig := webhook.DefaultConfig()
-	webhookAdapter := webhook.NewHTTPAdapter(alertSourceManager, webhookConfig)
-	webhookAdapter.SetAlertHandler(alertHandler.HandleEntityAlert)
 
 	return &Container{
 		config:               cfg,
@@ -185,6 +166,67 @@ func NewContainer(cfg *Config) (*Container, error) {
 		investigationUseCase: investigationUseCase,
 		webhookAdapter:       webhookAdapter,
 	}, nil
+}
+
+// createInvestigationComponents sets up the investigation framework including
+// the use case, alert handler, source manager, and webhook adapter.
+func createInvestigationComponents(
+	cfg *Config,
+	convService *service.ConversationService,
+	toolExecutor port.ToolExecutor,
+) (*usecase.AlertInvestigationUseCase, port.AlertSourceManager, *webhook.HTTPAdapter, error) {
+	// Configure investigation safety limits
+	invConfig := usecase.AlertInvestigationUseCaseConfig{
+		MaxActions:    20,
+		MaxDuration:   15 * time.Minute,
+		MaxConcurrent: 5,
+		AllowedTools: []string{
+			"bash", "read_file", "list_files",
+			"activate_skill", "complete_investigation", "escalate_investigation",
+		},
+		BlockedCommands: []string{"rm -rf", "dd if=", "mkfs"},
+	}
+	investigationUseCase := usecase.NewAlertInvestigationUseCaseWithConfig(invConfig)
+
+	// Wire core dependencies
+	investigationUseCase.SetConversationService(convService)
+	investigationUseCase.SetToolExecutor(toolExecutor)
+
+	// Wire prompt builders for different alert types
+	promptRegistry := usecase.NewPromptBuilderRegistry()
+	_ = promptRegistry.Register(usecase.NewHighCPUPromptBuilder())
+	_ = promptRegistry.Register(usecase.NewDiskSpacePromptBuilder())
+	_ = promptRegistry.Register(usecase.NewMemoryPromptBuilder())
+	_ = promptRegistry.Register(usecase.NewOOMPromptBuilder())
+	_ = promptRegistry.Register(usecase.NewGenericPromptBuilder())
+	investigationUseCase.SetPromptBuilderRegistry(promptRegistry)
+
+	// Wire escalation handler
+	investigationUseCase.SetEscalationHandler(usecase.NewLogEscalationHandler())
+
+	// Wire investigation store for persistence
+	storePath := filepath.Join(cfg.WorkingDir, ".agent", "investigations")
+	fileStore, err := investigation.NewFileInvestigationStore(storePath)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	investigationUseCase.SetInvestigationStore(&investigationStoreAdapter{store: fileStore})
+
+	// Create alert handler with severity-based routing
+	alertHandler := usecase.NewAlertHandler(investigationUseCase, usecase.AlertHandlerConfig{
+		AutoInvestigateCritical: true,
+		AutoInvestigateWarning:  false,
+	})
+
+	// Create alert source manager
+	alertSourceManager := alert.NewLocalAlertSourceManager()
+	alertSourceManager.SetAlertHandler(alertHandler.HandleEntityAlert)
+
+	// Create webhook HTTP adapter
+	webhookAdapter := webhook.NewHTTPAdapter(alertSourceManager, webhook.DefaultConfig())
+	webhookAdapter.SetAlertHandler(alertHandler.HandleEntityAlert)
+
+	return investigationUseCase, alertSourceManager, webhookAdapter, nil
 }
 
 // ChatService returns the application chat service.

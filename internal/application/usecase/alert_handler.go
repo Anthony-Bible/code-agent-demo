@@ -124,6 +124,15 @@ func (h *AlertHandler) Handle(ctx context.Context, alert *AlertForInvestigation)
 	}
 	fmt.Fprintf(os.Stderr, "[AlertHandler] Investigation completed: status=%s, findings=%d, confidence=%.2f\n",
 		result.Status, len(result.Findings), result.Confidence)
+	if len(result.Findings) > 0 {
+		_, _ = fmt.Fprintf(os.Stderr, "[AlertHandler] Findings:\n")
+		for i, finding := range result.Findings {
+			_, _ = fmt.Fprintf(os.Stderr, "  %d. %s\n", i+1, finding)
+		}
+	}
+	if result.Escalated {
+		_, _ = fmt.Fprintf(os.Stderr, "[AlertHandler] ESCALATED: %s\n", result.EscalateReason)
+	}
 	return nil
 }
 

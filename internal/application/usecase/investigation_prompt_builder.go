@@ -24,6 +24,41 @@ var (
 	ErrNilPromptBuilder = errors.New("prompt builder cannot be nil")
 )
 
+// investigationToolsHeader is the common preamble that explains available tools to the AI.
+const investigationToolsHeader = `You are an AI assistant investigating an alert. You MUST use the available tools to investigate.
+
+## Available Tools
+
+1. **bash** - Execute shell commands to gather information
+   Example: {"command": "top -b -n 1 | head -20"}
+
+2. **read_file** - Read file contents
+   Example: {"path": "/var/log/syslog"}
+
+3. **list_files** - List directory contents
+   Example: {"path": "/var/log"}
+
+4. **complete_investigation** - Call this when you have finished investigating
+   Required fields:
+   - findings: array of strings describing what you found
+   - confidence: number from 0.0 to 1.0 indicating your confidence level
+   Example: {"findings": ["High CPU from process X", "Caused by memory leak"], "confidence": 0.85}
+
+5. **escalate_investigation** - Call this if you cannot resolve the issue
+   Required fields:
+   - reason: why you are escalating
+   - partial_findings: any findings so far
+   Example: {"reason": "Unable to access logs", "partial_findings": ["Detected high load"]}
+
+## IMPORTANT RULES
+
+- You MUST use the bash tool to execute commands (not just describe them)
+- You MUST end by calling either complete_investigation or escalate_investigation
+- Use read-only commands only - DO NOT modify, restart, or kill anything
+- If you cannot determine the root cause, use escalate_investigation
+
+`
+
 // AlertStub represents a lightweight alert structure for prompt building.
 // It contains only the fields needed to generate investigation prompts.
 type AlertStub struct {
@@ -112,27 +147,21 @@ func (b *HighCPUPromptBuilder) BuildPrompt(alert *AlertStub) (string, error) {
 		instance = "unknown"
 	}
 
-	prompt := fmt.Sprintf(`Investigate high CPU usage alert.
-
-Alert Details:
+	alertDetails := fmt.Sprintf(`## Alert Details
+- Type: High CPU Usage
 - Severity: %s
 - Instance: %s
 - Title: %s
 
-Investigation Steps:
-1. Use 'top -b -n 1' to check current CPU usage and identify top processes
-2. Check process details with 'ps aux --sort=-%%cpu | head -20'
-3. Look for any runaway processes or high load
+## Suggested Investigation Steps
+1. Run: top -b -n 1 | head -20
+2. Run: ps aux --sort=-%%cpu | head -20
+3. Look for runaway processes or high load
 
-Safety Rules:
-- DO NOT restart or kill any processes without confirmation
-- Only use safe, read-only commands for investigation
-- If you cannot determine the root cause, escalate to human operator
-
-Report your findings and recommendations.`,
+Begin your investigation now using the bash tool.`,
 		alert.Severity(), instance, alert.Title())
 
-	return prompt, nil
+	return investigationToolsHeader + alertDetails, nil
 }
 
 // DiskSpacePromptBuilder generates investigation prompts for low disk space alerts.
@@ -162,27 +191,21 @@ func (b *DiskSpacePromptBuilder) BuildPrompt(alert *AlertStub) (string, error) {
 		mountpoint = "/"
 	}
 
-	prompt := fmt.Sprintf(`Investigate low disk space alert.
-
-Alert Details:
+	alertDetails := fmt.Sprintf(`## Alert Details
+- Type: Low Disk Space
 - Severity: %s
 - Mountpoint: %s
 - Title: %s
 
-Investigation Steps:
-1. Use 'df -h' to check disk usage across all filesystems
-2. Use 'du -sh /*' to find large directories
-3. Check for large log files that can be rotated or cleaned
+## Suggested Investigation Steps
+1. Run: df -h
+2. Run: du -sh /* 2>/dev/null | sort -hr | head -10
+3. Check for large log files that can be rotated
 
-Safety Rules:
-- DO NOT delete any files without confirmation
-- Only use safe, read-only commands for investigation
-- If space is critically low, escalate immediately
-
-Report your findings and recommendations.`,
+Begin your investigation now using the bash tool.`,
 		alert.Severity(), mountpoint, alert.Title())
 
-	return prompt, nil
+	return investigationToolsHeader + alertDetails, nil
 }
 
 // MemoryPromptBuilder generates investigation prompts for high memory usage alerts.
@@ -206,26 +229,20 @@ func (b *MemoryPromptBuilder) BuildPrompt(alert *AlertStub) (string, error) {
 		return "", ErrNilAlert
 	}
 
-	prompt := fmt.Sprintf(`Investigate high memory usage alert.
-
-Alert Details:
+	alertDetails := fmt.Sprintf(`## Alert Details
+- Type: High Memory Usage
 - Severity: %s
 - Title: %s
 
-Investigation Steps:
-1. Use 'free -h' to check overall memory usage
-2. Use 'ps aux --sort=-rss | head -20' to find top memory consumers
+## Suggested Investigation Steps
+1. Run: free -h
+2. Run: ps aux --sort=-rss | head -20
 3. Check for memory leaks or unusual consumption patterns
 
-Safety Rules:
-- DO NOT kill any processes without confirmation
-- Only use safe, read-only commands for investigation
-- If memory is critically low, escalate immediately
-
-Report your findings and recommendations.`,
+Begin your investigation now using the bash tool.`,
 		alert.Severity(), alert.Title())
 
-	return prompt, nil
+	return investigationToolsHeader + alertDetails, nil
 }
 
 // OOMPromptBuilder generates investigation prompts for OOM (Out of Memory) killed alerts.
@@ -250,27 +267,23 @@ func (b *OOMPromptBuilder) BuildPrompt(alert *AlertStub) (string, error) {
 		return "", ErrNilAlert
 	}
 
-	prompt := fmt.Sprintf(`Investigate OOM (Out of Memory) killed process alert.
-
-Alert Details:
+	alertDetails := fmt.Sprintf(`## Alert Details
+- Type: OOM (Out of Memory) Killed
 - Severity: %s
 - Title: %s
 
-Investigation Steps:
-1. Check dmesg for OOM killer messages: 'dmesg | grep -i oom'
-2. Review journal logs: 'journalctl -k | grep -i oom'
-3. Check current memory state with 'free -h'
-4. Identify memory limit configurations
+## Suggested Investigation Steps
+1. Run: dmesg | grep -i oom | tail -20
+2. Run: journalctl -k | grep -i oom | tail -20
+3. Run: free -h
+4. Identify which process was killed and why
 
-Safety Rules:
-- DO NOT modify any memory limits without confirmation
-- Only use safe, read-only commands for investigation
-- This is a critical event - consider escalating
+This is a critical event. If you cannot determine the root cause, escalate.
 
-Report your findings and recommendations.`,
+Begin your investigation now using the bash tool.`,
 		alert.Severity(), alert.Title())
 
-	return prompt, nil
+	return investigationToolsHeader + alertDetails, nil
 }
 
 // GenericPromptBuilder generates investigation prompts for alerts with no specific builder.
@@ -295,29 +308,22 @@ func (b *GenericPromptBuilder) BuildPrompt(alert *AlertStub) (string, error) {
 		return "", ErrNilAlert
 	}
 
-	prompt := fmt.Sprintf(`Investigate the following alert.
-
-Alert Details:
+	alertDetails := fmt.Sprintf(`## Alert Details
 - ID: %s
 - Source: %s
 - Severity: %s
 - Title: %s
 - Description: %s
 
-Investigation Steps:
-1. Gather relevant system information
+## Suggested Investigation Steps
+1. Gather relevant system information (uptime, load, memory, disk)
 2. Check logs for related errors
 3. Identify potential root causes
 
-Safety Rules:
-- DO NOT make any changes without confirmation
-- Only use safe, read-only commands for investigation
-- If unsure, escalate to human operator
-
-Report your findings and recommendations.`,
+Begin your investigation now using the bash tool.`,
 		alert.ID(), alert.Source(), alert.Severity(), alert.Title(), alert.Description())
 
-	return prompt, nil
+	return investigationToolsHeader + alertDetails, nil
 }
 
 // DefaultPromptBuilderRegistry is the default implementation of PromptBuilderRegistry.

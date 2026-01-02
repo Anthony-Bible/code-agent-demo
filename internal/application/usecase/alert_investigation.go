@@ -30,7 +30,7 @@ type SafetyEnforcer interface {
 	CheckTimeout(ctx context.Context) error
 }
 
-// InvestigationStubData is a minimal interface for investigation persistence.
+// InvestigationStubData is the interface for investigation persistence.
 // Matches the InvestigationStub type from service package.
 type InvestigationStubData interface {
 	ID() string
@@ -38,6 +38,14 @@ type InvestigationStubData interface {
 	SessionID() string
 	Status() string
 	StartedAt() time.Time
+	// Full result data
+	CompletedAt() time.Time
+	Findings() []string
+	ActionsTaken() int
+	Duration() time.Duration
+	Confidence() float64
+	Escalated() bool
+	EscalateReason() string
 }
 
 // InvestigationStoreWriter defines the write interface for investigation persistence.
@@ -48,10 +56,18 @@ type InvestigationStoreWriter interface {
 	Update(ctx context.Context, inv InvestigationStubData) error
 }
 
-// simpleInvestigationStub is a minimal implementation of InvestigationStubData.
+// simpleInvestigationStub is an implementation of InvestigationStubData.
 type simpleInvestigationStub struct {
 	id, alertID, sessionID, status string
 	startedAt                      time.Time
+	// Full result fields
+	completedAt    time.Time
+	findings       []string
+	actionsTaken   int
+	durationNanos  int64
+	confidence     float64
+	escalated      bool
+	escalateReason string
 }
 
 func (s *simpleInvestigationStub) ID() string        { return s.id }
@@ -64,6 +80,13 @@ func (s *simpleInvestigationStub) StartedAt() time.Time {
 	}
 	return s.startedAt
 }
+func (s *simpleInvestigationStub) CompletedAt() time.Time  { return s.completedAt }
+func (s *simpleInvestigationStub) Findings() []string      { return s.findings }
+func (s *simpleInvestigationStub) ActionsTaken() int       { return s.actionsTaken }
+func (s *simpleInvestigationStub) Duration() time.Duration { return time.Duration(s.durationNanos) }
+func (s *simpleInvestigationStub) Confidence() float64     { return s.confidence }
+func (s *simpleInvestigationStub) Escalated() bool         { return s.escalated }
+func (s *simpleInvestigationStub) EscalateReason() string  { return s.escalateReason }
 
 func newSimpleInvestigationStub(id, alertID, sessionID, status string) *simpleInvestigationStub {
 	return &simpleInvestigationStub{
@@ -72,6 +95,28 @@ func newSimpleInvestigationStub(id, alertID, sessionID, status string) *simpleIn
 		sessionID: sessionID,
 		status:    status,
 		startedAt: time.Now(),
+	}
+}
+
+// newSimpleInvestigationStubFromResult creates a stub with full result data.
+func newSimpleInvestigationStubFromResult(
+	result *InvestigationResultStub,
+	sessionID string,
+	startedAt time.Time,
+) *simpleInvestigationStub {
+	return &simpleInvestigationStub{
+		id:             result.InvestigationID,
+		alertID:        result.AlertID,
+		sessionID:      sessionID,
+		status:         result.Status,
+		startedAt:      startedAt,
+		completedAt:    time.Now(),
+		findings:       result.Findings,
+		actionsTaken:   result.ActionsTaken,
+		durationNanos:  int64(result.Duration),
+		confidence:     result.Confidence,
+		escalated:      result.Escalated,
+		escalateReason: result.EscalateReason,
 	}
 }
 

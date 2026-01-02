@@ -116,6 +116,13 @@ func (m *MockSafetyEnforcer) CheckTimeout(ctx context.Context) error {
 type mockStub struct {
 	id, alertID, sessionID, status string
 	startedAt                      time.Time
+	completedAt                    time.Time
+	findings                       []string
+	actionsTaken                   int
+	durationNanos                  int64
+	confidence                     float64
+	escalated                      bool
+	escalateReason                 string
 }
 
 func (s *mockStub) ID() string        { return s.id }
@@ -128,6 +135,13 @@ func (s *mockStub) StartedAt() time.Time {
 	}
 	return s.startedAt
 }
+func (s *mockStub) CompletedAt() time.Time  { return s.completedAt }
+func (s *mockStub) Findings() []string      { return s.findings }
+func (s *mockStub) ActionsTaken() int       { return s.actionsTaken }
+func (s *mockStub) Duration() time.Duration { return time.Duration(s.durationNanos) }
+func (s *mockStub) Confidence() float64     { return s.confidence }
+func (s *mockStub) Escalated() bool         { return s.escalated }
+func (s *mockStub) EscalateReason() string  { return s.escalateReason }
 
 // MockInvestigationStore is a test double for InvestigationStoreWriter interface.
 type MockInvestigationStore struct {
