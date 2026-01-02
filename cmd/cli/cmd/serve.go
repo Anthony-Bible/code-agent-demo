@@ -5,6 +5,8 @@ import (
 	"code-editing-agent/internal/infrastructure/adapter/alert"
 	"code-editing-agent/internal/infrastructure/adapter/webhook"
 	"code-editing-agent/internal/infrastructure/config"
+	signalhandler "code-editing-agent/internal/infrastructure/signal"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -51,6 +53,67 @@ func init() {
 	}
 }
 
+// registerAlertSources registers alert sources from config with the source manager.
+func registerAlertSources(webhookCfg *config.WebhookServerConfig, container *config.Container) error {
+	sourceManager := container.AlertSourceManager()
+	ui := container.UIAdapter()
+
+	for _, srcCfg := range webhookCfg.Sources {
+		if srcCfg.Type != "prometheus" {
+			return errors.New("unknown source type: " + srcCfg.Type)
+		}
+
+		promSource, err := alert.NewPrometheusSource(alert.SourceConfig{
+			Type:        srcCfg.Type,
+			Name:        srcCfg.Name,
+			WebhookPath: srcCfg.WebhookPath,
+			Extra:       srcCfg.Extra,
+		})
+		if err != nil {
+			return err
+		}
+
+		if err := sourceManager.RegisterSource(promSource); err != nil {
+			return err
+		}
+
+		_ = ui.DisplaySystemMessage(
+			"Registered alert source: " + srcCfg.Name + " (type=" + srcCfg.Type + ", path=" + srcCfg.WebhookPath + ")",
+		)
+	}
+	return nil
+}
+
+// setupSkillReloadHandler creates and starts a SIGHUP handler for skill hot-reload.
+func setupSkillReloadHandler(container *config.Container) *signalhandler.ReloadHandler {
+	ui := container.UIAdapter()
+	skillManager := container.SkillManager()
+
+	reloadHandler := signalhandler.NewReloadHandler(func(reloadCtx context.Context) {
+		_ = ui.DisplaySystemMessage("")
+		_ = ui.DisplaySystemMessage("Received SIGHUP - reloading skills...")
+
+		result, err := skillManager.DiscoverSkills(reloadCtx)
+		if err != nil {
+			_ = ui.DisplaySystemMessage("Error discovering skills: " + err.Error())
+			return
+		}
+
+		_ = ui.DisplaySystemMessage(fmt.Sprintf("Discovered %d skills:", result.TotalCount))
+		for _, skill := range result.Skills {
+			status := "inactive"
+			if skill.IsActive {
+				status = "active"
+			}
+			_ = ui.DisplaySystemMessage(fmt.Sprintf("  - %s (%s, %s)",
+				skill.Name, skill.SourceType, status))
+		}
+		_ = ui.DisplaySystemMessage("")
+	})
+	reloadHandler.Start()
+	return reloadHandler
+}
+
 // runServe executes the serve command.
 func runServe(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
@@ -77,34 +140,14 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// Get UI adapter for output
 	ui := container.UIAdapter()
 
-	// Get alert source manager and register sources from config
-	sourceManager := container.AlertSourceManager()
-
-	for _, srcCfg := range webhookCfg.Sources {
-		switch srcCfg.Type {
-		case "prometheus":
-			promSource, err := alert.NewPrometheusSource(alert.SourceConfig{
-				Type:        srcCfg.Type,
-				Name:        srcCfg.Name,
-				WebhookPath: srcCfg.WebhookPath,
-				Extra:       srcCfg.Extra,
-			})
-			if err != nil {
-				return err
-			}
-			if err := sourceManager.RegisterSource(promSource); err != nil {
-				return err
-			}
-			_ = ui.DisplaySystemMessage(
-				"Registered alert source: " + srcCfg.Name + " (type=" + srcCfg.Type + ", path=" + srcCfg.WebhookPath + ")",
-			)
-		default:
-			return errors.New("unknown source type: " + srcCfg.Type)
-		}
+	// Register alert sources from config
+	if err := registerAlertSources(webhookCfg, container); err != nil {
+		return err
 	}
+
+	sourceManager := container.AlertSourceManager()
 
 	// Create alert handler for dispatching alerts to investigation use case
 	alertHandler := usecase.NewAlertHandler(container.InvestigationUseCase(), usecase.AlertHandlerConfig{
@@ -121,6 +164,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	})
 	webhookAdapter.SetAsyncAlertHandler(alertHandler.HandleEntityAlertAsync, alertHandler.RunEntityAlertInvestigation)
 
+	// Set up SIGHUP handler for skill hot-reload
+	reloadHandler := setupSkillReloadHandler(container)
+	defer reloadHandler.Stop()
+
 	// Print startup info
 	_ = ui.DisplaySystemMessage("")
 	_ = ui.DisplaySystemMessage("Starting webhook server on " + addr)
@@ -131,6 +178,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	_ = ui.DisplaySystemMessage("")
 	_ = ui.DisplaySystemMessage("Press Ctrl+C to stop")
+	_ = ui.DisplaySystemMessage("Send SIGHUP to reload skills")
 
 	// Get interrupt handler for graceful shutdown
 	handler := InterruptHandlerFromContext(ctx)
