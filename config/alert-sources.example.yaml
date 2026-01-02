@@ -1,0 +1,25 @@
+# Example configuration for alert sources
+# Copy this file to config/alert-sources.yaml and customize
+
+addr: ":8080"
+
+sources:
+  # Prometheus Alertmanager webhook source
+  - type: prometheus
+    name: alertmanager
+    webhook_path: /alerts/prometheus
+    # extra:
+    #   key: value
+
+  # Google Cloud Monitoring webhook source
+  - type: gcp_monitoring
+    name: gcp-alerts
+    webhook_path: /alerts/gcp
+    # extra:
+    #   key: value
+
+# Configure Google Cloud Monitoring to send webhooks to:
+# http://your-server:8080/alerts/gcp
+#
+# Configure Prometheus Alertmanager to send webhooks to:
+# http://your-server:8080/alerts/prometheus

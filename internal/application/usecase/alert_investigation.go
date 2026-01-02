@@ -289,6 +289,13 @@ func (uc *AlertInvestigationUseCase) RunInvestigation(
 		return nil, ErrAlertNil
 	}
 
+	// Cleanup tracking maps when investigation completes
+	defer func() {
+		uc.mu.Lock()
+		uc.cleanupInvestigationTracking(invID, alert.ID())
+		uc.mu.Unlock()
+	}()
+
 	// Check if safety enforcer blocks all investigation tools
 	uc.mu.RLock()
 	enforcer := uc.safetyEnforcer
@@ -450,8 +457,7 @@ func (uc *AlertInvestigationUseCase) StopInvestigation(ctx context.Context, invI
 		_ = uc.investigationStore.Update(ctx, stub)
 	}
 
-	delete(uc.activeInvestigations, invID)
-	delete(uc.alertToInvestigation, inv.alertID)
+	uc.cleanupInvestigationTracking(invID, inv.alertID)
 
 	return nil
 }
@@ -505,6 +511,14 @@ func (uc *AlertInvestigationUseCase) GetActiveCount() int {
 	uc.mu.RLock()
 	defer uc.mu.RUnlock()
 	return len(uc.activeInvestigations)
+}
+
+// cleanupInvestigationTracking removes an investigation from internal tracking maps.
+// This method assumes the caller holds uc.mu write lock (Lock).
+// It is used by both RunInvestigation (via defer) and StopInvestigation.
+func (uc *AlertInvestigationUseCase) cleanupInvestigationTracking(invID, alertID string) {
+	delete(uc.activeInvestigations, invID)
+	delete(uc.alertToInvestigation, alertID)
 }
 
 // SetEscalationHandler configures the handler used for investigation escalations.

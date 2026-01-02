@@ -7,7 +7,6 @@ import (
 	"code-editing-agent/internal/infrastructure/config"
 	signalhandler "code-editing-agent/internal/infrastructure/signal"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 
@@ -58,22 +57,22 @@ func registerAlertSources(webhookCfg *config.WebhookServerConfig, container *con
 	sourceManager := container.AlertSourceManager()
 	ui := container.UIAdapter()
 
-	for _, srcCfg := range webhookCfg.Sources {
-		if srcCfg.Type != "prometheus" {
-			return errors.New("unknown source type: " + srcCfg.Type)
-		}
+	// Create registry with builtin factories
+	registry := alert.NewSourceRegistry()
+	registry.RegisterBuiltinFactories()
 
-		promSource, err := alert.NewPrometheusSource(alert.SourceConfig{
+	for _, srcCfg := range webhookCfg.Sources {
+		source, err := registry.CreateSource(alert.SourceConfig{
 			Type:        srcCfg.Type,
 			Name:        srcCfg.Name,
 			WebhookPath: srcCfg.WebhookPath,
 			Extra:       srcCfg.Extra,
 		})
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create source %s: %w", srcCfg.Name, err)
 		}
 
-		if err := sourceManager.RegisterSource(promSource); err != nil {
+		if err := sourceManager.RegisterSource(source); err != nil {
 			return err
 		}
 

@@ -1092,6 +1092,303 @@ func TestAlertInvestigationUseCase_StopInvestigation_WithStore_UpdatesStatus(t *
 }
 
 // =============================================================================
+// RunInvestigation Cleanup Tests
+// These tests verify that RunInvestigation properly cleans up tracking maps
+// after completion, preventing memory leaks and duplicate investigation errors.
+// =============================================================================
+
+func TestAlertInvestigationUseCase_RunInvestigation_CleansUpTrackingOnSuccess(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
+	}
+
+	alert := &AlertForInvestigation{
+		id:       "alert-cleanup-success",
+		source:   "prometheus",
+		severity: "warning",
+		title:    "Test Alert for Cleanup",
+	}
+
+	// Start the investigation
+	invID, err := uc.StartInvestigation(context.Background(), alert)
+	if err != nil {
+		t.Fatalf("StartInvestigation() error = %v", err)
+	}
+
+	// Verify investigation is tracked
+	if uc.GetActiveCount() != 1 {
+		t.Fatalf("GetActiveCount() after start = %v, want 1", uc.GetActiveCount())
+	}
+
+	// Run the investigation (which should complete)
+	_, err = uc.RunInvestigation(context.Background(), alert, invID)
+	if err != nil {
+		t.Logf("RunInvestigation() error = %v (may be acceptable)", err)
+	}
+
+	// CRITICAL: After RunInvestigation completes, active count should be 0
+	if uc.GetActiveCount() != 0 {
+		t.Errorf(
+			"GetActiveCount() after RunInvestigation = %v, want 0 (investigation should be cleaned up)",
+			uc.GetActiveCount(),
+		)
+	}
+}
+
+func TestAlertInvestigationUseCase_RunInvestigation_AllowsNewInvestigationAfterCompletion(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
+	}
+
+	alert := &AlertForInvestigation{
+		id:       "alert-restart-test",
+		source:   "prometheus",
+		severity: "warning",
+		title:    "Test Alert for Restart",
+	}
+
+	// First investigation
+	invID1, err := uc.StartInvestigation(context.Background(), alert)
+	if err != nil {
+		t.Fatalf("First StartInvestigation() error = %v", err)
+	}
+
+	_, err = uc.RunInvestigation(context.Background(), alert, invID1)
+	if err != nil {
+		t.Logf("First RunInvestigation() error = %v (may be acceptable)", err)
+	}
+
+	// CRITICAL: After first investigation completes, we should be able to start a new one for the same alert
+	invID2, err := uc.StartInvestigation(context.Background(), alert)
+	if err != nil {
+		t.Errorf(
+			"Second StartInvestigation() error = %v, want nil (should allow new investigation after first completes)",
+			err,
+		)
+	}
+	if invID2 == "" {
+		t.Error("Second StartInvestigation() returned empty ID, should return valid investigation ID")
+	}
+	if invID2 == invID1 {
+		t.Error("Second investigation ID should be different from first")
+	}
+}
+
+func TestAlertInvestigationUseCase_RunInvestigation_CleansUpTrackingOnError(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
+	}
+
+	// Create a mock safety enforcer that blocks all tools to force failure/escalation
+	enforcer := NewMockSafetyEnforcerWithBlockedTools([]string{"bash", "read_file", "list_files"})
+	if enforcer != nil {
+		uc.SetSafetyEnforcer(enforcer)
+	}
+
+	alert := &AlertForInvestigation{
+		id:       "alert-cleanup-error",
+		source:   "prometheus",
+		severity: "warning",
+		title:    "Test Alert for Error Cleanup",
+	}
+
+	invID, err := uc.StartInvestigation(context.Background(), alert)
+	if err != nil {
+		t.Fatalf("StartInvestigation() error = %v", err)
+	}
+
+	// Verify investigation is tracked
+	if uc.GetActiveCount() != 1 {
+		t.Fatalf("GetActiveCount() after start = %v, want 1", uc.GetActiveCount())
+	}
+
+	// Run investigation (which should fail or escalate due to blocked tools)
+	result, runErr := uc.RunInvestigation(context.Background(), alert, invID)
+	// Error is acceptable here
+	if runErr != nil {
+		t.Logf("RunInvestigation() error = %v (acceptable for blocked tools test)", runErr)
+	}
+	if result != nil && result.Status != "failed" && !result.Escalated {
+		t.Logf("RunInvestigation() status = %v, escalated = %v", result.Status, result.Escalated)
+	}
+
+	// CRITICAL: Even on error/escalation, active count should be 0
+	if uc.GetActiveCount() != 0 {
+		t.Errorf(
+			"GetActiveCount() after RunInvestigation error = %v, want 0 (investigation should be cleaned up even on failure)",
+			uc.GetActiveCount(),
+		)
+	}
+}
+
+func TestAlertInvestigationUseCase_RunInvestigation_CleansUpTrackingOnTimeout(t *testing.T) {
+	config := AlertInvestigationUseCaseConfig{
+		MaxDuration:   1 * time.Millisecond, // Very short timeout to force timeout
+		MaxConcurrent: 5,
+		AllowedTools:  []string{"bash", "read_file"},
+	}
+
+	uc := NewAlertInvestigationUseCaseWithConfig(config)
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
+	}
+
+	alert := &AlertForInvestigation{
+		id:       "alert-cleanup-timeout",
+		source:   "prometheus",
+		severity: "warning",
+		title:    "Test Alert for Timeout Cleanup",
+	}
+
+	invID, startErr := uc.StartInvestigation(context.Background(), alert)
+	if startErr != nil {
+		t.Fatalf("StartInvestigation() error = %v", startErr)
+	}
+
+	// Verify investigation is tracked
+	if uc.GetActiveCount() != 1 {
+		t.Fatalf("GetActiveCount() after start = %v, want 1", uc.GetActiveCount())
+	}
+
+	// Run investigation with very short timeout context
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+
+	result, runErr := uc.RunInvestigation(ctx, alert, invID)
+	// Timeout error is expected and acceptable
+	if runErr != nil {
+		t.Logf("RunInvestigation() error = %v (expected for timeout test)", runErr)
+	}
+	if result != nil {
+		t.Logf("RunInvestigation() status = %v", result.Status)
+	}
+
+	// CRITICAL: Even on timeout, active count should be 0
+	if uc.GetActiveCount() != 0 {
+		t.Errorf(
+			"GetActiveCount() after RunInvestigation timeout = %v, want 0 (investigation should be cleaned up even on timeout)",
+			uc.GetActiveCount(),
+		)
+	}
+}
+
+func TestAlertInvestigationUseCase_HandleAlert_CleansUpTrackingOnCompletion(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
+	}
+
+	alert := &AlertForInvestigation{
+		id:       "alert-handlealert-cleanup",
+		source:   "prometheus",
+		severity: "warning",
+		title:    "Test Alert for HandleAlert Cleanup",
+	}
+
+	// HandleAlert should start, run, and cleanup the investigation
+	_, err := uc.HandleAlert(context.Background(), alert)
+	if err != nil {
+		t.Logf("HandleAlert() error = %v (may be acceptable)", err)
+	}
+
+	// CRITICAL: After HandleAlert completes, active count should be 0
+	if uc.GetActiveCount() != 0 {
+		t.Errorf(
+			"GetActiveCount() after HandleAlert = %v, want 0 (investigation should be cleaned up)",
+			uc.GetActiveCount(),
+		)
+	}
+}
+
+func TestAlertInvestigationUseCase_HandleAlert_AllowsConsecutiveInvestigations(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
+	}
+
+	alert := &AlertForInvestigation{
+		id:       "alert-consecutive",
+		source:   "prometheus",
+		severity: "warning",
+		title:    "Test Alert for Consecutive Investigations",
+	}
+
+	// First investigation via HandleAlert
+	_, err := uc.HandleAlert(context.Background(), alert)
+	if err != nil {
+		t.Logf("First HandleAlert() error = %v (may be acceptable)", err)
+	}
+
+	// CRITICAL: Second investigation should succeed (no "already running" error)
+	_, err = uc.HandleAlert(context.Background(), alert)
+	if err != nil {
+		// If we get ErrInvestigationAlreadyRunning, that means cleanup didn't happen
+		if errors.Is(err, ErrInvestigationAlreadyRunning) {
+			t.Errorf(
+				"Second HandleAlert() error = %v, should not be 'already running' error (first investigation should have been cleaned up)",
+				err,
+			)
+		} else {
+			t.Logf("Second HandleAlert() error = %v (acceptable if not 'already running' error)", err)
+		}
+	}
+}
+
+func TestAlertInvestigationUseCase_RunInvestigation_RemovesAlertFromTracking(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
+	}
+
+	alert := &AlertForInvestigation{
+		id:       "alert-tracking-removal",
+		source:   "prometheus",
+		severity: "warning",
+		title:    "Test Alert for Tracking Removal",
+	}
+
+	invID, err := uc.StartInvestigation(context.Background(), alert)
+	if err != nil {
+		t.Fatalf("StartInvestigation() error = %v", err)
+	}
+
+	// Verify we can't start duplicate while running
+	_, err = uc.StartInvestigation(context.Background(), alert)
+	if err == nil {
+		t.Error("Second StartInvestigation() should fail with 'already running' while first is active")
+	}
+	if err != nil && !errors.Is(err, ErrInvestigationAlreadyRunning) {
+		t.Errorf("Second StartInvestigation() error = %v, want ErrInvestigationAlreadyRunning", err)
+	}
+
+	// Run the investigation
+	_, err = uc.RunInvestigation(context.Background(), alert, invID)
+	if err != nil {
+		t.Logf("RunInvestigation() error = %v (may be acceptable)", err)
+	}
+
+	// CRITICAL: After RunInvestigation completes, we should be able to start a new investigation
+	// This verifies the alert was removed from alertToInvestigation map
+	invID2, err := uc.StartInvestigation(context.Background(), alert)
+	if err != nil {
+		if errors.Is(err, ErrInvestigationAlreadyRunning) {
+			t.Errorf(
+				"Third StartInvestigation() error = %v, should not be 'already running' (alert should be removed from tracking)",
+				err,
+			)
+		} else {
+			t.Logf("Third StartInvestigation() error = %v (acceptable if not 'already running' error)", err)
+		}
+	}
+	if invID2 == "" {
+		t.Error("Third StartInvestigation() returned empty ID after cleanup")
+	}
+}
+
+// =============================================================================
 // Combined Safety Enforcer + Store Integration Tests
 // =============================================================================
 
