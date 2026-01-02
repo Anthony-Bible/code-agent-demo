@@ -42,6 +42,8 @@ type ExecutorAdapter struct {
 	mu                          sync.RWMutex
 	dangerousCommandCallback    DangerousCommandCallback
 	commandConfirmationCallback CommandConfirmationCallback
+	investigationStates         map[string]string // tracks investigation_id -> status
+	investigationMu             sync.Mutex
 }
 
 // toRawMessage converts various input types to json.RawMessage for validation.
@@ -91,9 +93,10 @@ func wrapFileOperationError(operation string, err error) error {
 // It also registers the default tools (read_file, list_files, edit_file, bash, fetch, activate_skill).
 func NewExecutorAdapter(fileManager port.FileManager) *ExecutorAdapter {
 	adapter := &ExecutorAdapter{
-		fileManager:  fileManager,
-		skillManager: nil,
-		tools:        make(map[string]entity.Tool),
+		fileManager:         fileManager,
+		skillManager:        nil,
+		tools:               make(map[string]entity.Tool),
+		investigationStates: make(map[string]string),
 	}
 
 	// Register default tools
@@ -400,6 +403,9 @@ In plan mode, you will:
 		RequiredFields: []string{"reason"},
 	}
 	a.tools[enterPlanModeTool.Name] = enterPlanModeTool
+
+	// Register investigation tools
+	a.registerInvestigationTools()
 }
 
 // executeByName executes the appropriate tool function based on the tool name.
@@ -417,6 +423,12 @@ func (a *ExecutorAdapter) executeByName(ctx context.Context, name string, input 
 		return a.executeFetch(ctx, input)
 	case "activate_skill":
 		return a.executeActivateSkill(ctx, input)
+	case "complete_investigation":
+		return a.executeCompleteInvestigation(ctx, input)
+	case "escalate_investigation":
+		return a.executeEscalateInvestigation(ctx, input)
+	case "report_investigation":
+		return a.executeReportInvestigation(ctx, input)
 	default:
 		return "", fmt.Errorf("no implementation available for tool: %s", name)
 	}
@@ -1132,4 +1144,364 @@ func (a *ExecutorAdapter) executeActivateSkill(ctx context.Context, input json.R
 	result.WriteString(skill.RawContent)
 
 	return result.String(), nil
+}
+
+// registerInvestigationTools registers the investigation-related tools.
+func (a *ExecutorAdapter) registerInvestigationTools() {
+	// Register complete_investigation tool
+	completeInvestigationTool := entity.Tool{
+		ID:          "complete_investigation",
+		Name:        "complete_investigation",
+		Description: "Completes an investigation with findings and confidence level.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"investigation_id": map[string]interface{}{
+					"type":        "string",
+					"description": "The ID of the investigation to complete",
+				},
+				"confidence": map[string]interface{}{
+					"type":        "number",
+					"minimum":     float64(0),
+					"maximum":     float64(1),
+					"description": "Confidence level from 0 to 1",
+				},
+				"findings": map[string]interface{}{
+					"type":        "array",
+					"description": "List of findings from the investigation",
+				},
+				"root_cause": map[string]interface{}{
+					"type":        "string",
+					"description": "The identified root cause (optional)",
+				},
+				"recommended_actions": map[string]interface{}{
+					"type":        "array",
+					"description": "List of recommended actions (optional)",
+				},
+				"severity": map[string]interface{}{
+					"type":        "string",
+					"enum":        []interface{}{"info", "warning", "error", "critical"},
+					"description": "Severity level of the findings",
+				},
+				"summary": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief summary of the investigation",
+				},
+			},
+			"required": []string{"confidence", "findings"},
+		},
+		RequiredFields: []string{"investigation_id", "confidence", "findings"},
+	}
+	a.tools[completeInvestigationTool.Name] = completeInvestigationTool
+
+	// Register escalate_investigation tool
+	escalateInvestigationTool := entity.Tool{
+		ID:          "escalate_investigation",
+		Name:        "escalate_investigation",
+		Description: "Escalates an investigation to a higher priority or human review.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"investigation_id": map[string]interface{}{
+					"type":        "string",
+					"description": "The ID of the investigation to escalate",
+				},
+				"reason": map[string]interface{}{
+					"type":        "string",
+					"description": "Reason for escalation",
+				},
+				"priority": map[string]interface{}{
+					"type":        "string",
+					"enum":        []interface{}{"low", "medium", "high", "critical"},
+					"description": "Priority level for escalation",
+				},
+				"partial_findings": map[string]interface{}{
+					"type":        "array",
+					"description": "Partial findings gathered so far (optional)",
+				},
+				"blocking": map[string]interface{}{
+					"type":        "boolean",
+					"description": "Whether this escalation is blocking",
+				},
+				"requires_acknowledgment": map[string]interface{}{
+					"type":        "boolean",
+					"description": "Whether acknowledgment is required",
+				},
+			},
+			"required": []string{"investigation_id", "reason", "priority"},
+		},
+		RequiredFields: []string{"investigation_id", "reason", "priority"},
+	}
+	a.tools[escalateInvestigationTool.Name] = escalateInvestigationTool
+
+	// Register report_investigation tool
+	reportInvestigationTool := entity.Tool{
+		ID:          "report_investigation",
+		Name:        "report_investigation",
+		Description: "Reports progress or status update during an ongoing investigation.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"investigation_id": map[string]interface{}{
+					"type":        "string",
+					"description": "The ID of the investigation to report on",
+				},
+				"message": map[string]interface{}{
+					"type":        "string",
+					"description": "Status message or progress update",
+				},
+				"progress": map[string]interface{}{
+					"type":        "number",
+					"minimum":     float64(0),
+					"maximum":     float64(100),
+					"description": "Progress percentage from 0 to 100",
+				},
+			},
+			"required": []string{"investigation_id", "message"},
+		},
+		RequiredFields: []string{"investigation_id", "message"},
+	}
+	a.tools[reportInvestigationTool.Name] = reportInvestigationTool
+}
+
+// Investigation status constants.
+const (
+	investigationStatusRunning   = "running"
+	investigationStatusCompleted = "completed"
+	investigationStatusEscalated = "escalated"
+)
+
+// RegisterInvestigation registers an investigation ID so it can be completed or escalated.
+// This is primarily used for testing and by the investigation runner.
+func (a *ExecutorAdapter) RegisterInvestigation(investigationID string) {
+	if investigationID == "" || strings.TrimSpace(investigationID) == "" {
+		return
+	}
+	a.investigationMu.Lock()
+	defer a.investigationMu.Unlock()
+	if _, exists := a.investigationStates[investigationID]; !exists {
+		a.investigationStates[investigationID] = investigationStatusRunning
+	}
+}
+
+// checkAndSetInvestigationStatus checks if an investigation can transition to newStatus.
+// Returns nil if the transition is allowed, or an error if already in a terminal state.
+// If investigationID is empty, the check is skipped.
+func (a *ExecutorAdapter) checkAndSetInvestigationStatus(investigationID, newStatus string) error {
+	if investigationID == "" || strings.TrimSpace(investigationID) == "" {
+		return nil
+	}
+
+	a.investigationMu.Lock()
+	defer a.investigationMu.Unlock()
+
+	if status, exists := a.investigationStates[investigationID]; exists {
+		if status == investigationStatusCompleted {
+			return errors.New("investigation already completed")
+		}
+		if status == investigationStatusEscalated {
+			return errors.New("investigation already escalated")
+		}
+	}
+	a.investigationStates[investigationID] = newStatus
+	return nil
+}
+
+// completeInvestigationInput represents the input for the complete_investigation tool.
+type completeInvestigationInput struct {
+	InvestigationID    string   `json:"investigation_id"`
+	Confidence         *float64 `json:"confidence"`
+	Findings           []string `json:"findings"`
+	RootCause          string   `json:"root_cause,omitempty"`
+	RecommendedActions []string `json:"recommended_actions,omitempty"`
+}
+
+// escalateInvestigationInput represents the input for the escalate_investigation tool.
+type escalateInvestigationInput struct {
+	InvestigationID string   `json:"investigation_id"`
+	Reason          string   `json:"reason"`
+	Priority        string   `json:"priority"`
+	PartialFindings []string `json:"partial_findings,omitempty"`
+}
+
+// reportInvestigationInput represents the input for the report_investigation tool.
+type reportInvestigationInput struct {
+	InvestigationID string   `json:"investigation_id"`
+	Message         string   `json:"message"`
+	Progress        *float64 `json:"progress,omitempty"`
+}
+
+// executeCompleteInvestigation executes the complete_investigation tool.
+func (a *ExecutorAdapter) executeCompleteInvestigation(ctx context.Context, input json.RawMessage) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	var in completeInvestigationInput
+	if err := json.Unmarshal(input, &in); err != nil {
+		return "", fmt.Errorf("failed to parse input: %w", err)
+	}
+
+	// Validate investigation_id
+	if in.InvestigationID == "" || strings.TrimSpace(in.InvestigationID) == "" {
+		return "", errors.New("investigation_id is required and cannot be empty")
+	}
+
+	// Check if investigation exists
+	a.investigationMu.Lock()
+	_, exists := a.investigationStates[in.InvestigationID]
+	a.investigationMu.Unlock()
+	if !exists {
+		return "", fmt.Errorf("investigation_id %q not found", in.InvestigationID)
+	}
+
+	// Validate confidence
+	if in.Confidence == nil {
+		return "", errors.New("confidence is required")
+	}
+	if *in.Confidence < 0 || *in.Confidence > 1 {
+		return "", errors.New("confidence must be between 0 and 1")
+	}
+
+	// Validate findings
+	if in.Findings == nil {
+		return "", errors.New("findings is required")
+	}
+	if len(in.Findings) == 0 {
+		return "", errors.New("findings cannot be empty")
+	}
+
+	// Check for duplicate completion (only if investigation_id provided)
+	if err := a.checkAndSetInvestigationStatus(in.InvestigationID, investigationStatusCompleted); err != nil {
+		return "", err
+	}
+
+	// Build output
+	output := map[string]interface{}{
+		"status":       investigationStatusCompleted,
+		"confidence":   *in.Confidence,
+		"findings":     in.Findings,
+		"completed_at": time.Now().UTC().Format(time.RFC3339),
+	}
+	if in.InvestigationID != "" {
+		output["investigation_id"] = in.InvestigationID
+	}
+
+	result, err := json.Marshal(output)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal output: %w", err)
+	}
+
+	return string(result), nil
+}
+
+// executeEscalateInvestigation executes the escalate_investigation tool.
+func (a *ExecutorAdapter) executeEscalateInvestigation(ctx context.Context, input json.RawMessage) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	var in escalateInvestigationInput
+	if err := json.Unmarshal(input, &in); err != nil {
+		return "", fmt.Errorf("failed to parse input: %w", err)
+	}
+
+	// Validate investigation_id
+	if in.InvestigationID == "" || strings.TrimSpace(in.InvestigationID) == "" {
+		return "", errors.New("investigation_id is required and cannot be empty")
+	}
+
+	// Check if investigation exists
+	a.investigationMu.Lock()
+	_, exists := a.investigationStates[in.InvestigationID]
+	a.investigationMu.Unlock()
+	if !exists {
+		return "", fmt.Errorf("investigation_id %q not found", in.InvestigationID)
+	}
+
+	// Validate reason
+	if in.Reason == "" || strings.TrimSpace(in.Reason) == "" {
+		return "", errors.New("reason is required and cannot be empty")
+	}
+
+	// Validate priority
+	validPriorities := map[string]bool{"low": true, "medium": true, "high": true, "critical": true}
+	if !validPriorities[in.Priority] {
+		return "", errors.New("priority must be one of: low, medium, high, critical")
+	}
+
+	// Check for duplicate escalation (only if investigation_id provided)
+	if err := a.checkAndSetInvestigationStatus(in.InvestigationID, investigationStatusEscalated); err != nil {
+		return "", err
+	}
+
+	// Build output
+	escalationID := fmt.Sprintf("esc-%d", time.Now().UnixNano())
+	if in.InvestigationID != "" {
+		escalationID = fmt.Sprintf("esc-%s-%d", in.InvestigationID, time.Now().UnixNano())
+	}
+	output := map[string]interface{}{
+		"status":        investigationStatusEscalated,
+		"escalation_id": escalationID,
+		"reason":        in.Reason,
+		"priority":      in.Priority,
+		"escalated_at":  time.Now().UTC().Format(time.RFC3339),
+	}
+	if in.InvestigationID != "" {
+		output["investigation_id"] = in.InvestigationID
+	}
+
+	result, err := json.Marshal(output)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal output: %w", err)
+	}
+
+	return string(result), nil
+}
+
+// executeReportInvestigation executes the report_investigation tool.
+func (a *ExecutorAdapter) executeReportInvestigation(ctx context.Context, input json.RawMessage) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	var in reportInvestigationInput
+	if err := json.Unmarshal(input, &in); err != nil {
+		return "", fmt.Errorf("failed to parse input: %w", err)
+	}
+
+	// Validate investigation_id
+	if in.InvestigationID == "" || strings.TrimSpace(in.InvestigationID) == "" {
+		return "", errors.New("investigation_id is required and cannot be empty")
+	}
+
+	// Validate message
+	if in.Message == "" {
+		return "", errors.New("message is required")
+	}
+
+	// Validate progress if provided
+	if in.Progress != nil {
+		if *in.Progress < 0 || *in.Progress > 100 {
+			return "", errors.New("progress must be between 0 and 100")
+		}
+	}
+
+	// Build output
+	output := map[string]interface{}{
+		"status":           "reported",
+		"investigation_id": in.InvestigationID,
+		"message":          in.Message,
+		"reported_at":      time.Now().UTC().Format(time.RFC3339),
+	}
+	if in.Progress != nil {
+		output["progress"] = *in.Progress
+	}
+
+	result, err := json.Marshal(output)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal output: %w", err)
+	}
+
+	return string(result), nil
 }

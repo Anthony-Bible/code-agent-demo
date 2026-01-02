@@ -6,6 +6,8 @@ import (
 	"code-editing-agent/internal/domain/entity"
 	"context"
 	"errors"
+	"fmt"
+	"os"
 )
 
 // Alert severity constants used internally by the handler for decision making.
@@ -109,8 +111,20 @@ func (h *AlertHandler) Handle(ctx context.Context, alert *AlertForInvestigation)
 	}
 
 	// All checks passed - start the investigation
-	_, err := h.investigationUseCase.HandleAlert(ctx, alert)
-	return err
+	fmt.Fprintf(
+		os.Stderr,
+		"[AlertHandler] Starting investigation for alert: %s (severity=%s)\n",
+		alert.Title(),
+		alert.Severity(),
+	)
+	result, err := h.investigationUseCase.HandleAlert(ctx, alert)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[AlertHandler] Investigation error: %v\n", err)
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "[AlertHandler] Investigation completed: status=%s, findings=%d, confidence=%.2f\n",
+		result.Status, len(result.Findings), result.Confidence)
+	return nil
 }
 
 // isSourceIgnored checks if the alert source is in the ignored list.

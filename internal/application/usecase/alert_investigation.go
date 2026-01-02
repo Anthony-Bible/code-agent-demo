@@ -1,6 +1,8 @@
 package usecase
 
 import (
+	"code-editing-agent/internal/domain/entity"
+	"code-editing-agent/internal/domain/port"
 	"context"
 	"errors"
 	"fmt"
@@ -8,6 +10,16 @@ import (
 	"sync"
 	"time"
 )
+
+// ConversationServiceInterface defines the interface for managing AI conversation sessions.
+// This is defined locally in usecase to avoid import cycles with service package.
+type ConversationServiceInterface interface {
+	StartConversation(ctx context.Context) (string, error)
+	AddUserMessage(ctx context.Context, sessionID, content string) (*entity.Message, error)
+	ProcessAssistantResponse(ctx context.Context, sessionID string) (*entity.Message, []port.ToolCallInfo, error)
+	AddToolResultMessage(ctx context.Context, sessionID string, toolResults []entity.ToolResult) error
+	EndConversation(ctx context.Context, sessionID string) error
+}
 
 // SafetyEnforcer defines the interface for safety checks during investigations.
 // This is defined locally in usecase to avoid import cycles with service package.
@@ -164,6 +176,8 @@ type AlertInvestigationUseCase struct {
 	promptBuilderRegistry PromptBuilderRegistry           // Generates investigation prompts
 	safetyEnforcer        SafetyEnforcer                  // Safety policy enforcer
 	investigationStore    InvestigationStoreWriter        // Persistence for investigations
+	convService           ConversationServiceInterface    // Conversation service for AI interaction
+	toolExecutor          port.ToolExecutor               // Tool executor for running tools
 	shutdown              bool                            // True after Shutdown is called
 	idCounter             int64                           // Counter for generating unique IDs
 }
@@ -260,23 +274,43 @@ func (uc *AlertInvestigationUseCase) HandleAlert(
 		}
 	}
 
-	// Simulate investigation completion
-	// TODO: Implement actual investigation loop with AI interaction
-	result := &InvestigationResultStub{
-		InvestigationID: invID,
-		AlertID:         alert.ID(),
-		Status:          "completed",
-		Findings:        []string{},
-		ActionsTaken:    0,
-		Duration:        time.Since(time.Now()),
-		Confidence:      0.8,
-	}
-
-	// Update store with final status if configured
+	// Run actual investigation using InvestigationRunner
 	uc.mu.RLock()
+	convService := uc.convService
+	toolExecutor := uc.toolExecutor
+	promptBuilder := uc.promptBuilderRegistry
+	config := uc.config
 	store := uc.investigationStore
 	uc.mu.RUnlock()
 
+	var result *InvestigationResultStub
+	if convService != nil && toolExecutor != nil {
+		runner := NewInvestigationRunner(
+			convService,
+			toolExecutor,
+			enforcer,
+			promptBuilder,
+			config,
+		)
+		var err error
+		result, err = runner.Run(ctx, alert, invID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// Fallback stub when dependencies not configured
+		result = &InvestigationResultStub{
+			InvestigationID: invID,
+			AlertID:         alert.ID(),
+			Status:          "completed",
+			Findings:        []string{},
+			ActionsTaken:    0,
+			Duration:        time.Since(time.Now()),
+			Confidence:      0.8,
+		}
+	}
+
+	// Update store with final status if configured
 	if store != nil {
 		stub := newSimpleInvestigationStub(invID, alert.ID(), "", result.Status)
 		_ = store.Update(ctx, stub)
@@ -454,6 +488,20 @@ func (uc *AlertInvestigationUseCase) SetInvestigationStore(store InvestigationSt
 	uc.mu.Lock()
 	defer uc.mu.Unlock()
 	uc.investigationStore = store
+}
+
+// SetConversationService configures the conversation service for AI interaction.
+func (uc *AlertInvestigationUseCase) SetConversationService(cs ConversationServiceInterface) {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
+	uc.convService = cs
+}
+
+// SetToolExecutor configures the tool executor for running investigation tools.
+func (uc *AlertInvestigationUseCase) SetToolExecutor(te port.ToolExecutor) {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
+	uc.toolExecutor = te
 }
 
 // IsToolAllowed checks if a tool name is in the allowed list.

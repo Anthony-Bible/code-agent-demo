@@ -121,17 +121,33 @@ func NewContainer(cfg *Config) (*Container, error) {
 	// - AllowedTools: Restricts which tools investigations can execute
 	// - BlockedCommands: Prevents dangerous shell commands from being executed
 	invConfig := usecase.AlertInvestigationUseCaseConfig{
-		MaxActions:      20,
-		MaxDuration:     15 * time.Minute,
-		MaxConcurrent:   5,
-		AllowedTools:    []string{"bash", "read_file", "list_files"},
+		MaxActions:    20,
+		MaxDuration:   15 * time.Minute,
+		MaxConcurrent: 5,
+		AllowedTools: []string{
+			"bash",
+			"read_file",
+			"list_files",
+			"activate_skill",
+			"complete_investigation",
+			"escalate_investigation",
+		},
 		BlockedCommands: []string{"rm -rf", "dd if=", "mkfs"},
 	}
 	investigationUseCase := usecase.NewAlertInvestigationUseCaseWithConfig(invConfig)
 
+	// Wire conversation service and tool executor for investigation loop
+	investigationUseCase.SetConversationService(convService)
+	investigationUseCase.SetToolExecutor(toolExecutor)
+
 	// Wire prompt builders - these generate AI prompts tailored to different alert types
 	// (e.g., high CPU, disk space, memory issues)
 	promptRegistry := usecase.NewPromptBuilderRegistry()
+	_ = promptRegistry.Register(usecase.NewHighCPUPromptBuilder())
+	_ = promptRegistry.Register(usecase.NewDiskSpacePromptBuilder())
+	_ = promptRegistry.Register(usecase.NewMemoryPromptBuilder())
+	_ = promptRegistry.Register(usecase.NewOOMPromptBuilder())
+	_ = promptRegistry.Register(usecase.NewGenericPromptBuilder()) // Fallback for unknown alert types
 	investigationUseCase.SetPromptBuilderRegistry(promptRegistry)
 
 	// Wire escalation handler - determines how to handle investigations that
