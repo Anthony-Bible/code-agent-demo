@@ -112,8 +112,8 @@ func (m *MockSafetyEnforcer) CheckTimeout(ctx context.Context) error {
 	return nil
 }
 
-// mockStub is a minimal InvestigationStubData implementation for testing.
-type mockStub struct {
+// mockInvestigationRecord is a minimal InvestigationRecordData implementation for testing.
+type mockInvestigationRecord struct {
 	id, alertID, sessionID, status string
 	startedAt                      time.Time
 	completedAt                    time.Time
@@ -125,40 +125,40 @@ type mockStub struct {
 	escalateReason                 string
 }
 
-func (s *mockStub) ID() string        { return s.id }
-func (s *mockStub) AlertID() string   { return s.alertID }
-func (s *mockStub) SessionID() string { return s.sessionID }
-func (s *mockStub) Status() string    { return s.status }
-func (s *mockStub) StartedAt() time.Time {
+func (s *mockInvestigationRecord) ID() string        { return s.id }
+func (s *mockInvestigationRecord) AlertID() string   { return s.alertID }
+func (s *mockInvestigationRecord) SessionID() string { return s.sessionID }
+func (s *mockInvestigationRecord) Status() string    { return s.status }
+func (s *mockInvestigationRecord) StartedAt() time.Time {
 	if s.startedAt.IsZero() {
 		return time.Now()
 	}
 	return s.startedAt
 }
-func (s *mockStub) CompletedAt() time.Time  { return s.completedAt }
-func (s *mockStub) Findings() []string      { return s.findings }
-func (s *mockStub) ActionsTaken() int       { return s.actionsTaken }
-func (s *mockStub) Duration() time.Duration { return time.Duration(s.durationNanos) }
-func (s *mockStub) Confidence() float64     { return s.confidence }
-func (s *mockStub) Escalated() bool         { return s.escalated }
-func (s *mockStub) EscalateReason() string  { return s.escalateReason }
+func (s *mockInvestigationRecord) CompletedAt() time.Time  { return s.completedAt }
+func (s *mockInvestigationRecord) Findings() []string      { return s.findings }
+func (s *mockInvestigationRecord) ActionsTaken() int       { return s.actionsTaken }
+func (s *mockInvestigationRecord) Duration() time.Duration { return time.Duration(s.durationNanos) }
+func (s *mockInvestigationRecord) Confidence() float64     { return s.confidence }
+func (s *mockInvestigationRecord) Escalated() bool         { return s.escalated }
+func (s *mockInvestigationRecord) EscalateReason() string  { return s.escalateReason }
 
 // MockInvestigationStore is a test double for InvestigationStoreWriter interface.
 type MockInvestigationStore struct {
 	mu     sync.RWMutex
-	data   map[string]*mockStub
+	data   map[string]*mockInvestigationRecord
 	closed bool
 }
 
 // NewMockInvestigationStore creates a new mock investigation store.
 func NewMockInvestigationStore() *MockInvestigationStore {
 	return &MockInvestigationStore{
-		data: make(map[string]*mockStub),
+		data: make(map[string]*mockInvestigationRecord),
 	}
 }
 
 // Store saves an investigation.
-func (m *MockInvestigationStore) Store(ctx context.Context, inv InvestigationStubData) error {
+func (m *MockInvestigationStore) Store(ctx context.Context, inv InvestigationRecordData) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -176,7 +176,7 @@ func (m *MockInvestigationStore) Store(ctx context.Context, inv InvestigationStu
 		return errMockDuplicate
 	}
 
-	m.data[inv.ID()] = &mockStub{
+	m.data[inv.ID()] = &mockInvestigationRecord{
 		id:        inv.ID(),
 		alertID:   inv.AlertID(),
 		sessionID: inv.SessionID(),
@@ -187,7 +187,7 @@ func (m *MockInvestigationStore) Store(ctx context.Context, inv InvestigationStu
 }
 
 // Get retrieves an investigation by ID.
-func (m *MockInvestigationStore) Get(ctx context.Context, id string) (InvestigationStubData, error) {
+func (m *MockInvestigationStore) Get(ctx context.Context, id string) (InvestigationRecordData, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -207,7 +207,7 @@ func (m *MockInvestigationStore) Get(ctx context.Context, id string) (Investigat
 }
 
 // Update modifies an existing investigation.
-func (m *MockInvestigationStore) Update(ctx context.Context, inv InvestigationStubData) error {
+func (m *MockInvestigationStore) Update(ctx context.Context, inv InvestigationRecordData) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -225,7 +225,7 @@ func (m *MockInvestigationStore) Update(ctx context.Context, inv InvestigationSt
 		return errMockNotFound
 	}
 
-	m.data[inv.ID()] = &mockStub{
+	m.data[inv.ID()] = &mockInvestigationRecord{
 		id:        inv.ID(),
 		alertID:   inv.AlertID(),
 		sessionID: inv.SessionID(),

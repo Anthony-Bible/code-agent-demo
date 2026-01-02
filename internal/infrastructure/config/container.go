@@ -23,14 +23,14 @@ import (
 )
 
 // investigationStoreAdapter adapts FileInvestigationStore to the usecase.InvestigationStoreWriter interface.
-// This is needed because FileInvestigationStore uses concrete *service.InvestigationStub types
-// while the usecase interface uses InvestigationStubData interface types.
+// This is needed because FileInvestigationStore uses concrete *service.InvestigationRecord types
+// while the usecase interface uses InvestigationRecordData interface types.
 type investigationStoreAdapter struct {
 	store *investigation.FileInvestigationStore
 }
 
-func (a *investigationStoreAdapter) Store(ctx context.Context, inv usecase.InvestigationStubData) error {
-	stub := appsvc.NewInvestigationStubWithResult(
+func (a *investigationStoreAdapter) Store(ctx context.Context, inv usecase.InvestigationRecordData) error {
+	stub := appsvc.NewInvestigationRecordWithResult(
 		inv.ID(), inv.AlertID(), inv.SessionID(), inv.Status(),
 		inv.StartedAt(), inv.CompletedAt(),
 		inv.Findings(), inv.ActionsTaken(), inv.Duration(),
@@ -39,12 +39,12 @@ func (a *investigationStoreAdapter) Store(ctx context.Context, inv usecase.Inves
 	return a.store.Store(ctx, stub)
 }
 
-func (a *investigationStoreAdapter) Get(ctx context.Context, id string) (usecase.InvestigationStubData, error) {
+func (a *investigationStoreAdapter) Get(ctx context.Context, id string) (usecase.InvestigationRecordData, error) {
 	return a.store.Get(ctx, id)
 }
 
-func (a *investigationStoreAdapter) Update(ctx context.Context, inv usecase.InvestigationStubData) error {
-	stub := appsvc.NewInvestigationStubWithResult(
+func (a *investigationStoreAdapter) Update(ctx context.Context, inv usecase.InvestigationRecordData) error {
+	stub := appsvc.NewInvestigationRecordWithResult(
 		inv.ID(), inv.AlertID(), inv.SessionID(), inv.Status(),
 		inv.StartedAt(), inv.CompletedAt(),
 		inv.Findings(), inv.ActionsTaken(), inv.Duration(),
@@ -211,12 +211,8 @@ func createInvestigationComponents(
 	investigationUseCase.SetConversationService(convService)
 	investigationUseCase.SetToolExecutor(toolExecutor)
 
-	// Wire prompt builders for different alert types
+	// Wire prompt builder (generic builder for all alert types)
 	promptRegistry := usecase.NewPromptBuilderRegistry()
-	_ = promptRegistry.Register(usecase.NewHighCPUPromptBuilder())
-	_ = promptRegistry.Register(usecase.NewDiskSpacePromptBuilder())
-	_ = promptRegistry.Register(usecase.NewMemoryPromptBuilder())
-	_ = promptRegistry.Register(usecase.NewOOMPromptBuilder())
 	_ = promptRegistry.Register(usecase.NewGenericPromptBuilder())
 	investigationUseCase.SetPromptBuilderRegistry(promptRegistry)
 

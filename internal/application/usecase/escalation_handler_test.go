@@ -29,7 +29,7 @@ func TestLogEscalationHandler_Escalate_Success(t *testing.T) {
 		t.Skip("NewLogEscalationHandler() returned nil")
 	}
 
-	inv := &InvestigationStubForEscalation{
+	inv := &EscalationInvestigationView{
 		id:        "inv-001",
 		alertID:   "alert-001",
 		sessionID: "session-001",
@@ -79,7 +79,7 @@ func TestLogEscalationHandler_Escalate_SetsTimestamp(t *testing.T) {
 		t.Skip("NewLogEscalationHandler() returned nil")
 	}
 
-	inv := &InvestigationStubForEscalation{
+	inv := &EscalationInvestigationView{
 		id:        "inv-002",
 		alertID:   "alert-002",
 		sessionID: "session-002",
@@ -111,7 +111,7 @@ func TestLogEscalationHandler_CanEscalate_NotEscalated(t *testing.T) {
 		t.Skip("NewLogEscalationHandler() returned nil")
 	}
 
-	inv := &InvestigationStubForEscalation{
+	inv := &EscalationInvestigationView{
 		id:          "inv-003",
 		isEscalated: false,
 	}
@@ -127,7 +127,7 @@ func TestLogEscalationHandler_CanEscalate_AlreadyEscalated(t *testing.T) {
 		t.Skip("NewLogEscalationHandler() returned nil")
 	}
 
-	inv := &InvestigationStubForEscalation{
+	inv := &EscalationInvestigationView{
 		id:          "inv-004",
 		isEscalated: true,
 	}
@@ -169,7 +169,7 @@ func TestLogEscalationHandler_GetEscalationHistory_AfterEscalation(t *testing.T)
 		t.Skip("NewLogEscalationHandler() returned nil")
 	}
 
-	inv := &InvestigationStubForEscalation{
+	inv := &EscalationInvestigationView{
 		id:        "inv-history-test",
 		alertID:   "alert-001",
 		sessionID: "session-001",
@@ -225,7 +225,7 @@ func TestConversationEscalationHandler_Escalate_Success(t *testing.T) {
 
 	handler.SetSessionID("test-session")
 
-	inv := &InvestigationStubForEscalation{
+	inv := &EscalationInvestigationView{
 		id:        "inv-conv-001",
 		alertID:   "alert-001",
 		sessionID: "session-001",
@@ -256,7 +256,7 @@ func TestConversationEscalationHandler_Escalate_NoSessionID(t *testing.T) {
 
 	// Don't set session ID
 
-	inv := &InvestigationStubForEscalation{
+	inv := &EscalationInvestigationView{
 		id:        "inv-conv-002",
 		alertID:   "alert-002",
 		sessionID: "session-002",
@@ -288,7 +288,7 @@ func TestConversationEscalationHandler_Escalate_RateLimited(t *testing.T) {
 
 	handler.SetSessionID("test-session")
 
-	inv := &InvestigationStubForEscalation{
+	inv := &EscalationInvestigationView{
 		id:        "inv-rate-001",
 		alertID:   "alert-001",
 		sessionID: "session-001",
@@ -308,7 +308,7 @@ func TestConversationEscalationHandler_Escalate_RateLimited(t *testing.T) {
 	}
 
 	// Second immediate escalation should be rate limited
-	inv2 := &InvestigationStubForEscalation{
+	inv2 := &EscalationInvestigationView{
 		id:        "inv-rate-002",
 		alertID:   "alert-002",
 		sessionID: "session-002",
@@ -337,7 +337,7 @@ func TestConversationEscalationHandler_Escalate_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	inv := &InvestigationStubForEscalation{
+	inv := &EscalationInvestigationView{
 		id:        "inv-ctx-001",
 		alertID:   "alert-001",
 		sessionID: "session-001",
@@ -392,7 +392,7 @@ func TestCompositeEscalationHandler_Escalate_CallsAllHandlers(t *testing.T) {
 		t.Skip("NewCompositeEscalationHandler() returned nil")
 	}
 
-	inv := &InvestigationStubForEscalation{
+	inv := &EscalationInvestigationView{
 		id:        "inv-composite-001",
 		alertID:   "alert-001",
 		sessionID: "session-001",
@@ -427,7 +427,7 @@ func TestCompositeEscalationHandler_AddHandler(t *testing.T) {
 
 	composite.AddHandler(logHandler)
 
-	inv := &InvestigationStubForEscalation{
+	inv := &EscalationInvestigationView{
 		id:        "inv-add-handler",
 		alertID:   "alert-001",
 		sessionID: "session-001",
@@ -462,7 +462,7 @@ func TestCompositeEscalationHandler_CanEscalate_AllTrue(t *testing.T) {
 
 	composite.AddHandler(logHandler)
 
-	inv := &InvestigationStubForEscalation{
+	inv := &EscalationInvestigationView{
 		id:          "inv-can-escalate",
 		isEscalated: false,
 	}
@@ -485,7 +485,7 @@ func TestCompositeEscalationHandler_GetEscalationHistory_Combined(t *testing.T) 
 
 	composite.AddHandler(logHandler)
 
-	inv := &InvestigationStubForEscalation{
+	inv := &EscalationInvestigationView{
 		id:        "inv-history-combined",
 		alertID:   "alert-001",
 		sessionID: "session-001",
@@ -533,7 +533,7 @@ func TestEscalationRequest_Priority_Validation(t *testing.T) {
 
 func TestEscalationRequest_Context_Data(t *testing.T) {
 	req := EscalationRequest{
-		Investigation: &InvestigationStubForEscalation{id: "inv-001"},
+		Investigation: &EscalationInvestigationView{id: "inv-001"},
 		Reason:        "Test reason",
 		Priority:      EscalationPriorityMedium,
 		Context: map[string]string{

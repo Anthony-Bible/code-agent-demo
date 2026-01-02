@@ -18,8 +18,8 @@ var (
 	ErrDuplicateInvestigationID = errors.New("investigation ID already exists")
 	// ErrInvestigationStoreShutdown is returned when operations are attempted on a closed store.
 	ErrInvestigationStoreShutdown = errors.New("investigation store is shutdown")
-	// ErrNilInvestigationStub is returned when a nil investigation is passed to Store or Update.
-	ErrNilInvestigationStub = errors.New("investigation cannot be nil")
+	// ErrNilInvestigationRecord is returned when a nil investigation is passed to Store or Update.
+	ErrNilInvestigationRecord = errors.New("investigation cannot be nil")
 	// ErrEmptyInvestigationIDStore is returned when Get is called with an empty ID.
 	ErrEmptyInvestigationIDStore = errors.New("investigation ID cannot be empty")
 )
@@ -35,9 +35,9 @@ type InvestigationQuery struct {
 	Limit     int       // Maximum results to return (0 = unlimited)
 }
 
-// InvestigationStub represents an investigation record for storage.
+// InvestigationRecord represents an investigation record for storage.
 // It contains fields for both metadata and full investigation results.
-type InvestigationStub struct {
+type InvestigationRecord struct {
 	id        string    // Unique identifier
 	alertID   string    // Associated alert ID
 	sessionID string    // Session context
@@ -53,10 +53,10 @@ type InvestigationStub struct {
 	escalateReason string    // Reason for escalation
 }
 
-// NewInvestigationStub creates a new InvestigationStub with the given parameters.
-// This is the primary constructor for creating investigation stubs with minimal metadata.
-func NewInvestigationStub(id, alertID, sessionID, status string, startedAt time.Time) *InvestigationStub {
-	return &InvestigationStub{
+// NewInvestigationRecord creates a new InvestigationRecord with the given parameters.
+// This is the primary constructor for creating investigation records with minimal metadata.
+func NewInvestigationRecord(id, alertID, sessionID, status string, startedAt time.Time) *InvestigationRecord {
+	return &InvestigationRecord{
 		id:        id,
 		alertID:   alertID,
 		sessionID: sessionID,
@@ -65,9 +65,9 @@ func NewInvestigationStub(id, alertID, sessionID, status string, startedAt time.
 	}
 }
 
-// NewInvestigationStubWithResult creates an InvestigationStub with full result data.
+// NewInvestigationRecordWithResult creates an InvestigationRecord with full result data.
 // Use this constructor when storing completed investigation results.
-func NewInvestigationStubWithResult(
+func NewInvestigationRecordWithResult(
 	id, alertID, sessionID, status string,
 	startedAt, completedAt time.Time,
 	findings []string,
@@ -76,8 +76,8 @@ func NewInvestigationStubWithResult(
 	confidence float64,
 	escalated bool,
 	escalateReason string,
-) *InvestigationStub {
-	return &InvestigationStub{
+) *InvestigationRecord {
+	return &InvestigationRecord{
 		id:             id,
 		alertID:        alertID,
 		sessionID:      sessionID,
@@ -94,20 +94,20 @@ func NewInvestigationStubWithResult(
 }
 
 // ID returns the unique investigation identifier.
-func (i *InvestigationStub) ID() string { return i.id }
+func (i *InvestigationRecord) ID() string { return i.id }
 
 // AlertID returns the ID of the alert being investigated.
-func (i *InvestigationStub) AlertID() string { return i.alertID }
+func (i *InvestigationRecord) AlertID() string { return i.alertID }
 
 // SessionID returns the session context for this investigation.
-func (i *InvestigationStub) SessionID() string { return i.sessionID }
+func (i *InvestigationRecord) SessionID() string { return i.sessionID }
 
 // Status returns the current investigation status.
-func (i *InvestigationStub) Status() string { return i.status }
+func (i *InvestigationRecord) Status() string { return i.status }
 
 // StartedAt returns when the investigation began.
 // Returns the current time if startedAt was never set (zero value).
-func (i *InvestigationStub) StartedAt() time.Time {
+func (i *InvestigationRecord) StartedAt() time.Time {
 	if i.startedAt.IsZero() {
 		return time.Now()
 	}
@@ -116,25 +116,25 @@ func (i *InvestigationStub) StartedAt() time.Time {
 
 // CompletedAt returns when the investigation finished.
 // Returns zero time if the investigation is still in progress.
-func (i *InvestigationStub) CompletedAt() time.Time { return i.completedAt }
+func (i *InvestigationRecord) CompletedAt() time.Time { return i.completedAt }
 
 // Findings returns the summary findings discovered during the investigation.
-func (i *InvestigationStub) Findings() []string { return i.findings }
+func (i *InvestigationRecord) Findings() []string { return i.findings }
 
 // ActionsTaken returns the number of tool executions performed.
-func (i *InvestigationStub) ActionsTaken() int { return i.actionsTaken }
+func (i *InvestigationRecord) ActionsTaken() int { return i.actionsTaken }
 
 // Duration returns the total investigation duration.
-func (i *InvestigationStub) Duration() time.Duration { return time.Duration(i.durationNanos) }
+func (i *InvestigationRecord) Duration() time.Duration { return time.Duration(i.durationNanos) }
 
 // Confidence returns the confidence level in the investigation outcome [0.0, 1.0].
-func (i *InvestigationStub) Confidence() float64 { return i.confidence }
+func (i *InvestigationRecord) Confidence() float64 { return i.confidence }
 
 // Escalated returns true if the investigation was escalated to a human.
-func (i *InvestigationStub) Escalated() bool { return i.escalated }
+func (i *InvestigationRecord) Escalated() bool { return i.escalated }
 
 // EscalateReason returns the reason for escalation, if applicable.
-func (i *InvestigationStub) EscalateReason() string { return i.escalateReason }
+func (i *InvestigationRecord) EscalateReason() string { return i.escalateReason }
 
 // InvestigationStore defines the interface for investigation persistence.
 // Implementations must be safe for concurrent access from multiple goroutines.
@@ -142,15 +142,15 @@ func (i *InvestigationStub) EscalateReason() string { return i.escalateReason }
 // context.DeadlineExceeded when appropriate.
 type InvestigationStore interface {
 	// Store persists a new investigation. Returns ErrDuplicateInvestigationID if exists.
-	Store(ctx context.Context, inv *InvestigationStub) error
+	Store(ctx context.Context, inv *InvestigationRecord) error
 	// Get retrieves an investigation by ID. Returns ErrInvestigationNotFound if not found.
-	Get(ctx context.Context, id string) (*InvestigationStub, error)
+	Get(ctx context.Context, id string) (*InvestigationRecord, error)
 	// Update modifies an existing investigation. Returns ErrInvestigationNotFound if not found.
-	Update(ctx context.Context, inv *InvestigationStub) error
+	Update(ctx context.Context, inv *InvestigationRecord) error
 	// Delete removes an investigation. Returns ErrInvestigationNotFound if not found.
 	Delete(ctx context.Context, id string) error
 	// Query returns investigations matching the filter criteria.
-	Query(ctx context.Context, query InvestigationQuery) ([]*InvestigationStub, error)
+	Query(ctx context.Context, query InvestigationQuery) ([]*InvestigationRecord, error)
 	// Count returns the total number of stored investigations.
 	Count(ctx context.Context) (int, error)
 	// Close releases resources and prevents further operations.
@@ -162,7 +162,7 @@ type InvestigationStore interface {
 // All operations are protected by a read-write mutex for concurrent access safety.
 type InMemoryInvestigationStore struct {
 	mu       sync.RWMutex // Protects all fields below
-	data     map[string]*InvestigationStub
+	data     map[string]*InvestigationRecord
 	closed   bool
 	capacity int // Initial capacity hint (informational only)
 }
@@ -170,7 +170,7 @@ type InMemoryInvestigationStore struct {
 // NewInMemoryInvestigationStore creates a new in-memory store with default capacity.
 func NewInMemoryInvestigationStore() *InMemoryInvestigationStore {
 	return &InMemoryInvestigationStore{
-		data: make(map[string]*InvestigationStub),
+		data: make(map[string]*InvestigationRecord),
 	}
 }
 
@@ -178,22 +178,22 @@ func NewInMemoryInvestigationStore() *InMemoryInvestigationStore {
 // The capacity is a hint for map allocation and does not limit the number of investigations.
 func NewInMemoryInvestigationStoreWithCapacity(capacity int) *InMemoryInvestigationStore {
 	return &InMemoryInvestigationStore{
-		data:     make(map[string]*InvestigationStub, capacity),
+		data:     make(map[string]*InvestigationRecord, capacity),
 		capacity: capacity,
 	}
 }
 
 // Store saves a new investigation to the store.
-// Returns ErrNilInvestigationStub if inv is nil.
+// Returns ErrNilInvestigationRecord if inv is nil.
 // Returns ErrDuplicateInvestigationID if an investigation with the same ID exists.
 // Returns ErrInvestigationStoreShutdown if the store has been closed.
-func (s *InMemoryInvestigationStore) Store(ctx context.Context, inv *InvestigationStub) error {
+func (s *InMemoryInvestigationStore) Store(ctx context.Context, inv *InvestigationRecord) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
 	if inv == nil {
-		return ErrNilInvestigationStub
+		return ErrNilInvestigationRecord
 	}
 
 	s.mu.Lock()
@@ -215,7 +215,7 @@ func (s *InMemoryInvestigationStore) Store(ctx context.Context, inv *Investigati
 // Returns ErrEmptyInvestigationIDStore if id is empty.
 // Returns ErrInvestigationNotFound if no investigation exists with that ID.
 // Returns ErrInvestigationStoreShutdown if the store has been closed.
-func (s *InMemoryInvestigationStore) Get(ctx context.Context, id string) (*InvestigationStub, error) {
+func (s *InMemoryInvestigationStore) Get(ctx context.Context, id string) (*InvestigationRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -241,16 +241,16 @@ func (s *InMemoryInvestigationStore) Get(ctx context.Context, id string) (*Inves
 
 // Update replaces an existing investigation with the provided one.
 // The investigation is matched by ID.
-// Returns ErrNilInvestigationStub if inv is nil.
+// Returns ErrNilInvestigationRecord if inv is nil.
 // Returns ErrInvestigationNotFound if no investigation exists with that ID.
 // Returns ErrInvestigationStoreShutdown if the store has been closed.
-func (s *InMemoryInvestigationStore) Update(ctx context.Context, inv *InvestigationStub) error {
+func (s *InMemoryInvestigationStore) Update(ctx context.Context, inv *InvestigationRecord) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
 	if inv == nil {
-		return ErrNilInvestigationStub
+		return ErrNilInvestigationRecord
 	}
 
 	s.mu.Lock()
@@ -299,7 +299,7 @@ func (s *InMemoryInvestigationStore) Delete(ctx context.Context, id string) erro
 func (s *InMemoryInvestigationStore) Query(
 	ctx context.Context,
 	query InvestigationQuery,
-) ([]*InvestigationStub, error) {
+) ([]*InvestigationRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -311,7 +311,7 @@ func (s *InMemoryInvestigationStore) Query(
 		return nil, ErrInvestigationStoreShutdown
 	}
 
-	var results []*InvestigationStub
+	var results []*InvestigationRecord
 
 	for _, inv := range s.data {
 		if !matchesQuery(inv, query) {
@@ -324,7 +324,7 @@ func (s *InMemoryInvestigationStore) Query(
 	}
 
 	if results == nil {
-		results = []*InvestigationStub{}
+		results = []*InvestigationRecord{}
 	}
 
 	return results, nil
@@ -360,7 +360,7 @@ func (s *InMemoryInvestigationStore) Close() error {
 
 // matchesQuery checks if an investigation matches all specified query criteria.
 // Returns true if the investigation matches all non-zero fields in the query.
-func matchesQuery(inv *InvestigationStub, query InvestigationQuery) bool {
+func matchesQuery(inv *InvestigationRecord, query InvestigationQuery) bool {
 	if query.AlertID != "" && inv.alertID != query.AlertID {
 		return false
 	}

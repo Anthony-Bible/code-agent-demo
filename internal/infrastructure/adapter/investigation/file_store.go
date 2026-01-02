@@ -34,8 +34,8 @@ type investigationJSON struct {
 type FileInvestigationStore struct {
 	mu      sync.RWMutex
 	baseDir string
-	index   map[string]bool                       // ID -> exists (index in memory)
-	cache   map[string]*service.InvestigationStub // lazy-loaded data
+	index   map[string]bool                         // ID -> exists (index in memory)
+	cache   map[string]*service.InvestigationRecord // lazy-loaded data
 	closed  bool
 }
 
@@ -54,7 +54,7 @@ func NewFileInvestigationStore(path string) (*FileInvestigationStore, error) {
 	store := &FileInvestigationStore{
 		baseDir: path,
 		index:   make(map[string]bool),
-		cache:   make(map[string]*service.InvestigationStub),
+		cache:   make(map[string]*service.InvestigationRecord),
 	}
 
 	// Load existing files into index
@@ -73,13 +73,13 @@ func NewFileInvestigationStore(path string) (*FileInvestigationStore, error) {
 }
 
 // Store persists a new investigation.
-func (s *FileInvestigationStore) Store(ctx context.Context, inv *service.InvestigationStub) error {
+func (s *FileInvestigationStore) Store(ctx context.Context, inv *service.InvestigationRecord) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
 	if inv == nil {
-		return service.ErrNilInvestigationStub
+		return service.ErrNilInvestigationRecord
 	}
 
 	s.mu.Lock()
@@ -103,7 +103,7 @@ func (s *FileInvestigationStore) Store(ctx context.Context, inv *service.Investi
 }
 
 // Get retrieves an investigation by ID, lazy-loading from disk if needed.
-func (s *FileInvestigationStore) Get(ctx context.Context, id string) (*service.InvestigationStub, error) {
+func (s *FileInvestigationStore) Get(ctx context.Context, id string) (*service.InvestigationRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -144,13 +144,13 @@ func (s *FileInvestigationStore) Get(ctx context.Context, id string) (*service.I
 }
 
 // Update modifies an existing investigation.
-func (s *FileInvestigationStore) Update(ctx context.Context, inv *service.InvestigationStub) error {
+func (s *FileInvestigationStore) Update(ctx context.Context, inv *service.InvestigationRecord) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
 	if inv == nil {
-		return service.ErrNilInvestigationStub
+		return service.ErrNilInvestigationRecord
 	}
 
 	s.mu.Lock()
@@ -203,7 +203,7 @@ func (s *FileInvestigationStore) Delete(ctx context.Context, id string) error {
 func (s *FileInvestigationStore) Query(
 	ctx context.Context,
 	query service.InvestigationQuery,
-) ([]*service.InvestigationStub, error) {
+) ([]*service.InvestigationRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -215,7 +215,7 @@ func (s *FileInvestigationStore) Query(
 		return nil, service.ErrInvestigationStoreShutdown
 	}
 
-	var results []*service.InvestigationStub
+	var results []*service.InvestigationRecord
 
 	for id := range s.index {
 		// Ensure data is loaded
@@ -237,7 +237,7 @@ func (s *FileInvestigationStore) Query(
 	}
 
 	if results == nil {
-		results = []*service.InvestigationStub{}
+		results = []*service.InvestigationRecord{}
 	}
 
 	return results, nil
@@ -268,7 +268,7 @@ func (s *FileInvestigationStore) Close() error {
 }
 
 // writeFile writes an investigation to disk as JSON.
-func (s *FileInvestigationStore) writeFile(inv *service.InvestigationStub) error {
+func (s *FileInvestigationStore) writeFile(inv *service.InvestigationRecord) error {
 	data := investigationJSON{
 		ID:             inv.ID(),
 		AlertID:        inv.AlertID(),
@@ -294,7 +294,7 @@ func (s *FileInvestigationStore) writeFile(inv *service.InvestigationStub) error
 }
 
 // readFile reads an investigation from disk.
-func (s *FileInvestigationStore) readFile(id string) (*service.InvestigationStub, error) {
+func (s *FileInvestigationStore) readFile(id string) (*service.InvestigationRecord, error) {
 	filePath := filepath.Join(s.baseDir, id+".json")
 	bytes, err := os.ReadFile(filePath)
 	if err != nil {
@@ -313,7 +313,7 @@ func (s *FileInvestigationStore) readFile(id string) (*service.InvestigationStub
 		return nil, err
 	}
 
-	return service.NewInvestigationStubWithResult(
+	return service.NewInvestigationRecordWithResult(
 		data.ID,
 		data.AlertID,
 		data.SessionID,
@@ -330,7 +330,7 @@ func (s *FileInvestigationStore) readFile(id string) (*service.InvestigationStub
 }
 
 // matchesQuery checks if an investigation matches all specified query criteria.
-func matchesQuery(inv *service.InvestigationStub, query service.InvestigationQuery) bool {
+func matchesQuery(inv *service.InvestigationRecord, query service.InvestigationQuery) bool {
 	if query.AlertID != "" && inv.AlertID() != query.AlertID {
 		return false
 	}

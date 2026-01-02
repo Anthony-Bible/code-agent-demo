@@ -2,10 +2,10 @@ package service
 
 import "time"
 
-// NewInvestigationStubForTest creates an InvestigationStub for testing purposes.
+// NewInvestigationRecordForTest creates an InvestigationRecord for testing purposes.
 // This helper sets startedAt to the current time.
-func NewInvestigationStubForTest(id, alertID, sessionID, status string) *InvestigationStub {
-	return &InvestigationStub{
+func NewInvestigationRecordForTest(id, alertID, sessionID, status string) *InvestigationRecord {
+	return &InvestigationRecord{
 		id:        id,
 		alertID:   alertID,
 		sessionID: sessionID,
@@ -14,13 +14,13 @@ func NewInvestigationStubForTest(id, alertID, sessionID, status string) *Investi
 	}
 }
 
-// NewInvestigationStubForTestWithTime creates an InvestigationStub with a custom start time.
+// NewInvestigationRecordForTestWithTime creates an InvestigationRecord with a custom start time.
 // Use this when testing time-based query filters.
-func NewInvestigationStubForTestWithTime(
+func NewInvestigationRecordForTestWithTime(
 	id, alertID, sessionID, status string,
 	startedAt time.Time,
-) *InvestigationStub {
-	return &InvestigationStub{
+) *InvestigationRecord {
+	return &InvestigationRecord{
 		id:        id,
 		alertID:   alertID,
 		sessionID: sessionID,

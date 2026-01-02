@@ -1,416 +1,31 @@
 package usecase
 
 import (
+	"code-editing-agent/internal/domain/entity"
+	"errors"
 	"strings"
 	"testing"
 )
 
 // =============================================================================
+// Test Helpers
+// =============================================================================
+
+// createTestTools creates a minimal set of tools for testing prompt generation.
+func createTestTools() []entity.Tool {
+	bash, _ := entity.NewTool("bash", "bash", "Execute shell commands")
+	readFile, _ := entity.NewTool("read_file", "read_file", "Read file contents")
+	listFiles, _ := entity.NewTool("list_files", "list_files", "List directory contents")
+	complete, _ := entity.NewTool("complete_investigation", "complete_investigation", "Complete investigation")
+	escalate, _ := entity.NewTool("escalate_investigation", "escalate_investigation", "Escalate investigation")
+
+	return []entity.Tool{*bash, *readFile, *listFiles, *complete, *escalate}
+}
+
+// =============================================================================
 // InvestigationPromptBuilder Tests
 // These tests verify the behavior of InvestigationPromptBuilder implementations.
 // =============================================================================
-
-// =============================================================================
-// HighCPU Prompt Builder Tests
-// =============================================================================
-
-func TestNewHighCPUPromptBuilder_NotNil(t *testing.T) {
-	builder := NewHighCPUPromptBuilder()
-	if builder == nil {
-		t.Error("NewHighCPUPromptBuilder() should not return nil")
-	}
-}
-
-func TestHighCPUPromptBuilder_AlertType(t *testing.T) {
-	builder := NewHighCPUPromptBuilder()
-	if builder == nil {
-		t.Skip("NewHighCPUPromptBuilder() returned nil")
-	}
-	if builder.AlertType() != "HighCPU" && builder.AlertType() != "HighCPUAlert" {
-		t.Errorf("AlertType() = %v, want HighCPU or HighCPUAlert", builder.AlertType())
-	}
-}
-
-func TestHighCPUPromptBuilder_BuildPrompt_ValidAlert(t *testing.T) {
-	builder := NewHighCPUPromptBuilder()
-	if builder == nil {
-		t.Skip("NewHighCPUPromptBuilder() returned nil")
-	}
-
-	alert := &AlertStub{
-		id:       "alert-cpu-001",
-		source:   "prometheus",
-		severity: "critical",
-		title:    "High CPU Usage",
-		labels: map[string]string{
-			"instance":  "web-01",
-			"value":     "95",
-			"threshold": "80",
-		},
-	}
-
-	prompt, err := builder.BuildPrompt(alert)
-	if err != nil {
-		t.Errorf("BuildPrompt() error = %v", err)
-	}
-	if prompt == "" {
-		t.Error("BuildPrompt() returned empty string")
-	}
-}
-
-func TestHighCPUPromptBuilder_BuildPrompt_ContainsAlertInfo(t *testing.T) {
-	builder := NewHighCPUPromptBuilder()
-	if builder == nil {
-		t.Skip("NewHighCPUPromptBuilder() returned nil")
-	}
-
-	alert := &AlertStub{
-		id:          "alert-cpu-002",
-		source:      "prometheus",
-		severity:    "critical",
-		title:       "High CPU Usage on web-01",
-		description: "CPU has exceeded 90% for 5 minutes",
-		labels: map[string]string{
-			"instance": "web-01",
-			"value":    "92",
-		},
-	}
-
-	prompt, err := builder.BuildPrompt(alert)
-	if err != nil {
-		t.Fatalf("BuildPrompt() error = %v", err)
-	}
-
-	// Prompt should contain key alert information
-	if !strings.Contains(prompt, "critical") {
-		t.Error("BuildPrompt() should mention severity")
-	}
-	if !strings.Contains(prompt, "web-01") {
-		t.Error("BuildPrompt() should mention instance")
-	}
-}
-
-func TestHighCPUPromptBuilder_BuildPrompt_ContainsInstructions(t *testing.T) {
-	builder := NewHighCPUPromptBuilder()
-	if builder == nil {
-		t.Skip("NewHighCPUPromptBuilder() returned nil")
-	}
-
-	alert := &AlertStub{
-		id:       "alert-cpu-003",
-		source:   "prometheus",
-		severity: "warning",
-		title:    "High CPU Usage",
-		labels:   map[string]string{"instance": "app-01"},
-	}
-
-	prompt, err := builder.BuildPrompt(alert)
-	if err != nil {
-		t.Fatalf("BuildPrompt() error = %v", err)
-	}
-
-	// Should contain investigation instructions
-	instructionKeywords := []string{"top", "CPU", "process", "check", "investigate"}
-	foundInstruction := false
-	for _, keyword := range instructionKeywords {
-		if strings.Contains(strings.ToLower(prompt), strings.ToLower(keyword)) {
-			foundInstruction = true
-			break
-		}
-	}
-	if !foundInstruction {
-		t.Error("BuildPrompt() should contain investigation instructions")
-	}
-}
-
-func TestHighCPUPromptBuilder_BuildPrompt_ContainsSafetyRules(t *testing.T) {
-	builder := NewHighCPUPromptBuilder()
-	if builder == nil {
-		t.Skip("NewHighCPUPromptBuilder() returned nil")
-	}
-
-	alert := &AlertStub{
-		id:       "alert-cpu-004",
-		source:   "prometheus",
-		severity: "critical",
-		title:    "High CPU Usage",
-		labels:   map[string]string{},
-	}
-
-	prompt, err := builder.BuildPrompt(alert)
-	if err != nil {
-		t.Fatalf("BuildPrompt() error = %v", err)
-	}
-
-	// Should contain safety rules
-	safetyKeywords := []string{"DO NOT", "confirm", "safe", "restart", "kill"}
-	foundSafety := false
-	for _, keyword := range safetyKeywords {
-		if strings.Contains(prompt, keyword) {
-			foundSafety = true
-			break
-		}
-	}
-	if !foundSafety {
-		t.Error("BuildPrompt() should contain safety rules")
-	}
-}
-
-func TestHighCPUPromptBuilder_BuildPrompt_NilAlert(t *testing.T) {
-	builder := NewHighCPUPromptBuilder()
-	if builder == nil {
-		t.Skip("NewHighCPUPromptBuilder() returned nil")
-	}
-
-	_, err := builder.BuildPrompt(nil)
-	if err == nil {
-		t.Error("BuildPrompt(nil) should return error")
-	}
-}
-
-// =============================================================================
-// DiskSpace Prompt Builder Tests
-// =============================================================================
-
-func TestNewDiskSpacePromptBuilder_NotNil(t *testing.T) {
-	builder := NewDiskSpacePromptBuilder()
-	if builder == nil {
-		t.Error("NewDiskSpacePromptBuilder() should not return nil")
-	}
-}
-
-func TestDiskSpacePromptBuilder_AlertType(t *testing.T) {
-	builder := NewDiskSpacePromptBuilder()
-	if builder == nil {
-		t.Skip("NewDiskSpacePromptBuilder() returned nil")
-	}
-	alertType := builder.AlertType()
-	if alertType != "DiskSpace" && alertType != "DiskSpaceAlert" && alertType != "LowDiskSpace" {
-		t.Errorf("AlertType() = %v, want DiskSpace-related", alertType)
-	}
-}
-
-func TestDiskSpacePromptBuilder_BuildPrompt_ValidAlert(t *testing.T) {
-	builder := NewDiskSpacePromptBuilder()
-	if builder == nil {
-		t.Skip("NewDiskSpacePromptBuilder() returned nil")
-	}
-
-	alert := &AlertStub{
-		id:       "alert-disk-001",
-		source:   "prometheus",
-		severity: "warning",
-		title:    "Low Disk Space",
-		labels: map[string]string{
-			"instance":   "db-01",
-			"mountpoint": "/var/lib/postgresql",
-			"usage":      "92",
-		},
-	}
-
-	prompt, err := builder.BuildPrompt(alert)
-	if err != nil {
-		t.Errorf("BuildPrompt() error = %v", err)
-	}
-	if prompt == "" {
-		t.Error("BuildPrompt() returned empty string")
-	}
-}
-
-func TestDiskSpacePromptBuilder_BuildPrompt_ContainsDiskCommands(t *testing.T) {
-	builder := NewDiskSpacePromptBuilder()
-	if builder == nil {
-		t.Skip("NewDiskSpacePromptBuilder() returned nil")
-	}
-
-	alert := &AlertStub{
-		id:       "alert-disk-002",
-		source:   "prometheus",
-		severity: "critical",
-		title:    "Disk Full",
-		labels:   map[string]string{"mountpoint": "/"},
-	}
-
-	prompt, err := builder.BuildPrompt(alert)
-	if err != nil {
-		t.Fatalf("BuildPrompt() error = %v", err)
-	}
-
-	// Should mention disk-related commands
-	diskKeywords := []string{"df", "du", "disk", "space", "files", "log"}
-	foundDiskCmd := false
-	for _, keyword := range diskKeywords {
-		if strings.Contains(strings.ToLower(prompt), strings.ToLower(keyword)) {
-			foundDiskCmd = true
-			break
-		}
-	}
-	if !foundDiskCmd {
-		t.Error("BuildPrompt() should contain disk investigation commands/keywords")
-	}
-}
-
-// =============================================================================
-// Memory Prompt Builder Tests
-// =============================================================================
-
-func TestNewMemoryPromptBuilder_NotNil(t *testing.T) {
-	builder := NewMemoryPromptBuilder()
-	if builder == nil {
-		t.Error("NewMemoryPromptBuilder() should not return nil")
-	}
-}
-
-func TestMemoryPromptBuilder_AlertType(t *testing.T) {
-	builder := NewMemoryPromptBuilder()
-	if builder == nil {
-		t.Skip("NewMemoryPromptBuilder() returned nil")
-	}
-	alertType := builder.AlertType()
-	if alertType != "Memory" && alertType != "MemoryUsage" && alertType != "HighMemory" {
-		t.Errorf("AlertType() = %v, want Memory-related", alertType)
-	}
-}
-
-func TestMemoryPromptBuilder_BuildPrompt_ValidAlert(t *testing.T) {
-	builder := NewMemoryPromptBuilder()
-	if builder == nil {
-		t.Skip("NewMemoryPromptBuilder() returned nil")
-	}
-
-	alert := &AlertStub{
-		id:       "alert-mem-001",
-		source:   "prometheus",
-		severity: "warning",
-		title:    "High Memory Usage",
-		labels: map[string]string{
-			"instance": "app-01",
-			"usage":    "85",
-		},
-	}
-
-	prompt, err := builder.BuildPrompt(alert)
-	if err != nil {
-		t.Errorf("BuildPrompt() error = %v", err)
-	}
-	if prompt == "" {
-		t.Error("BuildPrompt() returned empty string")
-	}
-}
-
-func TestMemoryPromptBuilder_BuildPrompt_ContainsMemoryCommands(t *testing.T) {
-	builder := NewMemoryPromptBuilder()
-	if builder == nil {
-		t.Skip("NewMemoryPromptBuilder() returned nil")
-	}
-
-	alert := &AlertStub{
-		id:       "alert-mem-002",
-		source:   "prometheus",
-		severity: "critical",
-		title:    "Memory Exhausted",
-		labels:   map[string]string{},
-	}
-
-	prompt, err := builder.BuildPrompt(alert)
-	if err != nil {
-		t.Fatalf("BuildPrompt() error = %v", err)
-	}
-
-	// Should mention memory-related commands/keywords
-	memKeywords := []string{"free", "memory", "ps", "top", "rss", "swap"}
-	foundMemCmd := false
-	for _, keyword := range memKeywords {
-		if strings.Contains(strings.ToLower(prompt), strings.ToLower(keyword)) {
-			foundMemCmd = true
-			break
-		}
-	}
-	if !foundMemCmd {
-		t.Error("BuildPrompt() should contain memory investigation commands/keywords")
-	}
-}
-
-// =============================================================================
-// OOM Prompt Builder Tests
-// =============================================================================
-
-func TestNewOOMPromptBuilder_NotNil(t *testing.T) {
-	builder := NewOOMPromptBuilder()
-	if builder == nil {
-		t.Error("NewOOMPromptBuilder() should not return nil")
-	}
-}
-
-func TestOOMPromptBuilder_AlertType(t *testing.T) {
-	builder := NewOOMPromptBuilder()
-	if builder == nil {
-		t.Skip("NewOOMPromptBuilder() returned nil")
-	}
-	alertType := builder.AlertType()
-	if alertType != "OOM" && alertType != "OOMKilled" && alertType != "OutOfMemory" {
-		t.Errorf("AlertType() = %v, want OOM-related", alertType)
-	}
-}
-
-func TestOOMPromptBuilder_BuildPrompt_ValidAlert(t *testing.T) {
-	builder := NewOOMPromptBuilder()
-	if builder == nil {
-		t.Skip("NewOOMPromptBuilder() returned nil")
-	}
-
-	alert := &AlertStub{
-		id:       "alert-oom-001",
-		source:   "prometheus",
-		severity: "critical",
-		title:    "OOM Kill Detected",
-		labels: map[string]string{
-			"container": "app-container",
-			"pod":       "app-pod-abc123",
-		},
-	}
-
-	prompt, err := builder.BuildPrompt(alert)
-	if err != nil {
-		t.Errorf("BuildPrompt() error = %v", err)
-	}
-	if prompt == "" {
-		t.Error("BuildPrompt() returned empty string")
-	}
-}
-
-func TestOOMPromptBuilder_BuildPrompt_ContainsOOMInvestigation(t *testing.T) {
-	builder := NewOOMPromptBuilder()
-	if builder == nil {
-		t.Skip("NewOOMPromptBuilder() returned nil")
-	}
-
-	alert := &AlertStub{
-		id:       "alert-oom-002",
-		source:   "prometheus",
-		severity: "critical",
-		title:    "OOM Killer Invoked",
-		labels:   map[string]string{},
-	}
-
-	prompt, err := builder.BuildPrompt(alert)
-	if err != nil {
-		t.Fatalf("BuildPrompt() error = %v", err)
-	}
-
-	// Should mention OOM-related investigation
-	oomKeywords := []string{"dmesg", "oom", "killed", "memory", "journal", "limit"}
-	foundOOMCmd := false
-	for _, keyword := range oomKeywords {
-		if strings.Contains(strings.ToLower(prompt), strings.ToLower(keyword)) {
-			foundOOMCmd = true
-			break
-		}
-	}
-	if !foundOOMCmd {
-		t.Error("BuildPrompt() should contain OOM investigation commands/keywords")
-	}
-}
 
 // =============================================================================
 // Generic Prompt Builder Tests
@@ -440,7 +55,7 @@ func TestGenericPromptBuilder_BuildPrompt_ValidAlert(t *testing.T) {
 		t.Skip("NewGenericPromptBuilder() returned nil")
 	}
 
-	alert := &AlertStub{
+	alert := &AlertView{
 		id:          "alert-generic-001",
 		source:      "custom-monitoring",
 		severity:    "warning",
@@ -449,7 +64,7 @@ func TestGenericPromptBuilder_BuildPrompt_ValidAlert(t *testing.T) {
 		labels:      map[string]string{"service": "mystery-service"},
 	}
 
-	prompt, err := builder.BuildPrompt(alert)
+	prompt, err := builder.BuildPrompt(alert, createTestTools())
 	if err != nil {
 		t.Errorf("BuildPrompt() error = %v", err)
 	}
@@ -464,7 +79,7 @@ func TestGenericPromptBuilder_BuildPrompt_ContainsGeneralInstructions(t *testing
 		t.Skip("NewGenericPromptBuilder() returned nil")
 	}
 
-	alert := &AlertStub{
+	alert := &AlertView{
 		id:       "alert-generic-002",
 		source:   "custom",
 		severity: "info",
@@ -472,14 +87,192 @@ func TestGenericPromptBuilder_BuildPrompt_ContainsGeneralInstructions(t *testing
 		labels:   map[string]string{},
 	}
 
-	prompt, err := builder.BuildPrompt(alert)
+	prompt, err := builder.BuildPrompt(alert, createTestTools())
 	if err != nil {
 		t.Fatalf("BuildPrompt() error = %v", err)
 	}
 
-	// Should contain general investigation guidance
-	if !strings.Contains(prompt, "investigate") && !strings.Contains(prompt, "Investigate") {
-		t.Error("BuildPrompt() should contain investigation guidance")
+	// Should contain essential prompt sections
+	requiredSections := []string{"Role", "Available Tools", "Rules", "Alert Context"}
+	for _, section := range requiredSections {
+		if !strings.Contains(prompt, section) {
+			t.Errorf("BuildPrompt() should contain %q section", section)
+		}
+	}
+
+	// Should contain safety rules
+	if !strings.Contains(prompt, "DO NOT") {
+		t.Error("BuildPrompt() should contain safety rules with 'DO NOT'")
+	}
+}
+
+func TestGenericPromptBuilder_BuildPrompt_IncludesAllLabels(t *testing.T) {
+	builder := NewGenericPromptBuilder()
+	if builder == nil {
+		t.Skip("NewGenericPromptBuilder() returned nil")
+	}
+
+	alert := &AlertView{
+		id:       "alert-labels-001",
+		source:   "prometheus",
+		severity: "warning",
+		title:    "Test Alert",
+		labels: map[string]string{
+			"instance":        "web-01",
+			"namespace":       "production",
+			"pod":             "app-pod-123",
+			"threshold_value": "80",
+			"current_value":   "95",
+		},
+	}
+
+	prompt, err := builder.BuildPrompt(alert, createTestTools())
+	if err != nil {
+		t.Fatalf("BuildPrompt() error = %v", err)
+	}
+
+	// Verify all labels appear in the prompt
+	for key, value := range alert.Labels() {
+		if !strings.Contains(prompt, key) {
+			t.Errorf("BuildPrompt() should contain label key %q", key)
+		}
+		if !strings.Contains(prompt, value) {
+			t.Errorf("BuildPrompt() should contain label value %q", value)
+		}
+	}
+
+	// Verify labels section exists
+	if !strings.Contains(prompt, "Labels") {
+		t.Error("BuildPrompt() should have a Labels section")
+	}
+}
+
+func TestGenericPromptBuilder_BuildPrompt_ContainsCloudGuidance(t *testing.T) {
+	builder := NewGenericPromptBuilder()
+	if builder == nil {
+		t.Skip("NewGenericPromptBuilder() returned nil")
+	}
+
+	alert := &AlertView{
+		id:       "alert-cloud-001",
+		source:   "gcp-monitoring",
+		severity: "critical",
+		title:    "Cloud Resource Alert",
+		labels: map[string]string{
+			"resource_type": "gce_instance",
+			"metric_type":   "compute.googleapis.com/instance/cpu/utilization",
+		},
+	}
+
+	prompt, err := builder.BuildPrompt(alert, createTestTools())
+	if err != nil {
+		t.Fatalf("BuildPrompt() error = %v", err)
+	}
+
+	// Verify cloud-specific guidance is present
+	if !strings.Contains(prompt, "cloud-metrics") {
+		t.Error("BuildPrompt() should mention cloud-metrics skill")
+	}
+
+	// Verify investigation guidance section exists
+	if !strings.Contains(prompt, "Investigation Guidance") {
+		t.Error("BuildPrompt() should have Investigation Guidance section")
+	}
+
+	// Verify mentions of Cloud/GCP alerts
+	if !strings.Contains(prompt, "Cloud/GCP") && !strings.Contains(prompt, "cloud monitoring") {
+		t.Error("BuildPrompt() should contain cloud investigation guidance")
+	}
+}
+
+func TestGenericPromptBuilder_BuildPrompt_ContainsAllAlertFields(t *testing.T) {
+	builder := NewGenericPromptBuilder()
+	if builder == nil {
+		t.Skip("NewGenericPromptBuilder() returned nil")
+	}
+
+	alert := &AlertView{
+		id:          "alert-full-001",
+		source:      "test-source",
+		severity:    "critical",
+		title:       "Complete Alert Test",
+		description: "This is a detailed description of the alert",
+		labels: map[string]string{
+			"key1": "value1",
+		},
+	}
+
+	prompt, err := builder.BuildPrompt(alert, createTestTools())
+	if err != nil {
+		t.Fatalf("BuildPrompt() error = %v", err)
+	}
+
+	// Verify all alert fields are present
+	if !strings.Contains(prompt, alert.ID()) {
+		t.Error("BuildPrompt() should contain alert ID")
+	}
+	if !strings.Contains(prompt, alert.Source()) {
+		t.Error("BuildPrompt() should contain alert source")
+	}
+	if !strings.Contains(prompt, alert.Severity()) {
+		t.Error("BuildPrompt() should contain alert severity")
+	}
+	if !strings.Contains(prompt, alert.Title()) {
+		t.Error("BuildPrompt() should contain alert title")
+	}
+	if !strings.Contains(prompt, alert.Description()) {
+		t.Error("BuildPrompt() should contain alert description")
+	}
+
+	// Verify Alert Context section exists
+	if !strings.Contains(prompt, "Alert Context") {
+		t.Error("BuildPrompt() should have Alert Context section")
+	}
+}
+
+func TestGenericPromptBuilder_BuildPrompt_EmptyLabels(t *testing.T) {
+	builder := NewGenericPromptBuilder()
+	if builder == nil {
+		t.Skip("NewGenericPromptBuilder() returned nil")
+	}
+
+	alert := &AlertView{
+		id:          "alert-empty-001",
+		source:      "test",
+		severity:    "info",
+		title:       "No Labels Alert",
+		description: "Alert with no labels",
+		labels:      map[string]string{},
+	}
+
+	prompt, err := builder.BuildPrompt(alert, createTestTools())
+	if err != nil {
+		t.Fatalf("BuildPrompt() error = %v", err)
+	}
+
+	// Should still generate valid prompt
+	if prompt == "" {
+		t.Error("BuildPrompt() should not return empty string for alert with no labels")
+	}
+
+	// Should still have core sections
+	if !strings.Contains(prompt, "Alert Context") {
+		t.Error("BuildPrompt() should have Alert Context section even with no labels")
+	}
+	if !strings.Contains(prompt, "Investigation Guidance") {
+		t.Error("BuildPrompt() should have Investigation Guidance section even with no labels")
+	}
+}
+
+func TestGenericPromptBuilder_BuildPrompt_NilAlert(t *testing.T) {
+	builder := NewGenericPromptBuilder()
+	if builder == nil {
+		t.Skip("NewGenericPromptBuilder() returned nil")
+	}
+
+	_, err := builder.BuildPrompt(nil, createTestTools())
+	if !errors.Is(err, ErrNilAlert) {
+		t.Errorf("BuildPrompt(nil) error = %v, want ErrNilAlert", err)
 	}
 }
 
@@ -500,9 +293,9 @@ func TestPromptBuilderRegistry_Register_Success(t *testing.T) {
 		t.Skip("NewPromptBuilderRegistry() returned nil")
 	}
 
-	builder := NewHighCPUPromptBuilder()
+	builder := NewGenericPromptBuilder()
 	if builder == nil {
-		t.Skip("NewHighCPUPromptBuilder() returned nil")
+		t.Skip("NewGenericPromptBuilder() returned nil")
 	}
 
 	err := registry.Register(builder)
@@ -529,9 +322,9 @@ func TestPromptBuilderRegistry_Get_Exists(t *testing.T) {
 		t.Skip("NewPromptBuilderRegistry() returned nil")
 	}
 
-	builder := NewHighCPUPromptBuilder()
+	builder := NewGenericPromptBuilder()
 	if builder == nil {
-		t.Skip("NewHighCPUPromptBuilder() returned nil")
+		t.Skip("NewGenericPromptBuilder() returned nil")
 	}
 
 	if err := registry.Register(builder); err != nil {
@@ -559,30 +352,30 @@ func TestPromptBuilderRegistry_Get_NotExists(t *testing.T) {
 	}
 }
 
-func TestPromptBuilderRegistry_BuildPromptForAlert_MatchingBuilder(t *testing.T) {
+func TestPromptBuilderRegistry_BuildPromptForAlert_UsesGenericBuilder(t *testing.T) {
 	registry := NewPromptBuilderRegistry()
 	if registry == nil {
 		t.Skip("NewPromptBuilderRegistry() returned nil")
 	}
 
-	builder := NewHighCPUPromptBuilder()
+	builder := NewGenericPromptBuilder()
 	if builder == nil {
-		t.Skip("NewHighCPUPromptBuilder() returned nil")
+		t.Skip("NewGenericPromptBuilder() returned nil")
 	}
 
 	if err := registry.Register(builder); err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
 
-	alert := &AlertStub{
+	alert := &AlertView{
 		id:       "alert-001",
 		source:   "prometheus",
 		severity: "critical",
-		title:    "HighCPU Alert", // Title or labels should match the builder
+		title:    "CPU Alert",
 		labels:   map[string]string{"alertname": "HighCPU"},
 	}
 
-	prompt, err := registry.BuildPromptForAlert(alert)
+	prompt, err := registry.BuildPromptForAlert(alert, createTestTools())
 	if err != nil {
 		t.Errorf("BuildPromptForAlert() error = %v", err)
 	}
@@ -607,7 +400,7 @@ func TestPromptBuilderRegistry_BuildPromptForAlert_FallbackToGeneric(t *testing.
 		t.Fatalf("Register() error = %v", err)
 	}
 
-	alert := &AlertStub{
+	alert := &AlertView{
 		id:       "alert-unknown",
 		source:   "custom",
 		severity: "info",
@@ -615,7 +408,7 @@ func TestPromptBuilderRegistry_BuildPromptForAlert_FallbackToGeneric(t *testing.
 		labels:   map[string]string{"alertname": "SomethingUnknown"},
 	}
 
-	prompt, err := registry.BuildPromptForAlert(alert)
+	prompt, err := registry.BuildPromptForAlert(alert, createTestTools())
 	// Should either succeed with generic builder or return meaningful error
 	if err != nil && prompt == "" {
 		t.Logf("BuildPromptForAlert() returned error for unknown type: %v (acceptable if no fallback)", err)
@@ -628,7 +421,7 @@ func TestPromptBuilderRegistry_BuildPromptForAlert_NilAlert(t *testing.T) {
 		t.Skip("NewPromptBuilderRegistry() returned nil")
 	}
 
-	_, err := registry.BuildPromptForAlert(nil)
+	_, err := registry.BuildPromptForAlert(nil, createTestTools())
 	if err == nil {
 		t.Error("BuildPromptForAlert(nil) should return error")
 	}
@@ -655,25 +448,21 @@ func TestPromptBuilderRegistry_ListAlertTypes_WithBuilders(t *testing.T) {
 		t.Skip("NewPromptBuilderRegistry() returned nil")
 	}
 
-	builders := []InvestigationPromptBuilder{
-		NewHighCPUPromptBuilder(),
-		NewDiskSpacePromptBuilder(),
-		NewMemoryPromptBuilder(),
+	builder := NewGenericPromptBuilder()
+	if builder == nil {
+		t.Skip("NewGenericPromptBuilder() returned nil")
 	}
 
-	registeredCount := 0
-	for _, b := range builders {
-		if b == nil {
-			continue
-		}
-		if err := registry.Register(b); err == nil {
-			registeredCount++
-		}
+	if err := registry.Register(builder); err != nil {
+		t.Fatalf("Register() error = %v", err)
 	}
 
 	types := registry.ListAlertTypes()
-	if len(types) != registeredCount {
-		t.Errorf("ListAlertTypes() len = %v, want %v", len(types), registeredCount)
+	if len(types) != 1 {
+		t.Errorf("ListAlertTypes() len = %v, want 1", len(types))
+	}
+	if len(types) > 0 && types[0] != "Generic" {
+		t.Errorf("ListAlertTypes()[0] = %v, want Generic", types[0])
 	}
 }
 
@@ -714,5 +503,71 @@ func TestPromptBuilderErrors_HaveMessages(t *testing.T) {
 	}
 	if ErrInvalidPromptVariables.Error() == "" {
 		t.Error("ErrInvalidPromptVariables should have a message")
+	}
+}
+
+// =============================================================================
+// GenerateToolsHeader Tests
+// =============================================================================
+
+func TestGenerateToolsHeader_EmptyTools(t *testing.T) {
+	header := GenerateToolsHeader([]entity.Tool{})
+	if header != "" {
+		t.Errorf("GenerateToolsHeader([]) = %q, want empty string", header)
+	}
+}
+
+func TestGenerateToolsHeader_NilTools(t *testing.T) {
+	header := GenerateToolsHeader(nil)
+	if header != "" {
+		t.Errorf("GenerateToolsHeader(nil) = %q, want empty string", header)
+	}
+}
+
+func TestGenerateToolsHeader_SingleTool(t *testing.T) {
+	tool, _ := entity.NewTool("bash", "bash", "Execute shell commands")
+	header := GenerateToolsHeader([]entity.Tool{*tool})
+
+	if !strings.Contains(header, "bash") {
+		t.Error("Header should contain tool name 'bash'")
+	}
+	if !strings.Contains(header, "Execute shell commands") {
+		t.Error("Header should contain tool description")
+	}
+	if !strings.Contains(header, "1.") {
+		t.Error("Header should start with numbered list")
+	}
+}
+
+func TestGenerateToolsHeader_MultipleTools(t *testing.T) {
+	tools := createTestTools()
+	header := GenerateToolsHeader(tools)
+
+	if !strings.Contains(header, "bash") {
+		t.Error("Header should contain 'bash'")
+	}
+	if !strings.Contains(header, "read_file") {
+		t.Error("Header should contain 'read_file'")
+	}
+	if !strings.Contains(header, "complete_investigation") {
+		t.Error("Header should contain 'complete_investigation'")
+	}
+
+	// Check for numbered list
+	if !strings.Contains(header, "1.") {
+		t.Error("Header should contain '1.'")
+	}
+	if !strings.Contains(header, "2.") {
+		t.Error("Header should contain '2.'")
+	}
+}
+
+func TestGenerateToolsHeader_ContainsExamples(t *testing.T) {
+	tools := createTestTools()
+	header := GenerateToolsHeader(tools)
+
+	// Should contain examples for common tools
+	if !strings.Contains(header, "Example:") {
+		t.Error("Header should contain example usage")
 	}
 }

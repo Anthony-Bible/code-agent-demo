@@ -207,7 +207,8 @@ type investigationRunnerPromptBuilderMock struct {
 	mu sync.Mutex
 
 	buildPromptForAlertCalls int
-	buildPromptForAlertAlert *AlertStub
+	buildPromptForAlertAlert *AlertView
+	buildPromptTools         []entity.Tool
 	buildPromptResult        string
 	buildPromptError         error
 }
@@ -226,11 +227,15 @@ func (m *investigationRunnerPromptBuilderMock) Get(alertType string) (Investigat
 	return nil, ErrPromptBuilderNotFound
 }
 
-func (m *investigationRunnerPromptBuilderMock) BuildPromptForAlert(alert *AlertStub) (string, error) {
+func (m *investigationRunnerPromptBuilderMock) BuildPromptForAlert(
+	alert *AlertView,
+	tools []entity.Tool,
+) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.buildPromptForAlertCalls++
 	m.buildPromptForAlertAlert = alert
+	m.buildPromptTools = tools
 	if m.buildPromptError != nil {
 		return "", m.buildPromptError
 	}
@@ -2326,7 +2331,7 @@ func TestInvestigationRunner_ConcurrentRuns(t *testing.T) {
 
 	// Act - Run multiple investigations concurrently
 	var wg sync.WaitGroup
-	results := make(chan *InvestigationResultStub, 5)
+	results := make(chan *InvestigationResult, 5)
 	errs := make(chan error, 5)
 
 	for i := range 5 {

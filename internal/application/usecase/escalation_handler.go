@@ -36,9 +36,9 @@ const (
 	EscalationPriorityCritical EscalationPriority = "critical"
 )
 
-// InvestigationStubForEscalation contains investigation data needed for escalation.
+// EscalationInvestigationView contains investigation data needed for escalation.
 // It provides a lightweight view of an investigation suitable for escalation handlers.
-type InvestigationStubForEscalation struct {
+type EscalationInvestigationView struct {
 	id             string   // Unique investigation identifier
 	alertID        string   // Associated alert ID
 	sessionID      string   // Session context
@@ -50,33 +50,33 @@ type InvestigationStubForEscalation struct {
 }
 
 // ID returns the unique investigation identifier.
-func (i *InvestigationStubForEscalation) ID() string { return i.id }
+func (i *EscalationInvestigationView) ID() string { return i.id }
 
 // AlertID returns the ID of the alert being investigated.
-func (i *InvestigationStubForEscalation) AlertID() string { return i.alertID }
+func (i *EscalationInvestigationView) AlertID() string { return i.alertID }
 
 // SessionID returns the session context for this investigation.
-func (i *InvestigationStubForEscalation) SessionID() string { return i.sessionID }
+func (i *EscalationInvestigationView) SessionID() string { return i.sessionID }
 
 // Status returns the current investigation status.
-func (i *InvestigationStubForEscalation) Status() string { return i.status }
+func (i *EscalationInvestigationView) Status() string { return i.status }
 
 // Findings returns the list of finding descriptions.
-func (i *InvestigationStubForEscalation) Findings() []string { return i.findings }
+func (i *EscalationInvestigationView) Findings() []string { return i.findings }
 
 // Actions returns the list of action descriptions.
-func (i *InvestigationStubForEscalation) Actions() []string { return i.actions }
+func (i *EscalationInvestigationView) Actions() []string { return i.actions }
 
 // IsEscalated returns true if this investigation has already been escalated.
-func (i *InvestigationStubForEscalation) IsEscalated() bool { return i.isEscalated }
+func (i *EscalationInvestigationView) IsEscalated() bool { return i.isEscalated }
 
 // EscalateReason returns the reason for escalation, or empty if not escalated.
-func (i *InvestigationStubForEscalation) EscalateReason() string { return i.escalateReason }
+func (i *EscalationInvestigationView) EscalateReason() string { return i.escalateReason }
 
 // EscalationRequest contains all information needed to escalate an investigation.
 type EscalationRequest struct {
 	// Investigation is the investigation being escalated.
-	Investigation *InvestigationStubForEscalation
+	Investigation *EscalationInvestigationView
 	// Reason explains why the investigation is being escalated.
 	Reason string
 	// Priority indicates the urgency of the escalation.
@@ -105,7 +105,7 @@ type EscalationHandler interface {
 	// Escalate sends an escalation request. Returns ErrNilInvestigation if investigation is nil.
 	Escalate(ctx context.Context, req EscalationRequest) (*EscalationResult, error)
 	// CanEscalate checks if an investigation can be escalated (e.g., not already escalated).
-	CanEscalate(inv *InvestigationStubForEscalation) bool
+	CanEscalate(inv *EscalationInvestigationView) bool
 	// GetEscalationHistory returns all past escalations for an investigation.
 	GetEscalationHistory(invID string) []EscalationResult
 }
@@ -171,7 +171,7 @@ func (h *LogEscalationHandler) Escalate(
 
 // CanEscalate returns true if the investigation has not already been escalated.
 // Returns false if inv is nil.
-func (h *LogEscalationHandler) CanEscalate(inv *InvestigationStubForEscalation) bool {
+func (h *LogEscalationHandler) CanEscalate(inv *EscalationInvestigationView) bool {
 	if inv == nil {
 		return false
 	}
@@ -281,7 +281,7 @@ func (h *ConversationEscalationHandler) Escalate(
 
 // CanEscalate returns true if the investigation has not already been escalated.
 // Returns false if inv is nil.
-func (h *ConversationEscalationHandler) CanEscalate(inv *InvestigationStubForEscalation) bool {
+func (h *ConversationEscalationHandler) CanEscalate(inv *EscalationInvestigationView) bool {
 	if inv == nil {
 		return false
 	}
@@ -371,7 +371,7 @@ func (h *CompositeEscalationHandler) Escalate(
 // CanEscalate returns true if any handler in the chain can escalate the investigation.
 // Returns true if the handler list is empty and the investigation is not already escalated.
 // Returns false if inv is nil.
-func (h *CompositeEscalationHandler) CanEscalate(inv *InvestigationStubForEscalation) bool {
+func (h *CompositeEscalationHandler) CanEscalate(inv *EscalationInvestigationView) bool {
 	if inv == nil {
 		return false
 	}

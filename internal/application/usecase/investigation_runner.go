@@ -5,14 +5,13 @@ import (
 	"code-editing-agent/internal/domain/entity"
 	"code-editing-agent/internal/domain/port"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 )
-
-// ErrInvestigationRunnerNotImplemented is returned by stub methods during TDD Red Phase.
-var ErrInvestigationRunnerNotImplemented = errors.New("investigation runner not implemented")
 
 // Special tool names for investigation control.
 const (
@@ -122,8 +121,8 @@ type runContext struct {
 }
 
 // failedResult creates a failed investigation result.
-func (rc *runContext) failedResult(err error) *InvestigationResultStub {
-	return &InvestigationResultStub{
+func (rc *runContext) failedResult(err error) *InvestigationResult {
+	return &InvestigationResult{
 		InvestigationID: rc.investigationID,
 		AlertID:         rc.alert.ID(),
 		Status:          "failed",
@@ -213,13 +212,13 @@ func (r *InvestigationRunner) processToolCalls(rc *runContext, toolCalls []port.
 //   - investigationID: Unique identifier for this investigation
 //
 // Returns:
-//   - *InvestigationResultStub: Result of the investigation
+//   - *InvestigationResult: Result of the investigation
 //   - error: Any error that occurred during investigation
 func (r *InvestigationRunner) Run(
 	ctx context.Context,
 	alert *AlertForInvestigation,
 	investigationID string,
-) (*InvestigationResultStub, error) {
+) (*InvestigationResult, error) {
 	if err := r.validateInputs(ctx, alert, investigationID); err != nil {
 		return r.validationFailedResult(investigationID, alert, err), err
 	}
@@ -250,7 +249,7 @@ func (r *InvestigationRunner) Run(
 
 	// Persist result to store if configured
 	if r.store != nil && result != nil {
-		stub := &investigationStubForStore{
+		stub := &investigationRecordForStore{
 			id:             result.InvestigationID,
 			alertID:        result.AlertID,
 			sessionID:      rc.sessionID,
@@ -264,14 +263,21 @@ func (r *InvestigationRunner) Run(
 			escalated:      result.Escalated,
 			escalateReason: result.EscalateReason,
 		}
-		_ = r.store.Store(ctx, stub)
+		if err := r.store.Store(ctx, stub); err != nil {
+			fmt.Fprintf(
+				os.Stderr,
+				"[InvestigationRunner] Failed to store result for %s: %v\n",
+				result.InvestigationID,
+				err,
+			)
+		}
 	}
 
 	return result, err
 }
 
-// investigationStubForStore implements InvestigationStubData for persistence.
-type investigationStubForStore struct {
+// investigationRecordForStore implements InvestigationRecordData for persistence.
+type investigationRecordForStore struct {
 	id, alertID, sessionID, status string
 	startedAt                      time.Time
 	completedAt                    time.Time
@@ -283,23 +289,23 @@ type investigationStubForStore struct {
 	escalateReason                 string
 }
 
-func (s *investigationStubForStore) ID() string        { return s.id }
-func (s *investigationStubForStore) AlertID() string   { return s.alertID }
-func (s *investigationStubForStore) SessionID() string { return s.sessionID }
-func (s *investigationStubForStore) Status() string    { return s.status }
-func (s *investigationStubForStore) StartedAt() time.Time {
+func (s *investigationRecordForStore) ID() string        { return s.id }
+func (s *investigationRecordForStore) AlertID() string   { return s.alertID }
+func (s *investigationRecordForStore) SessionID() string { return s.sessionID }
+func (s *investigationRecordForStore) Status() string    { return s.status }
+func (s *investigationRecordForStore) StartedAt() time.Time {
 	if s.startedAt.IsZero() {
 		return time.Now()
 	}
 	return s.startedAt
 }
-func (s *investigationStubForStore) CompletedAt() time.Time  { return s.completedAt }
-func (s *investigationStubForStore) Findings() []string      { return s.findings }
-func (s *investigationStubForStore) ActionsTaken() int       { return s.actionsTaken }
-func (s *investigationStubForStore) Duration() time.Duration { return time.Duration(s.durationNanos) }
-func (s *investigationStubForStore) Confidence() float64     { return s.confidence }
-func (s *investigationStubForStore) Escalated() bool         { return s.escalated }
-func (s *investigationStubForStore) EscalateReason() string  { return s.escalateReason }
+func (s *investigationRecordForStore) CompletedAt() time.Time  { return s.completedAt }
+func (s *investigationRecordForStore) Findings() []string      { return s.findings }
+func (s *investigationRecordForStore) ActionsTaken() int       { return s.actionsTaken }
+func (s *investigationRecordForStore) Duration() time.Duration { return time.Duration(s.durationNanos) }
+func (s *investigationRecordForStore) Confidence() float64     { return s.confidence }
+func (s *investigationRecordForStore) Escalated() bool         { return s.escalated }
+func (s *investigationRecordForStore) EscalateReason() string  { return s.escalateReason }
 
 func (r *InvestigationRunner) validateInputs(ctx context.Context, alert *AlertForInvestigation, invID string) error {
 	if alert == nil {
@@ -318,20 +324,27 @@ func (r *InvestigationRunner) validationFailedResult(
 	invID string,
 	alert *AlertForInvestigation,
 	err error,
-) *InvestigationResultStub {
+) *InvestigationResult {
 	alertID := ""
 	if alert != nil {
 		alertID = alert.ID()
 	}
-	return &InvestigationResultStub{InvestigationID: invID, AlertID: alertID, Status: "failed", Error: err}
+	return &InvestigationResult{InvestigationID: invID, AlertID: alertID, Status: "failed", Error: err}
 }
 
 func (r *InvestigationRunner) sendInitialPrompt(rc *runContext) error {
-	alertStub := &AlertStub{
+	alertStub := &AlertView{
 		id: rc.alert.ID(), source: rc.alert.Source(), severity: rc.alert.Severity(),
 		title: rc.alert.Title(), description: rc.alert.Description(), labels: rc.alert.Labels(),
 	}
-	prompt, err := r.promptBuilder.BuildPromptForAlert(alertStub)
+
+	// Get and filter tools for investigation prompt
+	tools, err := r.getInvestigationTools()
+	if err != nil {
+		return err
+	}
+
+	prompt, err := r.promptBuilder.BuildPromptForAlert(alertStub, tools)
 	if err != nil {
 		return err
 	}
@@ -341,6 +354,34 @@ func (r *InvestigationRunner) sendInitialPrompt(rc *runContext) error {
 		prompt+"\n\nAlert ID: "+rc.alert.ID()+"\nTitle: "+rc.alert.Title(),
 	)
 	return err
+}
+
+// getInvestigationTools returns the filtered list of tools for investigation prompts.
+// It filters based on the AllowedTools configuration.
+func (r *InvestigationRunner) getInvestigationTools() ([]entity.Tool, error) {
+	allTools, err := r.toolExecutor.ListTools()
+	if err != nil {
+		return nil, err
+	}
+
+	// If no allowed tools configured, return all tools
+	if len(r.config.AllowedTools) == 0 {
+		return allTools, nil
+	}
+
+	// Filter to only allowed tools
+	allowedSet := make(map[string]bool, len(r.config.AllowedTools))
+	for _, t := range r.config.AllowedTools {
+		allowedSet[t] = true
+	}
+
+	filtered := make([]entity.Tool, 0, len(allTools))
+	for _, tool := range allTools {
+		if allowedSet[tool.Name] {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered, nil
 }
 
 // separatedToolCalls holds tool calls separated into regular and special categories.
@@ -382,8 +423,8 @@ func extractStringSlice(input map[string]interface{}, key string) []string {
 }
 
 // buildCompletionResult creates a result from complete_investigation tool input.
-func (rc *runContext) buildCompletionResult(input map[string]interface{}) *InvestigationResultStub {
-	result := &InvestigationResultStub{
+func (rc *runContext) buildCompletionResult(input map[string]interface{}) *InvestigationResult {
+	result := &InvestigationResult{
 		InvestigationID: rc.investigationID,
 		AlertID:         rc.alert.ID(),
 		Status:          "completed",
@@ -398,8 +439,8 @@ func (rc *runContext) buildCompletionResult(input map[string]interface{}) *Inves
 }
 
 // buildEscalationResult creates a result from escalate_investigation tool input.
-func (rc *runContext) buildEscalationResult(input map[string]interface{}) *InvestigationResultStub {
-	result := &InvestigationResultStub{
+func (rc *runContext) buildEscalationResult(input map[string]interface{}) *InvestigationResult {
+	result := &InvestigationResult{
 		InvestigationID: rc.investigationID,
 		AlertID:         rc.alert.ID(),
 		Status:          "escalated",
@@ -432,7 +473,7 @@ func (r *InvestigationRunner) checkSafetyBudget(rc *runContext) error {
 
 // checkConfidenceEscalation checks if the AI's confidence is below the escalation threshold.
 // Returns an escalation result if confidence is low, nil otherwise.
-func (r *InvestigationRunner) checkConfidenceEscalation(rc *runContext, msg *entity.Message) *InvestigationResultStub {
+func (r *InvestigationRunner) checkConfidenceEscalation(rc *runContext, msg *entity.Message) *InvestigationResult {
 	if r.config.EscalateOnConfidence <= 0 || msg == nil {
 		return nil
 	}
@@ -475,14 +516,14 @@ func parseConfidenceFromMessage(content string) float64 {
 }
 
 // escalatedResult creates a failed result with escalation info.
-func (rc *runContext) escalatedResult(err error, reason string) *InvestigationResultStub {
+func (rc *runContext) escalatedResult(err error, reason string) *InvestigationResult {
 	result := rc.failedResult(err)
 	result.Escalated = true
 	result.EscalateReason = reason
 	return result
 }
 
-func (r *InvestigationRunner) runInvestigationLoop(rc *runContext) (*InvestigationResultStub, error) {
+func (r *InvestigationRunner) runInvestigationLoop(rc *runContext) (*InvestigationResult, error) {
 	for {
 		if err := rc.ctx.Err(); err != nil {
 			return nil, err
@@ -535,7 +576,7 @@ func (r *InvestigationRunner) getNextToolCalls(rc *runContext) (*entity.Message,
 func (r *InvestigationRunner) processLoopIteration(
 	rc *runContext,
 	toolCalls []port.ToolCallInfo,
-) (*InvestigationResultStub, bool, error) {
+) (*InvestigationResult, bool, error) {
 	separated := separateToolCalls(toolCalls)
 
 	if len(separated.regular) > 0 {
@@ -545,6 +586,10 @@ func (r *InvestigationRunner) processLoopIteration(
 	}
 
 	if separated.completion != nil {
+		// Log the raw input for debugging
+		inputJSON, _ := json.Marshal(separated.completion.Input)
+		fmt.Fprintf(os.Stderr, "[InvestigationRunner] complete_investigation called with input: %s\n", inputJSON)
+
 		return rc.buildCompletionResult(separated.completion.Input), true, nil
 	}
 
@@ -556,8 +601,8 @@ func (r *InvestigationRunner) processLoopIteration(
 }
 
 // completedResult creates a successful completion result.
-func (rc *runContext) completedResult() *InvestigationResultStub {
-	return &InvestigationResultStub{
+func (rc *runContext) completedResult() *InvestigationResult {
+	return &InvestigationResult{
 		InvestigationID: rc.investigationID,
 		AlertID:         rc.alert.ID(),
 		Status:          "completed",

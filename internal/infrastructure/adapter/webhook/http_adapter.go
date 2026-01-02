@@ -208,7 +208,9 @@ func (a *HTTPAdapter) handleWebhookAsync(
 		go func(alert *entity.Alert, invID string) {
 			defer a.wg.Done()
 			// Use investigation context so it can be cancelled during shutdown
-			_ = runner(a.invCtx, alert, invID)
+			if err := runner(a.invCtx, alert, invID); err != nil {
+				fmt.Fprintf(os.Stderr, "[Webhook] Async investigation %s failed: %v\n", invID, err)
+			}
 		}(alert, invID)
 	}
 

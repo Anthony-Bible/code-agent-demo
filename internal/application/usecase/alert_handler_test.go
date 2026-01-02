@@ -80,6 +80,9 @@ func TestAlertHandler_Handle_CriticalAlert_StartsInvestigation(t *testing.T) {
 	if uc == nil {
 		t.Skip("NewAlertInvestigationUseCase() returned nil")
 	}
+	uc.SetConversationService(newInvestigationRunnerConvServiceMock())
+	uc.SetToolExecutor(newInvestigationRunnerToolExecutorMock())
+	uc.SetPromptBuilderRegistry(newInvestigationRunnerPromptBuilderMock())
 
 	config := AlertHandlerConfig{
 		AutoInvestigateCritical: true,
@@ -157,6 +160,9 @@ func TestAlertHandler_Handle_WarningAlert_ConfigEnabled(t *testing.T) {
 	if uc == nil {
 		t.Skip("NewAlertInvestigationUseCase() returned nil")
 	}
+	uc.SetConversationService(newInvestigationRunnerConvServiceMock())
+	uc.SetToolExecutor(newInvestigationRunnerToolExecutorMock())
+	uc.SetPromptBuilderRegistry(newInvestigationRunnerPromptBuilderMock())
 
 	config := AlertHandlerConfig{
 		AutoInvestigateCritical: true,
@@ -396,6 +402,9 @@ func TestAlertHandler_Handle_IgnoredSources_MultipleIgnored(t *testing.T) {
 			// Reset use case
 			_ = uc.Shutdown(context.Background())
 			uc = NewAlertInvestigationUseCase()
+			uc.SetConversationService(newInvestigationRunnerConvServiceMock())
+			uc.SetToolExecutor(newInvestigationRunnerToolExecutorMock())
+			uc.SetPromptBuilderRegistry(newInvestigationRunnerPromptBuilderMock())
 			handler = NewAlertHandler(uc, config)
 
 			alert := &AlertForInvestigation{
@@ -424,6 +433,9 @@ func TestAlertHandler_Handle_IgnoredSources_NotIgnored(t *testing.T) {
 	if uc == nil {
 		t.Skip("NewAlertInvestigationUseCase() returned nil")
 	}
+	uc.SetConversationService(newInvestigationRunnerConvServiceMock())
+	uc.SetToolExecutor(newInvestigationRunnerToolExecutorMock())
+	uc.SetPromptBuilderRegistry(newInvestigationRunnerPromptBuilderMock())
 
 	config := AlertHandlerConfig{
 		AutoInvestigateCritical: true,

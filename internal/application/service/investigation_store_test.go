@@ -54,7 +54,7 @@ func TestInMemoryInvestigationStore_Store_Success(t *testing.T) {
 		t.Skip("NewInMemoryInvestigationStore() returned nil")
 	}
 
-	inv := &InvestigationStub{
+	inv := &InvestigationRecord{
 		id:        "inv-001",
 		alertID:   "alert-001",
 		sessionID: "session-001",
@@ -73,7 +73,7 @@ func TestInMemoryInvestigationStore_Store_DuplicateID(t *testing.T) {
 		t.Skip("NewInMemoryInvestigationStore() returned nil")
 	}
 
-	inv := &InvestigationStub{
+	inv := &InvestigationRecord{
 		id:        "inv-dup",
 		alertID:   "alert-001",
 		sessionID: "session-001",
@@ -113,7 +113,7 @@ func TestInMemoryInvestigationStore_Store_IncrementsCount(t *testing.T) {
 	ctx := context.Background()
 
 	for i := range 3 {
-		inv := &InvestigationStub{
+		inv := &InvestigationRecord{
 			id:        "inv-" + string(rune('a'+i)),
 			alertID:   "alert-001",
 			sessionID: "session-001",
@@ -144,7 +144,7 @@ func TestInMemoryInvestigationStore_Get_Exists(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	inv := &InvestigationStub{
+	inv := &InvestigationRecord{
 		id:        "inv-get-test",
 		alertID:   "alert-001",
 		sessionID: "session-001",
@@ -205,7 +205,7 @@ func TestInMemoryInvestigationStore_Update_Exists(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	inv := &InvestigationStub{
+	inv := &InvestigationRecord{
 		id:        "inv-update-test",
 		alertID:   "alert-001",
 		sessionID: "session-001",
@@ -234,7 +234,7 @@ func TestInMemoryInvestigationStore_Update_NotExists(t *testing.T) {
 		t.Skip("NewInMemoryInvestigationStore() returned nil")
 	}
 
-	inv := &InvestigationStub{
+	inv := &InvestigationRecord{
 		id:        "nonexistent",
 		alertID:   "alert-001",
 		sessionID: "session-001",
@@ -273,7 +273,7 @@ func TestInMemoryInvestigationStore_Delete_Exists(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	inv := &InvestigationStub{
+	inv := &InvestigationRecord{
 		id:        "inv-delete-test",
 		alertID:   "alert-001",
 		sessionID: "session-001",
@@ -314,7 +314,7 @@ func TestInMemoryInvestigationStore_Delete_DecrementsCount(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	inv := &InvestigationStub{
+	inv := &InvestigationRecord{
 		id:        "inv-count-test",
 		alertID:   "alert-001",
 		sessionID: "session-001",
@@ -371,7 +371,7 @@ func TestInMemoryInvestigationStore_Query_ByAlertID(t *testing.T) {
 	ctx := context.Background()
 
 	// Store investigations for different alerts
-	invs := []*InvestigationStub{
+	invs := []*InvestigationRecord{
 		{id: "inv-1", alertID: "alert-A", sessionID: "s1", status: "started"},
 		{id: "inv-2", alertID: "alert-A", sessionID: "s2", status: "running"},
 		{id: "inv-3", alertID: "alert-B", sessionID: "s3", status: "started"},
@@ -399,7 +399,7 @@ func TestInMemoryInvestigationStore_Query_BySessionID(t *testing.T) {
 
 	ctx := context.Background()
 
-	invs := []*InvestigationStub{
+	invs := []*InvestigationRecord{
 		{id: "inv-1", alertID: "a1", sessionID: "session-X", status: "started"},
 		{id: "inv-2", alertID: "a2", sessionID: "session-X", status: "running"},
 		{id: "inv-3", alertID: "a3", sessionID: "session-Y", status: "started"},
@@ -427,7 +427,7 @@ func TestInMemoryInvestigationStore_Query_ByStatus(t *testing.T) {
 
 	ctx := context.Background()
 
-	invs := []*InvestigationStub{
+	invs := []*InvestigationRecord{
 		{id: "inv-1", alertID: "a1", sessionID: "s1", status: "started"},
 		{id: "inv-2", alertID: "a2", sessionID: "s2", status: "running"},
 		{id: "inv-3", alertID: "a3", sessionID: "s3", status: "completed"},
@@ -456,7 +456,7 @@ func TestInMemoryInvestigationStore_Query_ByMultipleStatuses(t *testing.T) {
 
 	ctx := context.Background()
 
-	invs := []*InvestigationStub{
+	invs := []*InvestigationRecord{
 		{id: "inv-1", alertID: "a1", sessionID: "s1", status: "started"},
 		{id: "inv-2", alertID: "a2", sessionID: "s2", status: "running"},
 		{id: "inv-3", alertID: "a3", sessionID: "s3", status: "completed"},
@@ -486,7 +486,7 @@ func TestInMemoryInvestigationStore_Query_BySince(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 
-	invs := []*InvestigationStub{
+	invs := []*InvestigationRecord{
 		{id: "inv-old", alertID: "a1", sessionID: "s1", status: "started", startedAt: now.Add(-2 * time.Hour)},
 		{id: "inv-recent", alertID: "a2", sessionID: "s2", status: "running", startedAt: now.Add(-30 * time.Minute)},
 	}
@@ -514,7 +514,7 @@ func TestInMemoryInvestigationStore_Query_ByUntil(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 
-	invs := []*InvestigationStub{
+	invs := []*InvestigationRecord{
 		{id: "inv-old", alertID: "a1", sessionID: "s1", status: "completed", startedAt: now.Add(-2 * time.Hour)},
 		{id: "inv-recent", alertID: "a2", sessionID: "s2", status: "running", startedAt: now.Add(-30 * time.Minute)},
 	}
@@ -542,7 +542,7 @@ func TestInMemoryInvestigationStore_Query_WithLimit(t *testing.T) {
 	ctx := context.Background()
 
 	for i := range 10 {
-		inv := &InvestigationStub{
+		inv := &InvestigationRecord{
 			id:        "inv-" + string(rune('0'+i)),
 			alertID:   "a1",
 			sessionID: "s1",
@@ -570,7 +570,7 @@ func TestInMemoryInvestigationStore_Query_CombinedFilters(t *testing.T) {
 
 	ctx := context.Background()
 
-	invs := []*InvestigationStub{
+	invs := []*InvestigationRecord{
 		{id: "inv-1", alertID: "alert-X", sessionID: "s1", status: "running"},
 		{id: "inv-2", alertID: "alert-X", sessionID: "s2", status: "completed"},
 		{id: "inv-3", alertID: "alert-Y", sessionID: "s3", status: "running"},
@@ -606,7 +606,7 @@ func TestInMemoryInvestigationStore_Store_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	inv := &InvestigationStub{
+	inv := &InvestigationRecord{
 		id:        "inv-ctx",
 		alertID:   "a1",
 		sessionID: "s1",
@@ -675,7 +675,7 @@ func TestInMemoryInvestigationStore_Close_ThenStore(t *testing.T) {
 		t.Fatalf("Close() error = %v", err)
 	}
 
-	inv := &InvestigationStub{
+	inv := &InvestigationRecord{
 		id:        "inv-after-close",
 		alertID:   "a1",
 		sessionID: "s1",
@@ -720,7 +720,7 @@ func TestInMemoryInvestigationStore_ConcurrentStoreAndGet(t *testing.T) {
 	// Store goroutine
 	go func() {
 		for i := range 100 {
-			inv := &InvestigationStub{
+			inv := &InvestigationRecord{
 				id:        "inv-concurrent-" + string(rune('0'+i)),
 				alertID:   "a1",
 				sessionID: "s1",

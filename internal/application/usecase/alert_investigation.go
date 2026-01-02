@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -30,9 +31,9 @@ type SafetyEnforcer interface {
 	CheckTimeout(ctx context.Context) error
 }
 
-// InvestigationStubData is the interface for investigation persistence.
-// Matches the InvestigationStub type from service package.
-type InvestigationStubData interface {
+// InvestigationRecordData is the interface for investigation persistence.
+// Matches the InvestigationRecord type from service package.
+type InvestigationRecordData interface {
 	ID() string
 	AlertID() string
 	SessionID() string
@@ -51,13 +52,13 @@ type InvestigationStubData interface {
 // InvestigationStoreWriter defines the write interface for investigation persistence.
 // This avoids needing to import the full service.InvestigationStore interface.
 type InvestigationStoreWriter interface {
-	Store(ctx context.Context, inv InvestigationStubData) error
-	Get(ctx context.Context, id string) (InvestigationStubData, error)
-	Update(ctx context.Context, inv InvestigationStubData) error
+	Store(ctx context.Context, inv InvestigationRecordData) error
+	Get(ctx context.Context, id string) (InvestigationRecordData, error)
+	Update(ctx context.Context, inv InvestigationRecordData) error
 }
 
-// simpleInvestigationStub is an implementation of InvestigationStubData.
-type simpleInvestigationStub struct {
+// simpleInvestigationRecord is an implementation of InvestigationRecordData.
+type simpleInvestigationRecord struct {
 	id, alertID, sessionID, status string
 	startedAt                      time.Time
 	// Full result fields
@@ -70,26 +71,26 @@ type simpleInvestigationStub struct {
 	escalateReason string
 }
 
-func (s *simpleInvestigationStub) ID() string        { return s.id }
-func (s *simpleInvestigationStub) AlertID() string   { return s.alertID }
-func (s *simpleInvestigationStub) SessionID() string { return s.sessionID }
-func (s *simpleInvestigationStub) Status() string    { return s.status }
-func (s *simpleInvestigationStub) StartedAt() time.Time {
+func (s *simpleInvestigationRecord) ID() string        { return s.id }
+func (s *simpleInvestigationRecord) AlertID() string   { return s.alertID }
+func (s *simpleInvestigationRecord) SessionID() string { return s.sessionID }
+func (s *simpleInvestigationRecord) Status() string    { return s.status }
+func (s *simpleInvestigationRecord) StartedAt() time.Time {
 	if s.startedAt.IsZero() {
 		return time.Now()
 	}
 	return s.startedAt
 }
-func (s *simpleInvestigationStub) CompletedAt() time.Time  { return s.completedAt }
-func (s *simpleInvestigationStub) Findings() []string      { return s.findings }
-func (s *simpleInvestigationStub) ActionsTaken() int       { return s.actionsTaken }
-func (s *simpleInvestigationStub) Duration() time.Duration { return time.Duration(s.durationNanos) }
-func (s *simpleInvestigationStub) Confidence() float64     { return s.confidence }
-func (s *simpleInvestigationStub) Escalated() bool         { return s.escalated }
-func (s *simpleInvestigationStub) EscalateReason() string  { return s.escalateReason }
+func (s *simpleInvestigationRecord) CompletedAt() time.Time  { return s.completedAt }
+func (s *simpleInvestigationRecord) Findings() []string      { return s.findings }
+func (s *simpleInvestigationRecord) ActionsTaken() int       { return s.actionsTaken }
+func (s *simpleInvestigationRecord) Duration() time.Duration { return time.Duration(s.durationNanos) }
+func (s *simpleInvestigationRecord) Confidence() float64     { return s.confidence }
+func (s *simpleInvestigationRecord) Escalated() bool         { return s.escalated }
+func (s *simpleInvestigationRecord) EscalateReason() string  { return s.escalateReason }
 
-func newSimpleInvestigationStub(id, alertID, sessionID, status string) *simpleInvestigationStub {
-	return &simpleInvestigationStub{
+func newSimpleInvestigationRecord(id, alertID, sessionID, status string) *simpleInvestigationRecord {
+	return &simpleInvestigationRecord{
 		id:        id,
 		alertID:   alertID,
 		sessionID: sessionID,
@@ -157,9 +158,9 @@ func (a *AlertForInvestigation) IsCritical() bool {
 	return a.severity == string(EscalationPriorityCritical)
 }
 
-// InvestigationResultStub represents the outcome of an investigation.
+// InvestigationResult represents the outcome of an investigation.
 // It provides a summary of what happened during the investigation.
-type InvestigationResultStub struct {
+type InvestigationResult struct {
 	InvestigationID string        // Unique identifier for this investigation
 	AlertID         string        // ID of the investigated alert
 	Status          string        // Final status (completed, failed, escalated)
@@ -253,7 +254,7 @@ func NewAlertInvestigationUseCaseWithConfig(config AlertInvestigationUseCaseConf
 func (uc *AlertInvestigationUseCase) HandleAlert(
 	ctx context.Context,
 	alert *AlertForInvestigation,
-) (*InvestigationResultStub, error) {
+) (*InvestigationResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -280,7 +281,7 @@ func (uc *AlertInvestigationUseCase) RunInvestigation(
 	ctx context.Context,
 	alert *AlertForInvestigation,
 	invID string,
-) (*InvestigationResultStub, error) {
+) (*InvestigationResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -312,7 +313,7 @@ func (uc *AlertInvestigationUseCase) RunInvestigation(
 		}
 		if allBlocked {
 			// All tools are blocked - escalate
-			return &InvestigationResultStub{
+			return &InvestigationResult{
 				InvestigationID: invID,
 				AlertID:         alert.ID(),
 				Status:          "failed",
@@ -335,36 +336,27 @@ func (uc *AlertInvestigationUseCase) RunInvestigation(
 	store := uc.investigationStore
 	uc.mu.RUnlock()
 
-	var result *InvestigationResultStub
-	if convService != nil && toolExecutor != nil {
-		runner := NewInvestigationRunner(
-			convService,
-			toolExecutor,
-			enforcer,
-			promptBuilder,
-			config,
+	if convService == nil || toolExecutor == nil {
+		return nil, errors.New(
+			"investigation dependencies not configured: conversation service and tool executor are required",
 		)
-		var err error
-		result, err = runner.Run(ctx, alert, invID)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		// Fallback stub when dependencies not configured
-		result = &InvestigationResultStub{
-			InvestigationID: invID,
-			AlertID:         alert.ID(),
-			Status:          "completed",
-			Findings:        []string{},
-			ActionsTaken:    0,
-			Duration:        time.Since(time.Now()),
-			Confidence:      0.8,
-		}
+	}
+
+	runner := NewInvestigationRunner(
+		convService,
+		toolExecutor,
+		enforcer,
+		promptBuilder,
+		config,
+	)
+	result, err := runner.Run(ctx, alert, invID)
+	if err != nil {
+		return nil, err
 	}
 
 	// Update store with final status if configured
 	if store != nil {
-		stub := newSimpleInvestigationStub(invID, alert.ID(), "", result.Status)
+		stub := newSimpleInvestigationRecord(invID, alert.ID(), "", result.Status)
 		_ = store.Update(ctx, stub)
 	}
 
@@ -424,8 +416,10 @@ func (uc *AlertInvestigationUseCase) StartInvestigation(
 
 	// Persist to store if configured
 	if uc.investigationStore != nil {
-		stub := newSimpleInvestigationStub(invID, alert.ID(), "", "started")
-		_ = uc.investigationStore.Store(ctx, stub)
+		stub := newSimpleInvestigationRecord(invID, alert.ID(), "", "started")
+		if err := uc.investigationStore.Store(ctx, stub); err != nil {
+			fmt.Fprintf(os.Stderr, "[AlertInvestigation] Failed to store investigation %s: %v\n", invID, err)
+		}
 	}
 
 	return invID, nil
@@ -453,8 +447,10 @@ func (uc *AlertInvestigationUseCase) StopInvestigation(ctx context.Context, invI
 
 	// Update store with stopped status if configured
 	if uc.investigationStore != nil {
-		stub := newSimpleInvestigationStub(invID, inv.alertID, "", "stopped")
-		_ = uc.investigationStore.Update(ctx, stub)
+		stub := newSimpleInvestigationRecord(invID, inv.alertID, "", "stopped")
+		if err := uc.investigationStore.Update(ctx, stub); err != nil {
+			fmt.Fprintf(os.Stderr, "[AlertInvestigation] Failed to update investigation %s: %v\n", invID, err)
+		}
 	}
 
 	uc.cleanupInvestigationTracking(invID, inv.alertID)
@@ -467,7 +463,7 @@ func (uc *AlertInvestigationUseCase) StopInvestigation(ctx context.Context, invI
 func (uc *AlertInvestigationUseCase) GetInvestigationStatus(
 	ctx context.Context,
 	invID string,
-) (*InvestigationResultStub, error) {
+) (*InvestigationResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -480,7 +476,7 @@ func (uc *AlertInvestigationUseCase) GetInvestigationStatus(
 		return nil, ErrInvestigationNotFoundUC
 	}
 
-	return &InvestigationResultStub{
+	return &InvestigationResult{
 		InvestigationID: inv.id,
 		AlertID:         inv.alertID,
 		Status:          "running",
