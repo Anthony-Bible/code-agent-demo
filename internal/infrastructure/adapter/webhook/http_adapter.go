@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -190,6 +191,7 @@ func (a *HTTPAdapter) handleWebhookAsync(
 		// Start investigation and get ID (non-blocking)
 		invID, err := asyncHandler(context.Background(), alert)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "[Webhook] Failed to start investigation for alert %s: %v\n", alert.ID(), err)
 			startErrors++
 			continue
 		}
