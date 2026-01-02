@@ -101,11 +101,12 @@ func (h *InterruptHandler) handleSecondPress() {
 }
 
 // handleFirstPress processes the first Ctrl+C (or first after timeout reset).
-// It fires the FirstPress channel and starts the reset timer.
+// It cancels the context to trigger graceful shutdown and fires the FirstPress channel.
 // Caller must hold h.mu.
 func (h *InterruptHandler) handleFirstPress(pressTime time.Time) {
 	h.pressCount = 1
 	h.lastPressTime = pressTime
+	h.cancel() // Cancel context on first press to trigger graceful shutdown
 
 	// Fire the first press channel (non-blocking send)
 	select {

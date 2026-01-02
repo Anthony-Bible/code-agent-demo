@@ -52,6 +52,8 @@ type HTTPAdapter struct {
 	mux               *http.ServeMux
 	mu                sync.RWMutex
 	wg                sync.WaitGroup // tracks in-flight async investigations
+	invCtx            context.Context
+	invCancel         context.CancelFunc
 	started           bool
 }
 
@@ -60,10 +62,13 @@ func NewHTTPAdapter(
 	sourceManager port.AlertSourceManager,
 	config HTTPAdapterConfig,
 ) *HTTPAdapter {
+	invCtx, invCancel := context.WithCancel(context.Background())
 	adapter := &HTTPAdapter{
 		sourceManager: sourceManager,
 		config:        config,
 		mux:           http.NewServeMux(),
+		invCtx:        invCtx,
+		invCancel:     invCancel,
 	}
 	adapter.registerRoutes()
 	return adapter
@@ -200,8 +205,8 @@ func (a *HTTPAdapter) handleWebhookAsync(
 		a.wg.Add(1)
 		go func(alert *entity.Alert, invID string) {
 			defer a.wg.Done()
-			// Use background context since HTTP request context will be cancelled
-			_ = runner(context.Background(), alert, invID)
+			// Use investigation context so it can be cancelled during shutdown
+			_ = runner(a.invCtx, alert, invID)
 		}(alert, invID)
 	}
 
@@ -304,11 +309,26 @@ func (a *HTTPAdapter) Start(ctx context.Context) error {
 }
 
 // Shutdown gracefully stops the HTTP server.
-// It waits for in-flight async investigations to complete before closing.
+// It cancels running investigations and waits up to 5 seconds for them to complete.
 func (a *HTTPAdapter) Shutdown() error {
-	// Always wait for in-flight async investigations to complete
-	a.wg.Wait()
+	// Cancel all running investigations
+	a.invCancel()
 
+	// Wait for investigations with timeout
+	done := make(chan struct{})
+	go func() {
+		a.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// All investigations finished cleanly
+	case <-time.After(5 * time.Second):
+		// Timeout - proceed with server shutdown anyway
+	}
+
+	// Shut down HTTP server
 	a.mu.Lock()
 	defer a.mu.Unlock()
 

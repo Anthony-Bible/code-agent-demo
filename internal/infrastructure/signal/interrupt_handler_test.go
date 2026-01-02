@@ -82,7 +82,7 @@ func TestInterruptHandler_FirstInterruptFiresChannel(t *testing.T) {
 		}
 	})
 
-	t.Run("should not cancel context on first interrupt", func(t *testing.T) {
+	t.Run("should cancel context on first interrupt", func(t *testing.T) {
 		handler := newTestHandler(2 * time.Second)
 		if handler == nil {
 			t.Fatal("handler is nil")
@@ -98,15 +98,12 @@ func TestInterruptHandler_FirstInterruptFiresChannel(t *testing.T) {
 		// Simulate first Ctrl+C
 		handler.SimulateInterrupt()
 
-		// Give some time for any incorrect cancellation to occur
-		time.Sleep(50 * time.Millisecond)
-
-		// Context should NOT be cancelled after first press
+		// Context should be cancelled after first press to trigger graceful shutdown
 		select {
 		case <-ctx.Done():
-			t.Error("Context was cancelled after first interrupt, expected it to remain active")
-		default:
-			// Success - context is still active
+			// Success - context was cancelled for graceful shutdown
+		case <-time.After(100 * time.Millisecond):
+			t.Error("Context was not cancelled after first interrupt, expected graceful shutdown")
 		}
 	})
 }
@@ -205,12 +202,12 @@ func TestInterruptHandler_TimeoutResetsCounter(t *testing.T) {
 		// Wait for timeout to expire (plus buffer)
 		time.Sleep(timeout + 20*time.Millisecond)
 
-		// Context should still be active (not cancelled)
+		// Context should be cancelled (first interrupt cancelled it)
 		select {
 		case <-ctx.Done():
-			t.Error("Context was cancelled after timeout, but should still be active")
+			// Good - context was cancelled by first interrupt
 		default:
-			// Good - context still active
+			t.Error("Context should be cancelled after first interrupt")
 		}
 
 		// Third interrupt should now be treated as a new "first" press
@@ -225,12 +222,12 @@ func TestInterruptHandler_TimeoutResetsCounter(t *testing.T) {
 			t.Error("FirstPress channel did not fire after timeout reset")
 		}
 
-		// Context should STILL not be cancelled (only one press since reset)
+		// Context should already be cancelled from first interrupt
 		select {
 		case <-ctx.Done():
-			t.Error("Context was cancelled after single press post-reset")
+			// Success - context remains cancelled
 		default:
-			// Success - context is still active
+			t.Error("Context should remain cancelled")
 		}
 	})
 
@@ -373,12 +370,15 @@ func TestInterruptHandler_StartAndStop(t *testing.T) {
 			t.Fatal("handler is nil")
 		}
 		handler.Start()
-		handler.Stop()
 
+		// Get context before stopping
 		ctx := handler.Context()
 		if ctx == nil {
 			t.Fatal("Context() returned nil")
 		}
+
+		// Stop handler
+		handler.Stop()
 
 		// Simulate interrupts after stop
 		handler.SimulateInterrupt()
@@ -387,7 +387,7 @@ func TestInterruptHandler_StartAndStop(t *testing.T) {
 		// Give time for any incorrect processing
 		time.Sleep(50 * time.Millisecond)
 
-		// Context should NOT be cancelled since handler is stopped
+		// Context should NOT be cancelled since handler is stopped and interrupts ignored
 		select {
 		case <-ctx.Done():
 			t.Error("Context was cancelled after Stop, expected no response to interrupts")
@@ -710,10 +710,10 @@ func isContextCancelled(ctx context.Context) bool {
 func TestInterruptHandler_Scenarios(t *testing.T) {
 	tests := []scenarioTestCase{
 		{
-			name:             "single interrupt does not cancel",
+			name:             "single interrupt cancels context",
 			timeout:          100 * time.Millisecond,
 			interrupts:       []time.Duration{0},
-			expectCancelled:  false,
+			expectCancelled:  true, // First interrupt now cancels for graceful shutdown
 			expectFirstPress: 1,
 		},
 		{
@@ -724,17 +724,17 @@ func TestInterruptHandler_Scenarios(t *testing.T) {
 			expectFirstPress: 1,
 		},
 		{
-			name:             "double interrupt after timeout does not cancel",
+			name:             "double interrupt after timeout also cancels",
 			timeout:          50 * time.Millisecond,
 			interrupts:       []time.Duration{0, 80 * time.Millisecond},
-			expectCancelled:  false,
-			expectFirstPress: 2, // Both should be treated as "first" presses
+			expectCancelled:  true, // First interrupt already cancelled context
+			expectFirstPress: 2,    // Both should be treated as "first" presses
 		},
 		{
 			name:             "triple interrupt with timeout reset",
 			timeout:          50 * time.Millisecond,
 			interrupts:       []time.Duration{0, 80 * time.Millisecond, 90 * time.Millisecond},
-			expectCancelled:  true, // 2nd and 3rd are within timeout of each other
+			expectCancelled:  true, // 1st interrupt cancels context
 			expectFirstPress: 2,    // 1st and 2nd (after reset) fire FirstPress
 		},
 	}
