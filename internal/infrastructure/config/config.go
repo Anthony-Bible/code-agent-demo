@@ -47,6 +47,12 @@ type Config struct {
 	// HistoryMaxEntries is the maximum number of history entries to keep.
 	// Defaults to 1000.
 	HistoryMaxEntries int
+
+	// AutoApproveSafeCommands determines whether non-dangerous bash commands
+	// are automatically approved without user confirmation.
+	// Dangerous commands are still blocked.
+	// Defaults to false (all commands require confirmation).
+	AutoApproveSafeCommands bool
 }
 
 // Defaults returns a Config struct with all default values set.
@@ -105,6 +111,9 @@ func LoadConfig() *Config {
 		if val > 0 {
 			cfg.HistoryMaxEntries = val
 		}
+	}
+	if viper.IsSet("auto_approve_safe") {
+		cfg.AutoApproveSafeCommands = viper.GetBool("auto_approve_safe")
 	}
 
 	return cfg

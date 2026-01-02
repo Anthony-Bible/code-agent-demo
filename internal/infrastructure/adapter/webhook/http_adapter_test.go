@@ -9,7 +9,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 )
 
 var errSourceNotFound = errors.New("source not found")
@@ -378,6 +380,245 @@ func TestHTTPAdapter_Config(t *testing.T) {
 		}
 		if config.ShutdownTimeout != 10*1e9 {
 			t.Errorf("expected 10s, got %v", config.ShutdownTimeout)
+		}
+	})
+}
+
+func TestHTTPAdapter_AsyncHandler_Returns202(t *testing.T) {
+	webhookSource := &mockWebhookSource{
+		mockAlertSource: mockAlertSource{name: "prometheus", sourceType: port.SourceTypeWebhook},
+		webhookPath:     "/alerts/prometheus",
+		handleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
+			alert, _ := entity.NewAlert("alert-1", "prometheus", "critical", "High CPU")
+			return []*entity.Alert{alert}, nil
+		},
+	}
+	manager := &mockSourceManager{sources: []port.AlertSource{webhookSource}}
+	adapter := NewHTTPAdapter(manager, DefaultConfig())
+
+	var runnerCalled bool
+	var runnerWg sync.WaitGroup
+	runnerWg.Add(1)
+
+	adapter.SetAsyncAlertHandler(
+		func(_ context.Context, _ *entity.Alert) (string, error) {
+			return "inv-12345", nil
+		},
+		func(_ context.Context, _ *entity.Alert, _ string) error {
+			runnerCalled = true
+			runnerWg.Done()
+			return nil
+		},
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString("{}"))
+	rec := httptest.NewRecorder()
+
+	adapter.Mux().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("expected 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp["status"] != "accepted" {
+		t.Errorf("expected status 'accepted', got %q", resp["status"])
+	}
+	if resp["investigation_id"] != "inv-12345" {
+		t.Errorf("expected investigation_id 'inv-12345', got %q", resp["investigation_id"])
+	}
+
+	runnerWg.Wait()
+	if !runnerCalled {
+		t.Error("expected runner to be called")
+	}
+}
+
+func TestHTTPAdapter_AsyncHandler_FilteredAlerts(t *testing.T) {
+	webhookSource := &mockWebhookSource{
+		mockAlertSource: mockAlertSource{name: "prometheus", sourceType: port.SourceTypeWebhook},
+		webhookPath:     "/alerts/prometheus",
+		handleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
+			alert, _ := entity.NewAlert("alert-1", "prometheus", "info", "Info Alert")
+			return []*entity.Alert{alert}, nil
+		},
+	}
+	manager := &mockSourceManager{sources: []port.AlertSource{webhookSource}}
+	adapter := NewHTTPAdapter(manager, DefaultConfig())
+
+	adapter.SetAsyncAlertHandler(
+		func(_ context.Context, _ *entity.Alert) (string, error) {
+			return "", nil // Empty ID means filtered out
+		},
+		func(_ context.Context, _ *entity.Alert, _ string) error {
+			t.Error("runner should not be called for filtered alerts")
+			return nil
+		},
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString("{}"))
+	rec := httptest.NewRecorder()
+
+	adapter.Mux().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp["message"] != "no investigations started (alerts filtered)" {
+		t.Errorf("expected filtered message, got %q", resp["message"])
+	}
+}
+
+func TestHTTPAdapter_AsyncHandler_StartError(t *testing.T) {
+	webhookSource := &mockWebhookSource{
+		mockAlertSource: mockAlertSource{name: "prometheus", sourceType: port.SourceTypeWebhook},
+		webhookPath:     "/alerts/prometheus",
+		handleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
+			alert, _ := entity.NewAlert("alert-1", "prometheus", "critical", "Critical Alert")
+			return []*entity.Alert{alert}, nil
+		},
+	}
+	manager := &mockSourceManager{sources: []port.AlertSource{webhookSource}}
+	adapter := NewHTTPAdapter(manager, DefaultConfig())
+
+	adapter.SetAsyncAlertHandler(
+		func(_ context.Context, _ *entity.Alert) (string, error) {
+			return "", errors.New("start failed")
+		},
+		func(_ context.Context, _ *entity.Alert, _ string) error {
+			t.Error("runner should not be called when start fails")
+			return nil
+		},
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString("{}"))
+	rec := httptest.NewRecorder()
+
+	adapter.Mux().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHTTPAdapter_AsyncHandler_ShutdownWaits(t *testing.T) {
+	webhookSource := &mockWebhookSource{
+		mockAlertSource: mockAlertSource{name: "prometheus", sourceType: port.SourceTypeWebhook},
+		webhookPath:     "/alerts/prometheus",
+		handleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
+			alert, _ := entity.NewAlert("alert-1", "prometheus", "critical", "Critical Alert")
+			return []*entity.Alert{alert}, nil
+		},
+	}
+	manager := &mockSourceManager{sources: []port.AlertSource{webhookSource}}
+	adapter := NewHTTPAdapter(manager, DefaultConfig())
+
+	runnerStarted := make(chan struct{})
+	runnerComplete := make(chan struct{})
+
+	adapter.SetAsyncAlertHandler(
+		func(_ context.Context, _ *entity.Alert) (string, error) {
+			return "inv-shutdown-test", nil
+		},
+		func(_ context.Context, _ *entity.Alert, _ string) error {
+			close(runnerStarted)
+			<-runnerComplete
+			return nil
+		},
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString("{}"))
+	rec := httptest.NewRecorder()
+	adapter.Mux().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	<-runnerStarted
+
+	shutdownComplete := make(chan struct{})
+	go func() {
+		_ = adapter.Shutdown()
+		close(shutdownComplete)
+	}()
+
+	select {
+	case <-shutdownComplete:
+		t.Error("shutdown completed before investigation finished")
+	case <-time.After(50 * time.Millisecond):
+		// Expected - shutdown should be blocked
+	}
+
+	close(runnerComplete)
+
+	select {
+	case <-shutdownComplete:
+		// Expected
+	case <-time.After(1 * time.Second):
+		t.Error("shutdown did not complete after investigation finished")
+	}
+}
+
+func TestHTTPAdapter_AsyncAndSyncHandlerPrecedence(t *testing.T) {
+	t.Run("async handler takes precedence over sync handler", func(t *testing.T) {
+		webhookSource := &mockWebhookSource{
+			mockAlertSource: mockAlertSource{name: "prometheus", sourceType: port.SourceTypeWebhook},
+			webhookPath:     "/alerts/prometheus",
+			handleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
+				alert, _ := entity.NewAlert("alert-1", "prometheus", "critical", "High CPU")
+				return []*entity.Alert{alert}, nil
+			},
+		}
+		manager := &mockSourceManager{sources: []port.AlertSource{webhookSource}}
+		adapter := NewHTTPAdapter(manager, DefaultConfig())
+
+		// Set both sync and async handlers
+		syncCalled := false
+		adapter.SetAlertHandler(func(_ context.Context, _ *entity.Alert) error {
+			syncCalled = true
+			return nil
+		})
+
+		asyncCalled := false
+		var runnerWg sync.WaitGroup
+		runnerWg.Add(1)
+		adapter.SetAsyncAlertHandler(
+			func(_ context.Context, _ *entity.Alert) (string, error) {
+				asyncCalled = true
+				return "inv-async", nil
+			},
+			func(_ context.Context, _ *entity.Alert, _ string) error {
+				runnerWg.Done()
+				return nil
+			},
+		)
+
+		req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString("{}"))
+		rec := httptest.NewRecorder()
+
+		adapter.Mux().ServeHTTP(rec, req)
+
+		// Should return 202 (async) not 200 (sync)
+		if rec.Code != http.StatusAccepted {
+			t.Errorf("expected 202, got %d", rec.Code)
+		}
+
+		runnerWg.Wait()
+
+		if !asyncCalled {
+			t.Error("expected async handler to be called")
+		}
+		if syncCalled {
+			t.Error("sync handler should not be called when async is set")
 		}
 	})
 }

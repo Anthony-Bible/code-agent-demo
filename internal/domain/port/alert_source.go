@@ -51,6 +51,15 @@ type WebhookAlertSource interface {
 // It is called by the AlertSourceManager when new alerts are received.
 type AlertHandler func(ctx context.Context, alert *entity.Alert) error
 
+// AsyncAlertHandler starts an investigation and returns the investigation ID immediately.
+// The actual investigation runs asynchronously via AlertRunner.
+// Returns empty string if the alert is filtered out (e.g., ignored source or severity).
+type AsyncAlertHandler func(ctx context.Context, alert *entity.Alert) (investigationID string, err error)
+
+// AlertRunner runs an already-started investigation.
+// It is the second half of the async workflow, called after AsyncAlertHandler returns the ID.
+type AlertRunner func(ctx context.Context, alert *entity.Alert, investigationID string) error
+
 // AlertSourceManager manages the lifecycle and registration of alert sources.
 // It provides a central registry for sources and dispatches alerts to handlers.
 type AlertSourceManager interface {

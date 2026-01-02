@@ -4,6 +4,7 @@
 package webhook
 
 import (
+	"code-editing-agent/internal/domain/entity"
 	"code-editing-agent/internal/domain/port"
 	"context"
 	"encoding/json"
@@ -42,13 +43,16 @@ func DefaultConfig() HTTPAdapterConfig {
 // HTTPAdapter provides HTTP endpoints for receiving webhook alerts.
 // It implements graceful shutdown and integrates with AlertSourceManager.
 type HTTPAdapter struct {
-	sourceManager port.AlertSourceManager
-	alertHandler  port.AlertHandler
-	config        HTTPAdapterConfig
-	server        *http.Server
-	mux           *http.ServeMux
-	mu            sync.RWMutex
-	started       bool
+	sourceManager     port.AlertSourceManager
+	alertHandler      port.AlertHandler
+	asyncAlertHandler port.AsyncAlertHandler
+	alertRunner       port.AlertRunner
+	config            HTTPAdapterConfig
+	server            *http.Server
+	mux               *http.ServeMux
+	mu                sync.RWMutex
+	wg                sync.WaitGroup // tracks in-flight async investigations
+	started           bool
 }
 
 // NewHTTPAdapter creates a new webhook HTTP adapter.
@@ -134,15 +138,24 @@ func (a *HTTPAdapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Dispatch alerts to the handler
+	// Check if async handler is configured
 	a.mu.RLock()
-	handler := a.alertHandler
+	asyncHandler := a.asyncAlertHandler
+	runner := a.alertRunner
+	syncHandler := a.alertHandler
 	a.mu.RUnlock()
 
+	// Use async dispatch if configured
+	if asyncHandler != nil && runner != nil {
+		a.handleWebhookAsync(w, alerts, asyncHandler, runner)
+		return
+	}
+
+	// Fall back to sync dispatch
 	var handlerErrors int
 	for _, alert := range alerts {
-		if handler != nil {
-			if err := handler(ctx, alert); err != nil {
+		if syncHandler != nil {
+			if err := syncHandler(ctx, alert); err != nil {
 				handlerErrors++
 			}
 		}
@@ -154,6 +167,71 @@ func (a *HTTPAdapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		"status":   "ok",
 		"received": len(alerts),
 		"errors":   handlerErrors,
+	})
+	_, _ = w.Write(resp)
+}
+
+// handleWebhookAsync handles alerts asynchronously, returning 202 Accepted immediately.
+func (a *HTTPAdapter) handleWebhookAsync(
+	w http.ResponseWriter,
+	alerts []*entity.Alert,
+	asyncHandler port.AsyncAlertHandler,
+	runner port.AlertRunner,
+) {
+	var lastInvID string
+	var startErrors int
+
+	for _, alert := range alerts {
+		// Start investigation and get ID (non-blocking)
+		invID, err := asyncHandler(context.Background(), alert)
+		if err != nil {
+			startErrors++
+			continue
+		}
+
+		// Empty ID means alert was filtered out (ignored source/severity)
+		if invID == "" {
+			continue
+		}
+
+		lastInvID = invID
+
+		// Run investigation in background
+		a.wg.Add(1)
+		go func(alert *entity.Alert, invID string) {
+			defer a.wg.Done()
+			// Use background context since HTTP request context will be cancelled
+			_ = runner(context.Background(), alert, invID)
+		}(alert, invID)
+	}
+
+	// Return 202 Accepted immediately
+	if lastInvID != "" {
+		w.WriteHeader(http.StatusAccepted)
+		resp, _ := json.Marshal(map[string]interface{}{
+			"status":           "accepted",
+			"investigation_id": lastInvID,
+		})
+		_, _ = w.Write(resp)
+		return
+	}
+
+	// No investigations started (all filtered or errors)
+	if startErrors > 0 {
+		w.WriteHeader(http.StatusInternalServerError)
+		resp, _ := json.Marshal(map[string]interface{}{
+			"error":  "failed to start investigations",
+			"errors": startErrors,
+		})
+		_, _ = w.Write(resp)
+		return
+	}
+
+	// All alerts filtered out
+	w.WriteHeader(http.StatusOK)
+	resp, _ := json.Marshal(map[string]interface{}{
+		"status":  "ok",
+		"message": "no investigations started (alerts filtered)",
 	})
 	_, _ = w.Write(resp)
 }
@@ -171,11 +249,22 @@ func (a *HTTPAdapter) findWebhookSource(path string) port.WebhookAlertSource {
 	return nil
 }
 
-// SetAlertHandler sets the callback for handling parsed alerts.
+// SetAlertHandler sets the callback for handling parsed alerts synchronously.
 func (a *HTTPAdapter) SetAlertHandler(handler port.AlertHandler) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.alertHandler = handler
+}
+
+// SetAsyncAlertHandler sets the async handler and runner for async alert processing.
+// When set, handleWebhook will return 202 Accepted immediately and run investigations
+// in background goroutines. The handler starts the investigation and returns the ID,
+// while the runner executes the actual investigation.
+func (a *HTTPAdapter) SetAsyncAlertHandler(handler port.AsyncAlertHandler, runner port.AlertRunner) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.asyncAlertHandler = handler
+	a.alertRunner = runner
 }
 
 // Start begins listening for HTTP requests.
@@ -215,7 +304,11 @@ func (a *HTTPAdapter) Start(ctx context.Context) error {
 }
 
 // Shutdown gracefully stops the HTTP server.
+// It waits for in-flight async investigations to complete before closing.
 func (a *HTTPAdapter) Shutdown() error {
+	// Always wait for in-flight async investigations to complete
+	a.wg.Wait()
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 

@@ -182,3 +182,90 @@ func (h *AlertHandler) HandleEntityAlert(ctx context.Context, alert *entity.Aler
 	}
 	return h.Handle(ctx, invAlert)
 }
+
+// HandleEntityAlertAsync starts an investigation and returns the investigation ID immediately.
+// The actual investigation should be run separately via RunEntityAlertInvestigation.
+// This is useful for async workflows where you need to return the ID before the investigation completes.
+//
+// Returns empty string if the alert is filtered out (source ignored or severity not configured).
+// Returns ErrNilAlert if the alert is nil.
+// Returns ErrNilUseCase if the investigation use case is nil.
+func (h *AlertHandler) HandleEntityAlertAsync(ctx context.Context, alert *entity.Alert) (string, error) {
+	if alert == nil {
+		return "", ErrNilAlert
+	}
+	if h.investigationUseCase == nil {
+		return "", ErrNilUseCase
+	}
+
+	// Convert domain entity to use case DTO for processing
+	invAlert := &AlertForInvestigation{
+		id:          alert.ID(),
+		source:      alert.Source(),
+		severity:    alert.Severity(),
+		title:       alert.Title(),
+		description: alert.Description(),
+		labels:      alert.Labels(),
+	}
+
+	// Check if source is ignored - silently skip these alerts
+	if h.isSourceIgnored(invAlert.Source()) {
+		return "", nil
+	}
+
+	// Check if we should investigate based on severity and config
+	if !h.shouldInvestigate(invAlert) {
+		return "", nil
+	}
+
+	// Start investigation and return ID immediately
+	return h.investigationUseCase.StartInvestigation(ctx, invAlert)
+}
+
+// RunEntityAlertInvestigation runs an already-started investigation.
+// StartInvestigation (via HandleEntityAlertAsync) must be called first to obtain the invID.
+// This is the second half of the async workflow.
+//
+// Returns ErrNilAlert if the alert is nil.
+// Returns ErrNilUseCase if the investigation use case is nil.
+func (h *AlertHandler) RunEntityAlertInvestigation(
+	ctx context.Context,
+	alert *entity.Alert,
+	invID string,
+) error {
+	if alert == nil {
+		return ErrNilAlert
+	}
+	if h.investigationUseCase == nil {
+		return ErrNilUseCase
+	}
+
+	// Convert domain entity to use case DTO for processing
+	invAlert := &AlertForInvestigation{
+		id:          alert.ID(),
+		source:      alert.Source(),
+		severity:    alert.Severity(),
+		title:       alert.Title(),
+		description: alert.Description(),
+		labels:      alert.Labels(),
+	}
+
+	result, err := h.investigationUseCase.RunInvestigation(ctx, invAlert, invID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[AlertHandler] Investigation error: %v\n", err)
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "[AlertHandler] Investigation completed: status=%s, findings=%d, confidence=%.2f\n",
+		result.Status, len(result.Findings), result.Confidence)
+	if len(result.Findings) > 0 {
+		_, _ = fmt.Fprintf(os.Stderr, "[AlertHandler] Findings:\n")
+		for i, finding := range result.Findings {
+			_, _ = fmt.Fprintf(os.Stderr, "  %d. %s\n", i+1, finding)
+		}
+	}
+	if result.Escalated {
+		_, _ = fmt.Fprintf(os.Stderr, "[AlertHandler] ESCALATED: %s\n", result.EscalateReason)
+	}
+	return nil
+}

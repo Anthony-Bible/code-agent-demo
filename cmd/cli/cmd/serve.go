@@ -6,8 +6,11 @@ import (
 	"code-editing-agent/internal/infrastructure/adapter/webhook"
 	"code-editing-agent/internal/infrastructure/config"
 	"errors"
+	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 // serveCmd represents the serve command.
@@ -39,6 +42,13 @@ func init() {
 
 	serveCmd.Flags().String("addr", ":8080", "Address to listen on (e.g., :8080, 0.0.0.0:9090)")
 	serveCmd.Flags().String("config", "config/alert-sources.yaml", "Path to alert sources config file")
+	serveCmd.Flags().
+		Bool("auto-approve-safe", false, "Auto-approve non-dangerous bash commands (dangerous commands are blocked)")
+
+	// Bind flag to viper
+	if err := viper.BindPFlag("auto_approve_safe", serveCmd.Flags().Lookup("auto-approve-safe")); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to bind auto-approve-safe flag: %v\n", err)
+	}
 }
 
 // runServe executes the serve command.
@@ -109,7 +119,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		WriteTimeout:    webhook.DefaultConfig().WriteTimeout,
 		ShutdownTimeout: webhook.DefaultConfig().ShutdownTimeout,
 	})
-	webhookAdapter.SetAlertHandler(alertHandler.HandleEntityAlert)
+	webhookAdapter.SetAsyncAlertHandler(alertHandler.HandleEntityAlertAsync, alertHandler.RunEntityAlertInvestigation)
 
 	// Print startup info
 	_ = ui.DisplaySystemMessage("")

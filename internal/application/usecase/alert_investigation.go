@@ -98,28 +98,6 @@ func newSimpleInvestigationStub(id, alertID, sessionID, status string) *simpleIn
 	}
 }
 
-// newSimpleInvestigationStubFromResult creates a stub with full result data.
-func newSimpleInvestigationStubFromResult(
-	result *InvestigationResultStub,
-	sessionID string,
-	startedAt time.Time,
-) *simpleInvestigationStub {
-	return &simpleInvestigationStub{
-		id:             result.InvestigationID,
-		alertID:        result.AlertID,
-		sessionID:      sessionID,
-		status:         result.Status,
-		startedAt:      startedAt,
-		completedAt:    time.Now(),
-		findings:       result.Findings,
-		actionsTaken:   result.ActionsTaken,
-		durationNanos:  int64(result.Duration),
-		confidence:     result.Confidence,
-		escalated:      result.Escalated,
-		escalateReason: result.EscalateReason,
-	}
-}
-
 // Sentinel errors for AlertInvestigationUseCase operations.
 // These errors indicate various failure conditions during investigation.
 var (
@@ -287,6 +265,28 @@ func (uc *AlertInvestigationUseCase) HandleAlert(
 	invID, err := uc.StartInvestigation(ctx, alert)
 	if err != nil {
 		return nil, err
+	}
+
+	return uc.RunInvestigation(ctx, alert, invID)
+}
+
+// RunInvestigation runs an already-started investigation.
+// StartInvestigation must be called first to obtain the invID.
+// This method is useful for async workflows where the investigation ID
+// needs to be returned before the investigation completes.
+//
+// Returns ErrAlertNil if alert is nil.
+func (uc *AlertInvestigationUseCase) RunInvestigation(
+	ctx context.Context,
+	alert *AlertForInvestigation,
+	invID string,
+) (*InvestigationResultStub, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	if alert == nil {
+		return nil, ErrAlertNil
 	}
 
 	// Check if safety enforcer blocks all investigation tools

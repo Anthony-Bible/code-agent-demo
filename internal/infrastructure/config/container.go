@@ -107,12 +107,31 @@ func NewContainer(cfg *Config) (*Container, error) {
 	toolExecutor := tool.NewPlanningExecutorAdapter(baseExecutor, fileManager, cfg.WorkingDir)
 
 	// Set up bash command confirmation callback
-	// This prompts the user before executing any bash command
-	toolExecutor.SetCommandConfirmationCallback(
-		func(command string, isDangerous bool, reason, description string) bool {
-			return uiAdapter.ConfirmBashCommand(command, isDangerous, reason, description)
-		},
-	)
+	// Behavior depends on cfg.AutoApproveSafeCommands flag
+	if cfg.AutoApproveSafeCommands {
+		// Auto-approve safe commands, block dangerous ones (headless mode)
+		toolExecutor.SetCommandConfirmationCallback(
+			func(command string, isDangerous bool, reason string, description string) bool {
+				if isDangerous {
+					// Block dangerous commands in headless mode
+					_ = uiAdapter.DisplaySystemMessage(
+						"[BLOCKED] " + description + ": " + command + " (reason: " + reason + ")",
+					)
+					return false
+				}
+				// Log auto-approved command
+				_ = uiAdapter.DisplaySystemMessage("[AUTO-APPROVED] " + description + ": " + command)
+				return true // Auto-approve safe commands
+			},
+		)
+	} else {
+		// Default behavior: prompt user before executing any bash command
+		toolExecutor.SetCommandConfirmationCallback(
+			func(command string, isDangerous bool, reason, description string) bool {
+				return uiAdapter.ConfirmBashCommand(command, isDangerous, reason, description)
+			},
+		)
+	}
 
 	// Set up plan mode confirmation callback
 	// This prompts the user when the agent wants to enter plan mode

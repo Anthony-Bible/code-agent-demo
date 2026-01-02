@@ -522,6 +522,92 @@ func TestBashTool_BackwardCompat_DangerousCallbackStillWorks(t *testing.T) {
 	}
 }
 
+func TestBashTool_LLMSpecifiedDangerous(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	var invocations []callbackInvocation
+
+	// Set CommandConfirmationCallback that tracks all invocations
+	adapter.SetCommandConfirmationCallback(func(command string, isDangerous bool, reason, description string) bool {
+		invocations = append(invocations, callbackInvocation{
+			command:     command,
+			isDangerous: isDangerous,
+			reason:      reason,
+			description: description,
+		})
+		return true
+	})
+
+	// Execute a safe command but with dangerous:true flag from LLM
+	input := `{"command": "echo hello", "dangerous": true, "description": "LLM thinks this is risky"}`
+	_, err := adapter.ExecuteTool(context.Background(), "bash", input)
+	if err != nil {
+		t.Fatalf("Expected command to succeed, got error: %v", err)
+	}
+
+	// Verify callback was called with isDangerous=true and appropriate reason
+	if len(invocations) != 1 {
+		t.Fatalf("Expected callback to be called 1 time, got %d", len(invocations))
+	}
+
+	inv := invocations[0]
+	if inv.command != "echo hello" {
+		t.Errorf("Expected command 'echo hello', got %q", inv.command)
+	}
+	if !inv.isDangerous {
+		t.Errorf("Expected isDangerous=true when LLM specifies dangerous:true")
+	}
+	if inv.reason != "marked dangerous by AI" {
+		t.Errorf("Expected reason 'marked dangerous by AI', got %q", inv.reason)
+	}
+	if inv.description != "LLM thinks this is risky" {
+		t.Errorf("Expected description 'LLM thinks this is risky', got %q", inv.description)
+	}
+}
+
+func TestBashTool_LLMSpecifiedDangerous_CombinesWithPatternDetection(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	var invocations []callbackInvocation
+
+	// Set CommandConfirmationCallback
+	adapter.SetCommandConfirmationCallback(func(command string, isDangerous bool, reason, description string) bool {
+		invocations = append(invocations, callbackInvocation{
+			command:     command,
+			isDangerous: isDangerous,
+			reason:      reason,
+			description: description,
+		})
+		return true
+	})
+
+	// Execute a pattern-detected dangerous command with dangerous:true flag
+	// Pattern detection should take precedence for the reason
+	input := `{"command": "sudo ls", "dangerous": true}`
+	_, err := adapter.ExecuteTool(context.Background(), "bash", input)
+	// sudo may fail but should not be blocked
+	if err != nil {
+		if strings.Contains(err.Error(), "blocked") {
+			t.Fatalf("Command should not be blocked: %v", err)
+		}
+	}
+
+	if len(invocations) != 1 {
+		t.Fatalf("Expected callback to be called 1 time, got %d", len(invocations))
+	}
+
+	inv := invocations[0]
+	if !inv.isDangerous {
+		t.Errorf("Expected isDangerous=true")
+	}
+	// Pattern detection reason should be used when patterns match
+	if !strings.Contains(inv.reason, "sudo") {
+		t.Errorf("Expected pattern-detected reason to contain 'sudo', got %q", inv.reason)
+	}
+}
+
 // =============================================================================
 // Tests for Fetch Tool
 // =============================================================================

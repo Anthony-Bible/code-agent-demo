@@ -620,6 +620,7 @@ type bashInput struct {
 	Command     string `json:"command"`
 	Description string `json:"description,omitempty"`
 	TimeoutMs   int    `json:"timeout_ms,omitempty"`
+	Dangerous   bool   `json:"dangerous,omitempty"`
 }
 
 // fetchInput represents the input for the fetch tool.
@@ -673,8 +674,14 @@ func isDangerousCommand(cmd string) (bool, string) {
 }
 
 // checkCommandConfirmation checks if a command should be allowed to execute.
-func (a *ExecutorAdapter) checkCommandConfirmation(command string, description string) error {
+func (a *ExecutorAdapter) checkCommandConfirmation(command string, description string, llmDangerous bool) error {
 	isDangerous, reason := isDangerousCommand(command)
+
+	// Combine: dangerous if either patterns match OR LLM says so
+	if llmDangerous && !isDangerous {
+		isDangerous = true
+		reason = "marked dangerous by AI"
+	}
 
 	switch {
 	case a.commandConfirmationCallback != nil:
@@ -708,7 +715,7 @@ func (a *ExecutorAdapter) executeBash(ctx context.Context, input json.RawMessage
 	}
 
 	// Check command confirmation
-	if err := a.checkCommandConfirmation(in.Command, in.Description); err != nil {
+	if err := a.checkCommandConfirmation(in.Command, in.Description, in.Dangerous); err != nil {
 		return "", err
 	}
 
