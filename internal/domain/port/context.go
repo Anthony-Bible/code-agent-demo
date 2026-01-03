@@ -40,3 +40,27 @@ func PlanModeFromContext(ctx context.Context) (PlanModeInfo, bool) {
 	info, ok := ctx.Value(planModeKey{}).(PlanModeInfo)
 	return info, ok
 }
+
+// customSystemPromptKey is the key for storing custom system prompt state in context.
+type customSystemPromptKey struct{}
+
+// CustomSystemPromptInfo contains custom system prompt configuration for the AI.
+// This allows sessions to override the default system prompt with custom instructions.
+type CustomSystemPromptInfo struct {
+	SessionID string // Session this prompt applies to
+	Prompt    string // Custom system prompt text to use instead of default
+}
+
+// WithCustomSystemPrompt adds custom system prompt info to the context.
+// This allows passing session-specific system prompt overrides through the call chain
+// without modifying interface signatures.
+func WithCustomSystemPrompt(ctx context.Context, info CustomSystemPromptInfo) context.Context {
+	return context.WithValue(ctx, customSystemPromptKey{}, info)
+}
+
+// CustomSystemPromptFromContext retrieves custom system prompt info from the context.
+// Returns the custom system prompt info and a boolean indicating if it was found.
+func CustomSystemPromptFromContext(ctx context.Context) (CustomSystemPromptInfo, bool) {
+	info, ok := ctx.Value(customSystemPromptKey{}).(CustomSystemPromptInfo)
+	return info, ok
+}
