@@ -126,18 +126,35 @@ func (a *AnthropicAdapter) SendMessage(
 	return a.convertResponse(response)
 }
 
-// getSystemPrompt returns the system prompt for the AI.
-// If plan mode is active in the context, it returns a specialized prompt
-// that instructs the agent to write a markdown implementation plan.
-// Otherwise, it returns a base prompt with optional skill metadata.
+// getSystemPrompt returns the system prompt for the AI based on context priority.
+//
+// Priority order (highest to lowest):
+//  1. Custom system prompt (from CustomSystemPromptFromContext) - Takes precedence over all other prompts
+//  2. Plan mode prompt (from PlanModeFromContext) - Used when plan mode is active and no custom prompt exists
+//  3. Base prompt with optional skill metadata - Default prompt when no special modes are active
+//
+// The custom prompt feature allows callers to override the system prompt entirely
+// for specialized tasks like code review, refactoring, or investigations.
 func (a *AnthropicAdapter) getSystemPrompt(ctx context.Context) string {
-	basePrompt := a.buildBasePromptWithSkills()
-
-	planInfo, ok := port.PlanModeFromContext(ctx)
-	if !ok || !planInfo.Enabled {
-		return basePrompt
+	// Priority 1: Check for custom system prompt (highest priority)
+	if customPromptInfo, ok := port.CustomSystemPromptFromContext(ctx); ok && customPromptInfo.Prompt != "" {
+		return customPromptInfo.Prompt
 	}
 
+	// Priority 2: Check for plan mode prompt (second priority)
+	planInfo, ok := port.PlanModeFromContext(ctx)
+	if ok && planInfo.Enabled {
+		return a.buildPlanModePrompt(planInfo)
+	}
+
+	// Priority 3: Return base prompt with optional skill metadata (default/fallback)
+	return a.buildBasePromptWithSkills()
+}
+
+// buildPlanModePrompt constructs the specialized plan mode system prompt.
+// This prompt instructs the agent to explore the codebase and write an implementation
+// plan rather than making direct changes.
+func (a *AnthropicAdapter) buildPlanModePrompt(planInfo port.PlanModeInfo) string {
 	return fmt.Sprintf(
 		`You are an AI assistant in PLAN MODE. Your job is to explore the codebase and write an implementation plan before making changes.
 

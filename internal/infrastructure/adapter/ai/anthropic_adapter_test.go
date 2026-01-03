@@ -2,6 +2,7 @@ package ai
 
 import (
 	"code-editing-agent/internal/domain/port"
+	"context"
 	"testing"
 )
 
@@ -438,4 +439,407 @@ func TestConvertTools_RequiredPreservesOrder(t *testing.T) {
 			t.Errorf("required field at index %d: expected '%s', got '%s'", i, expected, tool.InputSchema.Required[i])
 		}
 	}
+}
+
+// ============================================================================
+// Custom System Prompt Priority Tests (RED PHASE)
+// ============================================================================
+// These tests verify that getSystemPrompt() correctly prioritizes custom
+// system prompts from context over plan mode and base prompts.
+//
+// PRIORITY ORDER (highest to lowest):
+// 1. Custom system prompt (from CustomSystemPromptFromContext)
+// 2. Plan mode prompt (from PlanModeFromContext)
+// 3. Base prompt with skills (default)
+// ============================================================================
+
+// TestGetSystemPrompt_CustomPromptTakesPrecedenceOverBasePrompt verifies that
+// when a custom system prompt is present in the context, it is returned instead
+// of the base prompt.
+//
+// This test will FAIL until getSystemPrompt() is updated to check for custom
+// prompts in the context via CustomSystemPromptFromContext().
+func TestGetSystemPrompt_CustomPromptTakesPrecedenceOverBasePrompt(t *testing.T) {
+	// Setup: create adapter with no skill manager for predictable base prompt
+	adapter := &AnthropicAdapter{
+		model:        "test-model",
+		skillManager: nil, // No skills for simpler test
+	}
+
+	// Expected prompts
+	customPrompt := "You are a specialized code review assistant. Focus on security vulnerabilities."
+	expectedPrompt := customPrompt
+
+	// Setup: create context with custom system prompt
+	ctx := port.WithCustomSystemPrompt(
+		context.Background(),
+		port.CustomSystemPromptInfo{
+			SessionID: "test-session-123",
+			Prompt:    customPrompt,
+		},
+	)
+
+	// Execute: get system prompt
+	actualPrompt := adapter.getSystemPrompt(ctx)
+
+	// Assert: should return custom prompt, not base prompt
+	if actualPrompt != expectedPrompt {
+		t.Errorf("Expected custom prompt to take precedence.\nWant: %q\nGot:  %q", expectedPrompt, actualPrompt)
+	}
+
+	// Assert: should NOT be the base prompt
+	basePrompt := adapter.buildBasePromptWithSkills()
+	if actualPrompt == basePrompt {
+		t.Error("Custom prompt should take precedence over base prompt, but got base prompt instead")
+	}
+}
+
+// TestGetSystemPrompt_CustomPromptTakesPrecedenceOverPlanMode verifies that
+// when BOTH custom system prompt AND plan mode are present in the context,
+// the custom system prompt takes precedence.
+//
+// This test will FAIL until getSystemPrompt() is updated to prioritize custom
+// prompts over plan mode prompts.
+func TestGetSystemPrompt_CustomPromptTakesPrecedenceOverPlanMode(t *testing.T) {
+	// Setup: create adapter
+	adapter := &AnthropicAdapter{
+		model:        "test-model",
+		skillManager: nil,
+	}
+
+	// Expected prompts
+	customPrompt := "You are a debugging specialist. Analyze stack traces and find root causes."
+	planPath := ".agent/plans/session-456.md"
+
+	// Setup: create context with BOTH custom prompt AND plan mode
+	ctx := context.Background()
+	ctx = port.WithCustomSystemPrompt(ctx, port.CustomSystemPromptInfo{
+		SessionID: "test-session-456",
+		Prompt:    customPrompt,
+	})
+	ctx = port.WithPlanMode(ctx, port.PlanModeInfo{
+		Enabled:   true,
+		SessionID: "test-session-456",
+		PlanPath:  planPath,
+	})
+
+	// Execute: get system prompt
+	actualPrompt := adapter.getSystemPrompt(ctx)
+
+	// Assert: should return custom prompt, not plan mode prompt
+	if actualPrompt != customPrompt {
+		t.Errorf(
+			"Expected custom prompt to take precedence over plan mode.\nWant: %q\nGot:  %q",
+			customPrompt,
+			actualPrompt,
+		)
+	}
+
+	// Assert: should NOT contain plan mode instructions
+	if containsPlanModeInstructions(actualPrompt) {
+		t.Error("Custom prompt should take precedence over plan mode, but got plan mode instructions")
+	}
+
+	// Assert: should NOT contain the plan path
+	if containsString(actualPrompt, planPath) {
+		t.Errorf("Custom prompt should not contain plan path %q, but it does", planPath)
+	}
+}
+
+// TestGetSystemPrompt_EmptyCustomPromptFallsBackToBasePrompt verifies that
+// when a custom system prompt is present in context but has an empty Prompt field,
+// the system falls back to the base prompt behavior.
+//
+// This test will FAIL until getSystemPrompt() is updated to validate that the
+// custom prompt is non-empty before using it.
+func TestGetSystemPrompt_EmptyCustomPromptFallsBackToBasePrompt(t *testing.T) {
+	// Setup: create adapter
+	adapter := &AnthropicAdapter{
+		model:        "test-model",
+		skillManager: nil,
+	}
+
+	// Setup: create context with empty custom prompt
+	ctx := port.WithCustomSystemPrompt(
+		context.Background(),
+		port.CustomSystemPromptInfo{
+			SessionID: "test-session-789",
+			Prompt:    "", // Empty prompt should fall back to base
+		},
+	)
+
+	// Execute: get system prompt
+	actualPrompt := adapter.getSystemPrompt(ctx)
+
+	// Expected: base prompt
+	expectedPrompt := adapter.buildBasePromptWithSkills()
+
+	// Assert: should return base prompt when custom prompt is empty
+	if actualPrompt != expectedPrompt {
+		t.Errorf("Expected base prompt when custom prompt is empty.\nWant: %q\nGot:  %q", expectedPrompt, actualPrompt)
+	}
+}
+
+// TestGetSystemPrompt_NoCustomPromptWithPlanModeReturnsPlanPrompt verifies that
+// when there is NO custom prompt in context but plan mode IS enabled, the plan
+// mode prompt is returned (existing behavior should continue to work).
+//
+// This test verifies backward compatibility - plan mode should still work when
+// no custom prompt is present.
+func TestGetSystemPrompt_NoCustomPromptWithPlanModeReturnsPlanPrompt(t *testing.T) {
+	// Setup: create adapter
+	adapter := &AnthropicAdapter{
+		model:        "test-model",
+		skillManager: nil,
+	}
+
+	planPath := ".agent/plans/session-abc.md"
+
+	// Setup: create context with plan mode but NO custom prompt
+	ctx := port.WithPlanMode(
+		context.Background(),
+		port.PlanModeInfo{
+			Enabled:   true,
+			SessionID: "test-session-abc",
+			PlanPath:  planPath,
+		},
+	)
+
+	// Execute: get system prompt
+	actualPrompt := adapter.getSystemPrompt(ctx)
+
+	// Assert: should contain plan mode instructions
+	if !containsPlanModeInstructions(actualPrompt) {
+		t.Error("Expected plan mode prompt when plan mode is enabled and no custom prompt exists")
+	}
+
+	// Assert: should contain the plan path
+	if !containsString(actualPrompt, planPath) {
+		t.Errorf("Expected plan mode prompt to contain plan path %q, but it doesn't", planPath)
+	}
+
+	// Assert: should NOT be the base prompt
+	basePrompt := adapter.buildBasePromptWithSkills()
+	if actualPrompt == basePrompt {
+		t.Error("Expected plan mode prompt, but got base prompt instead")
+	}
+}
+
+// TestGetSystemPrompt_NoCustomPromptNoPlanModeReturnsBasePrompt verifies that
+// when there is NO custom prompt and NO plan mode in context, the base prompt
+// is returned (existing behavior should continue to work).
+//
+// This test verifies backward compatibility - the default behavior should still work.
+func TestGetSystemPrompt_NoCustomPromptNoPlanModeReturnsBasePrompt(t *testing.T) {
+	// Setup: create adapter
+	adapter := &AnthropicAdapter{
+		model:        "test-model",
+		skillManager: nil,
+	}
+
+	// Setup: create plain context with no custom prompt or plan mode
+	ctx := context.Background()
+
+	// Execute: get system prompt
+	actualPrompt := adapter.getSystemPrompt(ctx)
+
+	// Expected: base prompt
+	expectedPrompt := adapter.buildBasePromptWithSkills()
+
+	// Assert: should return base prompt
+	if actualPrompt != expectedPrompt {
+		t.Errorf(
+			"Expected base prompt when no custom prompt or plan mode exists.\nWant: %q\nGot:  %q",
+			expectedPrompt,
+			actualPrompt,
+		)
+	}
+
+	// Assert: should NOT contain plan mode instructions
+	if containsPlanModeInstructions(actualPrompt) {
+		t.Error("Expected base prompt, but got plan mode instructions")
+	}
+}
+
+// TestGetSystemPrompt_CustomPromptWithWhitespaceIsNotEmpty verifies that
+// a custom prompt containing only whitespace is still considered valid and
+// takes precedence over other prompts.
+//
+// This is an edge case test to ensure whitespace-only prompts are treated
+// as valid (even if unusual) rather than falling back to base prompt.
+func TestGetSystemPrompt_CustomPromptWithWhitespaceIsNotEmpty(t *testing.T) {
+	// Setup: create adapter
+	adapter := &AnthropicAdapter{
+		model:        "test-model",
+		skillManager: nil,
+	}
+
+	// Custom prompt with only whitespace
+	whitespacePrompt := "   \n\t  \n   "
+
+	// Setup: create context with whitespace-only custom prompt
+	ctx := port.WithCustomSystemPrompt(
+		context.Background(),
+		port.CustomSystemPromptInfo{
+			SessionID: "test-session-whitespace",
+			Prompt:    whitespacePrompt,
+		},
+	)
+
+	// Execute: get system prompt
+	actualPrompt := adapter.getSystemPrompt(ctx)
+
+	// Assert: should return whitespace prompt (even though unusual)
+	// The implementation should check for empty string, not trimmed empty
+	if actualPrompt != whitespacePrompt {
+		t.Errorf("Expected whitespace prompt to be used.\nWant: %q\nGot:  %q", whitespacePrompt, actualPrompt)
+	}
+}
+
+// TestGetSystemPrompt_CustomPromptSessionIDNotValidated verifies that
+// the session ID in CustomSystemPromptInfo is informational only and
+// doesn't affect whether the custom prompt is used.
+//
+// The getSystemPrompt() method should use the custom prompt if present,
+// regardless of the session ID value.
+func TestGetSystemPrompt_CustomPromptSessionIDNotValidated(t *testing.T) {
+	// Setup: create adapter
+	adapter := &AnthropicAdapter{
+		model:        "test-model",
+		skillManager: nil,
+	}
+
+	customPrompt := "You are a refactoring specialist."
+
+	tests := []struct {
+		name      string
+		sessionID string
+	}{
+		{
+			name:      "empty session ID",
+			sessionID: "",
+		},
+		{
+			name:      "mismatched session ID",
+			sessionID: "different-session-id",
+		},
+		{
+			name:      "valid session ID",
+			sessionID: "test-session-123",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup: create context with custom prompt and varying session IDs
+			ctx := port.WithCustomSystemPrompt(
+				context.Background(),
+				port.CustomSystemPromptInfo{
+					SessionID: tt.sessionID,
+					Prompt:    customPrompt,
+				},
+			)
+
+			// Execute: get system prompt
+			actualPrompt := adapter.getSystemPrompt(ctx)
+
+			// Assert: should return custom prompt regardless of session ID
+			if actualPrompt != customPrompt {
+				t.Errorf("Expected custom prompt to be used with session ID %q.\nWant: %q\nGot:  %q",
+					tt.sessionID, customPrompt, actualPrompt)
+			}
+		})
+	}
+}
+
+// TestGetSystemPrompt_MultipleCustomPromptsInSequence verifies that
+// different custom prompts can be used in different calls with different contexts.
+//
+// This ensures the implementation doesn't cache or persist custom prompts
+// inappropriately.
+func TestGetSystemPrompt_MultipleCustomPromptsInSequence(t *testing.T) {
+	// Setup: create adapter
+	adapter := &AnthropicAdapter{
+		model:        "test-model",
+		skillManager: nil,
+	}
+
+	prompt1 := "First custom prompt for session 1"
+	prompt2 := "Second custom prompt for session 2"
+
+	// Execute: call with first custom prompt
+	ctx1 := port.WithCustomSystemPrompt(
+		context.Background(),
+		port.CustomSystemPromptInfo{
+			SessionID: "session-1",
+			Prompt:    prompt1,
+		},
+	)
+	actualPrompt1 := adapter.getSystemPrompt(ctx1)
+
+	// Execute: call with second custom prompt
+	ctx2 := port.WithCustomSystemPrompt(
+		context.Background(),
+		port.CustomSystemPromptInfo{
+			SessionID: "session-2",
+			Prompt:    prompt2,
+		},
+	)
+	actualPrompt2 := adapter.getSystemPrompt(ctx2)
+
+	// Execute: call with no custom prompt
+	ctx3 := context.Background()
+	actualPrompt3 := adapter.getSystemPrompt(ctx3)
+
+	// Assert: each call returns the appropriate prompt
+	if actualPrompt1 != prompt1 {
+		t.Errorf("First call: expected %q, got %q", prompt1, actualPrompt1)
+	}
+	if actualPrompt2 != prompt2 {
+		t.Errorf("Second call: expected %q, got %q", prompt2, actualPrompt2)
+	}
+
+	basePrompt := adapter.buildBasePromptWithSkills()
+	if actualPrompt3 != basePrompt {
+		t.Errorf("Third call: expected base prompt %q, got %q", basePrompt, actualPrompt3)
+	}
+}
+
+// ============================================================================
+// Helper Functions for Custom System Prompt Tests
+// ============================================================================
+
+// containsPlanModeInstructions checks if a prompt string contains
+// characteristic plan mode instructions.
+func containsPlanModeInstructions(prompt string) bool {
+	// Check for key phrases that appear in plan mode prompts
+	planModeIndicators := []string{
+		"PLAN MODE",
+		"implementation plan",
+		"write your plan to",
+		"edit_file tool to write your plan",
+	}
+
+	for _, indicator := range planModeIndicators {
+		if containsString(prompt, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsString checks if a string contains a substring (case-sensitive).
+func containsString(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || indexOfString(s, substr) >= 0)
+}
+
+// indexOfString returns the index of the first occurrence of substr in s,
+// or -1 if substr is not present in s.
+func indexOfString(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
 }
