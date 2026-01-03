@@ -69,12 +69,13 @@ func TestDefaultInvestigationConfig_HasDefaultAllowedTools(t *testing.T) {
 		t.Skip("DefaultInvestigationConfig() returned nil")
 	}
 	tools := cfg.AllowedTools()
-	if len(tools) == 0 {
-		t.Error("AllowedTools() should have default tools")
+	if len(tools) != 4 {
+		t.Errorf("AllowedTools() should have 4 default tools, got %d", len(tools))
 	}
-	// Should include at least bash and read_file for basic investigation
+	// Should include bash, read_file, list_files, and batch_tool for investigation
 	hasBash := false
 	hasReadFile := false
+	hasBatchTool := false
 	for _, tool := range tools {
 		if tool == "bash" {
 			hasBash = true
@@ -82,12 +83,18 @@ func TestDefaultInvestigationConfig_HasDefaultAllowedTools(t *testing.T) {
 		if tool == "read_file" {
 			hasReadFile = true
 		}
+		if tool == "batch_tool" {
+			hasBatchTool = true
+		}
 	}
 	if !hasBash {
 		t.Error("AllowedTools() should include 'bash'")
 	}
 	if !hasReadFile {
 		t.Error("AllowedTools() should include 'read_file'")
+	}
+	if !hasBatchTool {
+		t.Error("AllowedTools() should include 'batch_tool'")
 	}
 }
 

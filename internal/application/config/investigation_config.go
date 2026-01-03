@@ -56,7 +56,7 @@ func NewInvestigationConfig() *InvestigationConfig {
 //   - maxActions: 20 (prevents runaway investigations)
 //   - maxDuration: 15 minutes (reasonable timeout)
 //   - maxConcurrent: 5 (balances throughput and resource usage)
-//   - allowedTools: bash, read_file, list_files (safe investigation tools)
+//   - allowedTools: bash, read_file, list_files, batch_tool (safe investigation tools)
 //   - blockedCommands: common destructive patterns (rm -rf, dd, mkfs, etc.)
 //   - escalateOnConfidenceBelow: 0.5 (escalate when uncertain)
 //   - escalateOnMultipleErrors: 3 (escalate after repeated failures)
@@ -65,7 +65,7 @@ func DefaultInvestigationConfig() *InvestigationConfig {
 		maxActions:    20,
 		maxDuration:   15 * time.Minute,
 		maxConcurrent: 5,
-		allowedTools:  []string{"bash", "read_file", "list_files"},
+		allowedTools:  []string{"bash", "read_file", "list_files", "batch_tool"},
 		blockedCommands: []string{
 			"rm -rf",
 			"dd if=",
