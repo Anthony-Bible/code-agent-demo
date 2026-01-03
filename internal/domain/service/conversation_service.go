@@ -21,13 +21,15 @@ var (
 // It orchestrates the flow of messages between users and AI, processes tool executions,
 // maintains conversation state, and coordinates with the AI provider.
 type ConversationService struct {
-	aiProvider     port.AIProvider
-	toolExecutor   port.ToolExecutor
-	conversations  map[string]*entity.Conversation
-	currentSession string
-	processing     map[string]bool
-	sessionModes   map[string]bool
-	sessionModesMu sync.RWMutex // Protects sessionModes map for concurrent access
+	aiProvider             port.AIProvider
+	toolExecutor           port.ToolExecutor
+	conversations          map[string]*entity.Conversation
+	currentSession         string
+	processing             map[string]bool
+	sessionModes           map[string]bool
+	sessionModesMu         sync.RWMutex // Protects sessionModes map for concurrent access
+	sessionSystemPrompts   map[string]string
+	sessionSystemPromptsMu sync.RWMutex // Protects sessionSystemPrompts map for concurrent access
 }
 
 // NewConversationService creates a new instance of ConversationService.
@@ -41,11 +43,12 @@ func NewConversationService(aiProvider port.AIProvider, toolExecutor port.ToolEx
 	}
 
 	return &ConversationService{
-		aiProvider:    aiProvider,
-		toolExecutor:  toolExecutor,
-		conversations: make(map[string]*entity.Conversation),
-		processing:    make(map[string]bool),
-		sessionModes:  make(map[string]bool),
+		aiProvider:           aiProvider,
+		toolExecutor:         toolExecutor,
+		conversations:        make(map[string]*entity.Conversation),
+		processing:           make(map[string]bool),
+		sessionModes:         make(map[string]bool),
+		sessionSystemPrompts: make(map[string]string),
 	}, nil
 }
 
@@ -201,6 +204,14 @@ func (cs *ConversationService) ProcessAssistantResponse(
 		ctx = port.WithPlanMode(ctx, planInfo)
 	}
 
+	// Add custom system prompt to context if set
+	if customPrompt, ok := cs.GetCustomSystemPrompt(sessionID); ok {
+		ctx = port.WithCustomSystemPrompt(ctx, port.CustomSystemPromptInfo{
+			Prompt:    customPrompt,
+			SessionID: sessionID,
+		})
+	}
+
 	// Send to AI provider
 	response, toolCalls, err := cs.aiProvider.SendMessage(ctx, messageParams, toolParams)
 	if err != nil {
@@ -307,6 +318,11 @@ func (cs *ConversationService) EndConversation(ctx context.Context, sessionID st
 	delete(cs.sessionModes, sessionID)
 	cs.sessionModesMu.Unlock()
 
+	// Remove custom system prompt
+	cs.sessionSystemPromptsMu.Lock()
+	delete(cs.sessionSystemPrompts, sessionID)
+	cs.sessionSystemPromptsMu.Unlock()
+
 	return nil
 }
 
@@ -390,4 +406,30 @@ func (cs *ConversationService) IsPlanMode(sessionID string) (bool, error) {
 	cs.sessionModesMu.RLock()
 	defer cs.sessionModesMu.RUnlock()
 	return cs.sessionModes[sessionID], nil
+}
+
+// SetCustomSystemPrompt sets a custom system prompt for a session.
+// This allows overriding the default AI system prompt with session-specific instructions.
+// The custom prompt is included in the context when calling the AI provider.
+// The operation is thread-safe.
+func (cs *ConversationService) SetCustomSystemPrompt(sessionID, prompt string) error {
+	_, exists := cs.conversations[sessionID]
+	if !exists {
+		return ErrConversationNotFound
+	}
+	cs.sessionSystemPromptsMu.Lock()
+	cs.sessionSystemPrompts[sessionID] = prompt
+	cs.sessionSystemPromptsMu.Unlock()
+	return nil
+}
+
+// GetCustomSystemPrompt retrieves the custom system prompt for a session.
+// Returns the prompt and true if set, or empty string and false if not set.
+// Returns false for non-existent sessions (graceful handling).
+// The operation is thread-safe for concurrent reads.
+func (cs *ConversationService) GetCustomSystemPrompt(sessionID string) (string, bool) {
+	cs.sessionSystemPromptsMu.RLock()
+	defer cs.sessionSystemPromptsMu.RUnlock()
+	prompt, ok := cs.sessionSystemPrompts[sessionID]
+	return prompt, ok
 }

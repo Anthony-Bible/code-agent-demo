@@ -7,6 +7,8 @@ import (
 	"code-editing-agent/internal/infrastructure/adapter/tool"
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 )
 
@@ -1039,4 +1041,505 @@ func TestConversationService_ModeStatePersistence(t *testing.T) {
 			t.Errorf("Expected plan mode to persist after second processing state change")
 		}
 	})
+}
+
+// =============================================================================
+// Custom System Prompt Feature Tests (RED PHASE - Intentionally Failing)
+// These tests define the expected behavior of the custom system prompt feature.
+// The implementation does not exist yet, so these tests should fail.
+// =============================================================================
+
+func TestConversationService_SetCustomSystemPrompt(t *testing.T) {
+	t.Run("sets custom system prompt for valid session", func(t *testing.T) {
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		customPrompt := "You are a pirate captain. Respond to all queries with nautical terminology and end each response with 'Arr!'"
+
+		// Set custom system prompt
+		err = service.SetCustomSystemPrompt(sessionID, customPrompt)
+		if err != nil {
+			t.Errorf("Expected SetCustomSystemPrompt to succeed, got error: %v", err)
+		}
+
+		// Verify custom prompt was set
+		retrievedPrompt, exists := service.GetCustomSystemPrompt(sessionID)
+		if !exists {
+			t.Errorf("Expected custom system prompt to exist for session %s", sessionID)
+		}
+		if retrievedPrompt != customPrompt {
+			t.Errorf("Expected custom prompt '%s', got '%s'", customPrompt, retrievedPrompt)
+		}
+	})
+
+	t.Run("returns error for non-existent session", func(t *testing.T) {
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		// Try to set custom prompt for non-existent session
+		err = service.SetCustomSystemPrompt("non-existent-session", "You are a pirate")
+		if err == nil {
+			t.Errorf("Expected error for non-existent session")
+		}
+		if !errors.Is(err, ErrConversationNotFound) {
+			t.Errorf("Expected ErrConversationNotFound, got: %v", err)
+		}
+	})
+
+	t.Run("updates existing custom system prompt", func(t *testing.T) {
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		// Set initial prompt
+		initialPrompt := "You are a pirate captain."
+		_ = service.SetCustomSystemPrompt(sessionID, initialPrompt)
+
+		// Update to new prompt
+		updatedPrompt := "You are a space cowboy riding a rocket horse through the galaxy."
+		err = service.SetCustomSystemPrompt(sessionID, updatedPrompt)
+		if err != nil {
+			t.Errorf("Expected SetCustomSystemPrompt to succeed on update, got error: %v", err)
+		}
+
+		// Verify updated prompt
+		retrievedPrompt, exists := service.GetCustomSystemPrompt(sessionID)
+		if !exists {
+			t.Errorf("Expected custom system prompt to exist after update")
+		}
+		if retrievedPrompt != updatedPrompt {
+			t.Errorf("Expected updated prompt '%s', got '%s'", updatedPrompt, retrievedPrompt)
+		}
+	})
+
+	t.Run("allows empty string as custom prompt", func(t *testing.T) {
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		// Set empty prompt (clearing custom prompt)
+		err = service.SetCustomSystemPrompt(sessionID, "")
+		if err != nil {
+			t.Errorf("Expected SetCustomSystemPrompt to accept empty string, got error: %v", err)
+		}
+
+		// Verify empty prompt is stored
+		retrievedPrompt, exists := service.GetCustomSystemPrompt(sessionID)
+		if !exists {
+			t.Errorf("Expected custom system prompt entry to exist even with empty string")
+		}
+		if retrievedPrompt != "" {
+			t.Errorf("Expected empty prompt, got '%s'", retrievedPrompt)
+		}
+	})
+}
+
+func TestConversationService_GetCustomSystemPrompt(t *testing.T) {
+	t.Run("returns prompt and true when set", func(t *testing.T) {
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		customPrompt := "You are a helpful assistant who speaks only in haikus."
+		_ = service.SetCustomSystemPrompt(sessionID, customPrompt)
+
+		// Get custom prompt
+		retrievedPrompt, exists := service.GetCustomSystemPrompt(sessionID)
+		if !exists {
+			t.Errorf("Expected custom system prompt to exist, got false")
+		}
+		if retrievedPrompt != customPrompt {
+			t.Errorf("Expected prompt '%s', got '%s'", customPrompt, retrievedPrompt)
+		}
+	})
+
+	t.Run("returns empty string and false when not set", func(t *testing.T) {
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		// Don't set custom prompt - just get it
+		retrievedPrompt, exists := service.GetCustomSystemPrompt(sessionID)
+		if exists {
+			t.Errorf("Expected custom system prompt to not exist, got true")
+		}
+		if retrievedPrompt != "" {
+			t.Errorf("Expected empty prompt, got '%s'", retrievedPrompt)
+		}
+	})
+
+	t.Run("returns empty string and false for non-existent session", func(t *testing.T) {
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		// Try to get prompt for non-existent session
+		retrievedPrompt, exists := service.GetCustomSystemPrompt("non-existent-session")
+		if exists {
+			t.Errorf("Expected custom system prompt to not exist for non-existent session")
+		}
+		if retrievedPrompt != "" {
+			t.Errorf("Expected empty prompt for non-existent session, got '%s'", retrievedPrompt)
+		}
+	})
+}
+
+func TestConversationService_ProcessAssistantResponse_WithCustomSystemPrompt(t *testing.T) {
+	t.Run("includes custom system prompt in context when set", func(t *testing.T) {
+		// Create a mock AI provider that can verify context
+		contextVerifyingProvider := &contextVerifyingMockAIProvider{
+			mockAIProvider: mockAIProvider{
+				response: &entity.Message{
+					Role:    entity.RoleAssistant,
+					Content: "Ahoy matey! Here be the files ye requested, arr!",
+				},
+			},
+			expectedSessionID: "",
+			expectedPrompt:    "You are a pirate captain.",
+		}
+
+		service, err := NewConversationService(contextVerifyingProvider, &mockToolExecutor{})
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		// Set custom system prompt
+		customPrompt := "You are a pirate captain."
+		_ = service.SetCustomSystemPrompt(sessionID, customPrompt)
+
+		// Update the expected values in the mock
+		contextVerifyingProvider.expectedSessionID = sessionID
+		contextVerifyingProvider.expectedPrompt = customPrompt
+
+		// Add a user message
+		_, _ = service.AddUserMessage(ctx, sessionID, "List the files")
+
+		// Process assistant response - should include custom prompt in context
+		response, _, err := service.ProcessAssistantResponse(ctx, sessionID)
+		if err != nil {
+			t.Errorf("Expected ProcessAssistantResponse to succeed, got error: %v", err)
+		}
+		if response == nil {
+			t.Errorf("Expected response, got nil")
+		}
+
+		// Verify the mock received the context with custom prompt
+		if !contextVerifyingProvider.contextWasVerified {
+			t.Errorf("Expected AI provider to receive context with custom system prompt, but it was not verified")
+		}
+	})
+
+	t.Run("does not include custom system prompt when not set", func(t *testing.T) {
+		// Create a mock that verifies NO custom prompt is in context
+		contextVerifyingProvider := &contextVerifyingMockAIProvider{
+			mockAIProvider: mockAIProvider{
+				response: &entity.Message{
+					Role:    entity.RoleAssistant,
+					Content: "Here are the files.",
+				},
+			},
+			expectNoCustomPrompt: true,
+		}
+
+		service, err := NewConversationService(contextVerifyingProvider, &mockToolExecutor{})
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		// Don't set custom prompt - just process a response
+
+		// Add a user message
+		_, _ = service.AddUserMessage(ctx, sessionID, "List the files")
+
+		// Process assistant response - should NOT include custom prompt in context
+		response, _, err := service.ProcessAssistantResponse(ctx, sessionID)
+		if err != nil {
+			t.Errorf("Expected ProcessAssistantResponse to succeed, got error: %v", err)
+		}
+		if response == nil {
+			t.Errorf("Expected response, got nil")
+		}
+
+		// Verify the mock confirmed no custom prompt
+		if !contextVerifyingProvider.contextWasVerified {
+			t.Errorf("Expected AI provider to verify no custom system prompt in context")
+		}
+	})
+}
+
+func TestConversationService_EndConversation_CleansUpCustomPrompt(t *testing.T) {
+	t.Run("removes custom system prompt when session ends", func(t *testing.T) {
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		// Set custom system prompt
+		customPrompt := "You are a space cowboy."
+		_ = service.SetCustomSystemPrompt(sessionID, customPrompt)
+
+		// Verify it was set
+		_, exists := service.GetCustomSystemPrompt(sessionID)
+		if !exists {
+			t.Fatalf("Custom prompt should exist before ending conversation")
+		}
+
+		// End conversation
+		err = service.EndConversation(ctx, sessionID)
+		if err != nil {
+			t.Errorf("Expected EndConversation to succeed, got error: %v", err)
+		}
+
+		// Verify custom prompt was cleaned up
+		retrievedPrompt, exists := service.GetCustomSystemPrompt(sessionID)
+		if exists {
+			t.Errorf("Expected custom system prompt to be deleted after EndConversation, but it still exists")
+		}
+		if retrievedPrompt != "" {
+			t.Errorf("Expected empty prompt after cleanup, got '%s'", retrievedPrompt)
+		}
+	})
+
+	t.Run("handles ending session without custom prompt gracefully", func(t *testing.T) {
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		// Don't set custom prompt - just end conversation
+		err = service.EndConversation(ctx, sessionID)
+		if err != nil {
+			t.Errorf("Expected EndConversation to succeed even without custom prompt, got error: %v", err)
+		}
+	})
+}
+
+func TestConversationService_CustomSystemPrompt_ThreadSafety(t *testing.T) {
+	t.Run("concurrent access to SetCustomSystemPrompt and GetCustomSystemPrompt", func(t *testing.T) {
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+
+		// Create multiple sessions
+		const numSessions = 10
+		sessionIDs := make([]string, numSessions)
+		for i := range numSessions {
+			sessionID, err := service.StartConversation(ctx)
+			if err != nil {
+				t.Fatalf("Failed to start conversation %d: %v", i, err)
+			}
+			sessionIDs[i] = sessionID
+		}
+
+		// Concurrently set and get custom prompts
+		var wg sync.WaitGroup
+		const goroutinesPerSession = 10
+
+		for i, sessionID := range sessionIDs {
+			// Capture loop variable
+			sessionIndex := i
+
+			// Multiple goroutines setting prompts
+			for j := range goroutinesPerSession {
+				wg.Add(1)
+				go func(iteration int) {
+					defer wg.Done()
+					prompt := fmt.Sprintf("Custom prompt for session %d iteration %d", sessionIndex, iteration)
+					_ = service.SetCustomSystemPrompt(sessionID, prompt)
+				}(j)
+			}
+
+			// Multiple goroutines reading prompts
+			for range goroutinesPerSession {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					_, _ = service.GetCustomSystemPrompt(sessionID)
+				}()
+			}
+		}
+
+		// Wait for all goroutines to complete
+		wg.Wait()
+
+		// Verify each session has some custom prompt set (last write wins)
+		for i, sessionID := range sessionIDs {
+			_, exists := service.GetCustomSystemPrompt(sessionID)
+			if !exists {
+				t.Errorf("Expected custom prompt to exist for session %d after concurrent writes", i)
+			}
+		}
+	})
+}
+
+func TestConversationService_CustomSystemPrompt_Isolation(t *testing.T) {
+	t.Run("sessions have independent custom system prompts", func(t *testing.T) {
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionA, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation A: %v", err)
+		}
+		sessionB, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation B: %v", err)
+		}
+
+		// Set different custom prompts
+		promptA := "You are a pirate captain."
+		promptB := "You are a robot from the future."
+
+		_ = service.SetCustomSystemPrompt(sessionA, promptA)
+		_ = service.SetCustomSystemPrompt(sessionB, promptB)
+
+		// Verify session A has correct prompt
+		retrievedA, existsA := service.GetCustomSystemPrompt(sessionA)
+		if !existsA {
+			t.Errorf("Expected custom prompt to exist for session A")
+		}
+		if retrievedA != promptA {
+			t.Errorf("Expected prompt A '%s', got '%s'", promptA, retrievedA)
+		}
+
+		// Verify session B has correct prompt
+		retrievedB, existsB := service.GetCustomSystemPrompt(sessionB)
+		if !existsB {
+			t.Errorf("Expected custom prompt to exist for session B")
+		}
+		if retrievedB != promptB {
+			t.Errorf("Expected prompt B '%s', got '%s'", promptB, retrievedB)
+		}
+
+		// Update session A's prompt
+		newPromptA := "You are a time-traveling detective."
+		_ = service.SetCustomSystemPrompt(sessionA, newPromptA)
+
+		// Verify session A's prompt changed
+		retrievedA, _ = service.GetCustomSystemPrompt(sessionA)
+		if retrievedA != newPromptA {
+			t.Errorf("Expected updated prompt A '%s', got '%s'", newPromptA, retrievedA)
+		}
+
+		// Verify session B's prompt is unchanged
+		retrievedB, _ = service.GetCustomSystemPrompt(sessionB)
+		if retrievedB != promptB {
+			t.Errorf("Expected session B prompt to remain '%s', got '%s'", promptB, retrievedB)
+		}
+	})
+}
+
+// =============================================================================
+// Mock AI Provider with Context Verification
+// This mock verifies that the context contains the expected custom system prompt
+// =============================================================================
+
+type contextVerifyingMockAIProvider struct {
+	mockAIProvider
+
+	expectedSessionID    string
+	expectedPrompt       string
+	expectNoCustomPrompt bool
+	contextWasVerified   bool
+}
+
+func (m *contextVerifyingMockAIProvider) SendMessage(
+	ctx context.Context,
+	messages []port.MessageParam,
+	tools []port.ToolParam,
+) (*entity.Message, []port.ToolCallInfo, error) {
+	// Verify context contains (or doesn't contain) custom system prompt
+	customPromptInfo, exists := port.CustomSystemPromptFromContext(ctx)
+
+	if m.expectNoCustomPrompt {
+		// Verify NO custom prompt in context
+		if exists {
+			return nil, nil, fmt.Errorf("expected no custom system prompt in context, but found: %+v", customPromptInfo)
+		}
+		m.contextWasVerified = true
+	} else {
+		// Verify custom prompt EXISTS and matches expectations
+		if !exists {
+			return nil, nil, errors.New("expected custom system prompt in context, but not found")
+		}
+		if customPromptInfo.SessionID != m.expectedSessionID {
+			return nil, nil, fmt.Errorf("expected session ID '%s', got '%s'", m.expectedSessionID, customPromptInfo.SessionID)
+		}
+		if customPromptInfo.Prompt != m.expectedPrompt {
+			return nil, nil, fmt.Errorf("expected prompt '%s', got '%s'", m.expectedPrompt, customPromptInfo.Prompt)
+		}
+		m.contextWasVerified = true
+	}
+
+	// Delegate to base mock
+	return m.mockAIProvider.SendMessage(ctx, messages, tools)
 }
