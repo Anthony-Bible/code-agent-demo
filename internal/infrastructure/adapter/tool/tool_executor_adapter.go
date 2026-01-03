@@ -664,9 +664,14 @@ var dangerousPatterns = []dangerousPattern{
 }
 
 // isDangerousCommand checks if a command matches any dangerous patterns.
+// Special case: writing to /dev/null is allowed.
 func isDangerousCommand(cmd string) (bool, string) {
 	for _, dp := range dangerousPatterns {
 		if dp.pattern.MatchString(cmd) {
+			// Allow writes to /dev/null (common pattern for suppressing output)
+			if dp.reason == "write to device" && strings.Contains(cmd, "/dev/null") {
+				continue
+			}
 			return true, dp.reason
 		}
 	}

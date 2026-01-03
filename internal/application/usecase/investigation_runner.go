@@ -542,6 +542,15 @@ func (r *InvestigationRunner) runInvestigationLoop(rc *runContext) (*Investigati
 			if result := r.checkConfidenceEscalation(rc, msg); result != nil {
 				return result, nil
 			}
+			// AI responded without tool calls - log the message
+			msgContent := ""
+			if msg != nil {
+				msgContent = msg.Content
+				if len(msgContent) > 200 {
+					msgContent = msgContent[:200] + "..."
+				}
+			}
+			fmt.Fprintf(os.Stderr, "[InvestigationRunner] AI responded without tool calls. Message: %s\n", msgContent)
 			break
 		}
 
@@ -555,9 +564,19 @@ func (r *InvestigationRunner) runInvestigationLoop(rc *runContext) (*Investigati
 		}
 
 		if rc.actionsTaken >= rc.maxActions {
+			fmt.Fprintf(
+				os.Stderr,
+				"[InvestigationRunner] Max actions limit reached (%d/%d). Investigation stopping without completion.\n",
+				rc.actionsTaken,
+				rc.maxActions,
+			)
 			break
 		}
 	}
+	fmt.Fprintf(
+		os.Stderr,
+		"[InvestigationRunner] Investigation loop ended naturally (no complete_investigation call). Using default completedResult.\n",
+	)
 	return rc.completedResult(), nil
 }
 

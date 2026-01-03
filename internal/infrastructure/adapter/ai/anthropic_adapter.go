@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -402,6 +403,15 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 			toolName := content.Name
 			inputMap := make(map[string]interface{})
 
+			// Log tool_use block for debugging
+			fmt.Fprintf(
+				os.Stderr,
+				"[AnthropicAdapter] Found tool_use: ID=%s, Name=%s, InputLen=%d\n",
+				toolID,
+				toolName,
+				len(content.Input),
+			)
+
 			// Convert Input JSON to map
 			if len(content.Input) > 0 {
 				if err := json.Unmarshal(content.Input, &inputMap); err == nil {
@@ -418,7 +428,17 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 						ToolName: toolName,
 						Input:    inputMap,
 					})
+					fmt.Fprintf(os.Stderr, "[AnthropicAdapter] Successfully parsed tool_use\n")
+				} else {
+					fmt.Fprintf(
+						os.Stderr,
+						"[AnthropicAdapter] Failed to unmarshal tool input: %v (raw: %s)\n",
+						err,
+						string(content.Input),
+					)
 				}
+			} else {
+				fmt.Fprintf(os.Stderr, "[AnthropicAdapter] tool_use has empty Input - skipping\n")
 			}
 		case "thinking":
 			// Thinking blocks are optional
@@ -428,7 +448,21 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 	content := contentBuilder.String()
 	if content == "" {
 		content = string(response.StopReason)
+		fmt.Fprintf(
+			os.Stderr,
+			"[AnthropicAdapter] No text content, using StopReason: %s\n",
+			response.StopReason,
+		)
 	}
+
+	// Log final parsing result
+	fmt.Fprintf(
+		os.Stderr,
+		"[AnthropicAdapter] Response parsed: content_len=%d, tool_calls=%d, content_blocks=%d\n",
+		len(content),
+		len(toolCalls),
+		len(response.Content),
+	)
 
 	// Create the message
 	msg, err := entity.NewMessage(entity.RoleAssistant, content)
