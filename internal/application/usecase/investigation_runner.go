@@ -28,6 +28,7 @@ type InvestigationRunner struct {
 	toolExecutor   port.ToolExecutor
 	safetyEnforcer SafetyEnforcer
 	promptBuilder  PromptBuilderRegistry
+	skillManager   port.SkillManager
 	store          InvestigationStoreWriter
 	config         AlertInvestigationUseCaseConfig
 }
@@ -39,6 +40,7 @@ type InvestigationRunner struct {
 //   - toolExecutor: Executor for running investigation tools
 //   - safetyEnforcer: Enforcer for safety policies during investigation (optional, can be nil)
 //   - promptBuilder: Registry for building investigation prompts
+//   - skillManager: Manager for discovering and loading skills (optional, can be nil)
 //   - config: Configuration for investigation limits and behavior
 //
 // Panics if required dependencies (convService, toolExecutor, promptBuilder) are nil.
@@ -47,6 +49,7 @@ func NewInvestigationRunner(
 	toolExecutor port.ToolExecutor,
 	safetyEnforcer SafetyEnforcer,
 	promptBuilder PromptBuilderRegistry,
+	skillManager port.SkillManager,
 	config AlertInvestigationUseCaseConfig,
 ) *InvestigationRunner {
 	if convService == nil {
@@ -58,13 +61,14 @@ func NewInvestigationRunner(
 	if promptBuilder == nil {
 		panic("promptBuilder cannot be nil")
 	}
-	// safetyEnforcer is optional and can be nil
+	// safetyEnforcer and skillManager are optional and can be nil
 
 	return &InvestigationRunner{
 		convService:    convService,
 		toolExecutor:   toolExecutor,
 		safetyEnforcer: safetyEnforcer,
 		promptBuilder:  promptBuilder,
+		skillManager:   skillManager,
 		config:         config,
 	}
 }
@@ -76,6 +80,7 @@ func NewInvestigationRunner(
 //   - toolExecutor: Executor for running investigation tools
 //   - safetyEnforcer: Enforcer for safety policies during investigation (optional, can be nil)
 //   - promptBuilder: Registry for building investigation prompts
+//   - skillManager: Manager for discovering and loading skills (optional, can be nil)
 //   - store: Store for persisting investigation state
 //   - config: Configuration for investigation limits and behavior
 //
@@ -85,6 +90,7 @@ func NewInvestigationRunnerWithStore(
 	toolExecutor port.ToolExecutor,
 	safetyEnforcer SafetyEnforcer,
 	promptBuilder PromptBuilderRegistry,
+	skillManager port.SkillManager,
 	store InvestigationStoreWriter,
 	config AlertInvestigationUseCaseConfig,
 ) *InvestigationRunner {
@@ -97,13 +103,14 @@ func NewInvestigationRunnerWithStore(
 	if promptBuilder == nil {
 		panic("promptBuilder cannot be nil")
 	}
-	// safetyEnforcer is optional and can be nil
+	// safetyEnforcer and skillManager are optional and can be nil
 
 	return &InvestigationRunner{
 		convService:    convService,
 		toolExecutor:   toolExecutor,
 		safetyEnforcer: safetyEnforcer,
 		promptBuilder:  promptBuilder,
+		skillManager:   skillManager,
 		store:          store,
 		config:         config,
 	}
@@ -342,8 +349,18 @@ func (r *InvestigationRunner) sendInitialPrompt(rc *runContext) error {
 		return err
 	}
 
+	// Get available skills if skill manager is configured
+	var skills []port.SkillInfo
+	if r.skillManager != nil {
+		result, err := r.skillManager.DiscoverSkills(rc.ctx)
+		if err == nil && result != nil {
+			skills = result.Skills
+		}
+		// Silently ignore skill discovery errors - skills are optional
+	}
+
 	// Build investigation prompt with full context and instructions
-	prompt, err := r.promptBuilder.BuildPromptForAlert(alertView, tools)
+	prompt, err := r.promptBuilder.BuildPromptForAlert(alertView, tools, skills)
 	if err != nil {
 		return err
 	}

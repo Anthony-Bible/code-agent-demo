@@ -203,6 +203,7 @@ type AlertInvestigationUseCase struct {
 	investigationStore    InvestigationStoreWriter        // Persistence for investigations
 	convService           ConversationServiceInterface    // Conversation service for AI interaction
 	toolExecutor          port.ToolExecutor               // Tool executor for running tools
+	skillManager          port.SkillManager               // Skill manager for discovering skills
 	shutdown              bool                            // True after Shutdown is called
 	idCounter             int64                           // Counter for generating unique IDs
 }
@@ -333,6 +334,7 @@ func (uc *AlertInvestigationUseCase) RunInvestigation(
 	convService := uc.convService
 	toolExecutor := uc.toolExecutor
 	promptBuilder := uc.promptBuilderRegistry
+	skillManager := uc.skillManager
 	config := uc.config
 	store := uc.investigationStore
 	uc.mu.RUnlock()
@@ -348,6 +350,7 @@ func (uc *AlertInvestigationUseCase) RunInvestigation(
 		toolExecutor,
 		enforcer,
 		promptBuilder,
+		skillManager,
 		config,
 	)
 	result, err := runner.Run(ctx, alert, invID)
@@ -558,6 +561,13 @@ func (uc *AlertInvestigationUseCase) SetToolExecutor(te port.ToolExecutor) {
 	uc.mu.Lock()
 	defer uc.mu.Unlock()
 	uc.toolExecutor = te
+}
+
+// SetSkillManager configures the skill manager for discovering and loading skills.
+func (uc *AlertInvestigationUseCase) SetSkillManager(sm port.SkillManager) {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
+	uc.skillManager = sm
 }
 
 // IsToolAllowed checks if a tool name is in the allowed list.

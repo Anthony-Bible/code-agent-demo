@@ -166,7 +166,7 @@ func NewContainer(cfg *Config) (*Container, error) {
 
 	// Step 4: Create investigation and alert handling components
 	investigationUseCase, alertSourceManager, webhookAdapter, err := createInvestigationComponents(
-		cfg, convService, toolExecutor,
+		cfg, convService, toolExecutor, skillManager,
 	)
 	if err != nil {
 		return nil, err
@@ -193,6 +193,7 @@ func createInvestigationComponents(
 	cfg *Config,
 	convService *service.ConversationService,
 	toolExecutor port.ToolExecutor,
+	skillManager port.SkillManager,
 ) (*usecase.AlertInvestigationUseCase, port.AlertSourceManager, *webhook.HTTPAdapter, error) {
 	// Configure investigation safety limits
 	invConfig := usecase.AlertInvestigationUseCaseConfig{
@@ -202,6 +203,7 @@ func createInvestigationComponents(
 		AllowedTools: []string{
 			"bash", "read_file", "list_files",
 			"activate_skill", "complete_investigation", "escalate_investigation",
+			"report_investigation",
 		},
 		BlockedCommands: []string{"rm -rf", "dd if=", "mkfs"},
 	}
@@ -210,6 +212,7 @@ func createInvestigationComponents(
 	// Wire core dependencies
 	investigationUseCase.SetConversationService(convService)
 	investigationUseCase.SetToolExecutor(toolExecutor)
+	investigationUseCase.SetSkillManager(skillManager)
 
 	// Wire prompt builder (generic builder for all alert types)
 	promptRegistry := usecase.NewPromptBuilderRegistry()

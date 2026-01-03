@@ -64,7 +64,7 @@ func TestGenericPromptBuilder_BuildPrompt_ValidAlert(t *testing.T) {
 		labels:      map[string]string{"service": "mystery-service"},
 	}
 
-	prompt, err := builder.BuildPrompt(alert, createTestTools())
+	prompt, err := builder.BuildPrompt(alert, createTestTools(), nil)
 	if err != nil {
 		t.Errorf("BuildPrompt() error = %v", err)
 	}
@@ -87,7 +87,7 @@ func TestGenericPromptBuilder_BuildPrompt_ContainsGeneralInstructions(t *testing
 		labels:   map[string]string{},
 	}
 
-	prompt, err := builder.BuildPrompt(alert, createTestTools())
+	prompt, err := builder.BuildPrompt(alert, createTestTools(), nil)
 	if err != nil {
 		t.Fatalf("BuildPrompt() error = %v", err)
 	}
@@ -126,7 +126,7 @@ func TestGenericPromptBuilder_BuildPrompt_IncludesAllLabels(t *testing.T) {
 		},
 	}
 
-	prompt, err := builder.BuildPrompt(alert, createTestTools())
+	prompt, err := builder.BuildPrompt(alert, createTestTools(), nil)
 	if err != nil {
 		t.Fatalf("BuildPrompt() error = %v", err)
 	}
@@ -164,7 +164,7 @@ func TestGenericPromptBuilder_BuildPrompt_ContainsCloudGuidance(t *testing.T) {
 		},
 	}
 
-	prompt, err := builder.BuildPrompt(alert, createTestTools())
+	prompt, err := builder.BuildPrompt(alert, createTestTools(), nil)
 	if err != nil {
 		t.Fatalf("BuildPrompt() error = %v", err)
 	}
@@ -202,7 +202,7 @@ func TestGenericPromptBuilder_BuildPrompt_ContainsAllAlertFields(t *testing.T) {
 		},
 	}
 
-	prompt, err := builder.BuildPrompt(alert, createTestTools())
+	prompt, err := builder.BuildPrompt(alert, createTestTools(), nil)
 	if err != nil {
 		t.Fatalf("BuildPrompt() error = %v", err)
 	}
@@ -245,7 +245,7 @@ func TestGenericPromptBuilder_BuildPrompt_EmptyLabels(t *testing.T) {
 		labels:      map[string]string{},
 	}
 
-	prompt, err := builder.BuildPrompt(alert, createTestTools())
+	prompt, err := builder.BuildPrompt(alert, createTestTools(), nil)
 	if err != nil {
 		t.Fatalf("BuildPrompt() error = %v", err)
 	}
@@ -270,7 +270,7 @@ func TestGenericPromptBuilder_BuildPrompt_NilAlert(t *testing.T) {
 		t.Skip("NewGenericPromptBuilder() returned nil")
 	}
 
-	_, err := builder.BuildPrompt(nil, createTestTools())
+	_, err := builder.BuildPrompt(nil, createTestTools(), nil)
 	if !errors.Is(err, ErrNilAlert) {
 		t.Errorf("BuildPrompt(nil) error = %v, want ErrNilAlert", err)
 	}
@@ -375,7 +375,7 @@ func TestPromptBuilderRegistry_BuildPromptForAlert_UsesGenericBuilder(t *testing
 		labels:   map[string]string{"alertname": "HighCPU"},
 	}
 
-	prompt, err := registry.BuildPromptForAlert(alert, createTestTools())
+	prompt, err := registry.BuildPromptForAlert(alert, createTestTools(), nil)
 	if err != nil {
 		t.Errorf("BuildPromptForAlert() error = %v", err)
 	}
@@ -408,7 +408,7 @@ func TestPromptBuilderRegistry_BuildPromptForAlert_FallbackToGeneric(t *testing.
 		labels:   map[string]string{"alertname": "SomethingUnknown"},
 	}
 
-	prompt, err := registry.BuildPromptForAlert(alert, createTestTools())
+	prompt, err := registry.BuildPromptForAlert(alert, createTestTools(), nil)
 	// Should either succeed with generic builder or return meaningful error
 	if err != nil && prompt == "" {
 		t.Logf("BuildPromptForAlert() returned error for unknown type: %v (acceptable if no fallback)", err)
@@ -421,7 +421,7 @@ func TestPromptBuilderRegistry_BuildPromptForAlert_NilAlert(t *testing.T) {
 		t.Skip("NewPromptBuilderRegistry() returned nil")
 	}
 
-	_, err := registry.BuildPromptForAlert(nil, createTestTools())
+	_, err := registry.BuildPromptForAlert(nil, createTestTools(), nil)
 	if err == nil {
 		t.Error("BuildPromptForAlert(nil) should return error")
 	}

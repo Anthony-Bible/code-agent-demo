@@ -3,6 +3,7 @@ package usecase
 
 import (
 	"code-editing-agent/internal/domain/entity"
+	"code-editing-agent/internal/domain/port"
 	"errors"
 	"fmt"
 	"strings"
@@ -23,6 +24,12 @@ var (
 	ErrInvalidPromptVariables = errors.New("missing required prompt variables")
 	// ErrNilPromptBuilder is returned when Register is called with a nil builder.
 	ErrNilPromptBuilder = errors.New("prompt builder cannot be nil")
+)
+
+// Alert type constants.
+const (
+	// AlertTypeGeneric is the fallback alert type for the GenericPromptBuilder.
+	AlertTypeGeneric = "Generic"
 )
 
 // GenerateToolsHeader creates formatted documentation for a list of tools.
@@ -56,6 +63,26 @@ func getToolExample(toolName string) string {
 		"escalate_investigation": `{"reason": "Unable to determine root cause", "partial_findings": ["Observed high CPU"]}`,
 	}
 	return examples[toolName]
+}
+
+// GenerateSkillsHeader creates formatted XML documentation for available skills.
+// Returns an empty string if no skills are provided.
+// Format matches the XML structure used in anthropic_adapter.go.
+func GenerateSkillsHeader(skills []port.SkillInfo) string {
+	if len(skills) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("<available_skills>\n")
+	for _, skill := range skills {
+		sb.WriteString("  <skill>\n")
+		sb.WriteString(fmt.Sprintf("    <name>%s</name>\n", skill.Name))
+		sb.WriteString(fmt.Sprintf("    <description>%s</description>\n", skill.Description))
+		sb.WriteString("  </skill>\n")
+	}
+	sb.WriteString("</available_skills>\n")
+	return sb.String()
 }
 
 // AlertView represents a lightweight alert structure for prompt building.
@@ -100,7 +127,7 @@ func (a *AlertView) LabelValue(key string) string { return a.labels[key] }
 type InvestigationPromptBuilder interface {
 	// BuildPrompt generates an investigation prompt for the given alert.
 	// Returns ErrNilAlert if alert is nil.
-	BuildPrompt(alert *AlertView, tools []entity.Tool) (string, error)
+	BuildPrompt(alert *AlertView, tools []entity.Tool, skills []port.SkillInfo) (string, error)
 	// AlertType returns the type of alerts this builder handles (e.g., "HighCPU", "DiskSpace").
 	AlertType() string
 }
@@ -114,7 +141,7 @@ type PromptBuilderRegistry interface {
 	Get(alertType string) (InvestigationPromptBuilder, error)
 	// BuildPromptForAlert finds the appropriate builder and generates a prompt.
 	// Falls back to Generic builder if no specific builder is found.
-	BuildPromptForAlert(alert *AlertView, tools []entity.Tool) (string, error)
+	BuildPromptForAlert(alert *AlertView, tools []entity.Tool, skills []port.SkillInfo) (string, error)
 	// ListAlertTypes returns all registered alert types.
 	ListAlertTypes() []string
 }
@@ -131,13 +158,17 @@ func NewGenericPromptBuilder() *GenericPromptBuilder {
 // AlertType returns "Generic" as the alert type this builder handles.
 // This builder serves as a fallback when no specialized builder is available.
 func (b *GenericPromptBuilder) AlertType() string {
-	return "Generic"
+	return AlertTypeGeneric
 }
 
 // BuildPrompt generates an enhanced investigation prompt using all available alert fields.
 // The prompt includes full alert context, all labels, and environment-aware investigation guidance.
 // Returns ErrNilAlert if alert is nil.
-func (b *GenericPromptBuilder) BuildPrompt(alert *AlertView, tools []entity.Tool) (string, error) {
+func (b *GenericPromptBuilder) BuildPrompt(
+	alert *AlertView,
+	tools []entity.Tool,
+	skills []port.SkillInfo,
+) (string, error) {
 	if alert == nil {
 		return "", ErrNilAlert
 	}
@@ -153,6 +184,13 @@ You are an intelligent systems investigator. Analyze the alert below and use the
 	// Tools section
 	sb.WriteString("## Available Tools\n\n")
 	sb.WriteString(GenerateToolsHeader(tools))
+
+	// Skills section
+	if len(skills) > 0 {
+		sb.WriteString("## Available Skills\n\n")
+		sb.WriteString(GenerateSkillsHeader(skills))
+		sb.WriteString("\nUse the `activate_skill` tool to load the full content of a skill.\n\n")
+	}
 
 	// Rules section
 	sb.WriteString(`## Rules
@@ -200,7 +238,7 @@ You are an intelligent systems investigator. Analyze the alert below and use the
 
 Based on the alert source, labels, and description, determine the appropriate investigation approach:
 
-- unless otherwise specified, assume the alert is for a remote host.
+- Unless otherwise specified, assume the alert is for a remote host.
 - **Cloud/GCP alerts**: If labels contain resource_type, metric_type, or the source indicates cloud monitoring, consider using the activate_skill tool with "cloud-metrics" skill for querying GCP metrics
 - **Kubernetes alerts**: Look for namespace, pod, container labels to scope your investigation
 - **Examine ALL labels**: They contain critical context (instance, mountpoint, threshold_value, etc.)
@@ -254,14 +292,18 @@ func (r *DefaultPromptBuilderRegistry) Get(alertType string) (InvestigationPromp
 //
 // Returns ErrNilAlert if alert is nil.
 // Returns ErrPromptBuilderNotFound if Generic builder is not registered.
-func (r *DefaultPromptBuilderRegistry) BuildPromptForAlert(alert *AlertView, tools []entity.Tool) (string, error) {
+func (r *DefaultPromptBuilderRegistry) BuildPromptForAlert(
+	alert *AlertView,
+	tools []entity.Tool,
+	skills []port.SkillInfo,
+) (string, error) {
 	if alert == nil {
 		return "", ErrNilAlert
 	}
 
 	// Always use Generic builder - LLM determines investigation approach
-	if builder, exists := r.builders["Generic"]; exists {
-		return builder.BuildPrompt(alert, tools)
+	if builder, exists := r.builders[AlertTypeGeneric]; exists {
+		return builder.BuildPrompt(alert, tools, skills)
 	}
 
 	return "", ErrPromptBuilderNotFound
