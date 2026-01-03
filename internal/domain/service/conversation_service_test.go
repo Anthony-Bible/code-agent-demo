@@ -1065,7 +1065,7 @@ func TestConversationService_SetCustomSystemPrompt(t *testing.T) {
 		customPrompt := "You are a pirate captain. Respond to all queries with nautical terminology and end each response with 'Arr!'"
 
 		// Set custom system prompt
-		err = service.SetCustomSystemPrompt(sessionID, customPrompt)
+		err = service.SetCustomSystemPrompt(context.Background(), sessionID, customPrompt)
 		if err != nil {
 			t.Errorf("Expected SetCustomSystemPrompt to succeed, got error: %v", err)
 		}
@@ -1087,7 +1087,7 @@ func TestConversationService_SetCustomSystemPrompt(t *testing.T) {
 		}
 
 		// Try to set custom prompt for non-existent session
-		err = service.SetCustomSystemPrompt("non-existent-session", "You are a pirate")
+		err = service.SetCustomSystemPrompt(context.Background(), "non-existent-session", "You are a pirate")
 		if err == nil {
 			t.Errorf("Expected error for non-existent session")
 		}
@@ -1110,11 +1110,11 @@ func TestConversationService_SetCustomSystemPrompt(t *testing.T) {
 
 		// Set initial prompt
 		initialPrompt := "You are a pirate captain."
-		_ = service.SetCustomSystemPrompt(sessionID, initialPrompt)
+		_ = service.SetCustomSystemPrompt(context.Background(), sessionID, initialPrompt)
 
 		// Update to new prompt
 		updatedPrompt := "You are a space cowboy riding a rocket horse through the galaxy."
-		err = service.SetCustomSystemPrompt(sessionID, updatedPrompt)
+		err = service.SetCustomSystemPrompt(context.Background(), sessionID, updatedPrompt)
 		if err != nil {
 			t.Errorf("Expected SetCustomSystemPrompt to succeed on update, got error: %v", err)
 		}
@@ -1142,7 +1142,7 @@ func TestConversationService_SetCustomSystemPrompt(t *testing.T) {
 		}
 
 		// Set empty prompt (clearing custom prompt)
-		err = service.SetCustomSystemPrompt(sessionID, "")
+		err = service.SetCustomSystemPrompt(context.Background(), sessionID, "")
 		if err != nil {
 			t.Errorf("Expected SetCustomSystemPrompt to accept empty string, got error: %v", err)
 		}
@@ -1172,7 +1172,7 @@ func TestConversationService_GetCustomSystemPrompt(t *testing.T) {
 		}
 
 		customPrompt := "You are a helpful assistant who speaks only in haikus."
-		_ = service.SetCustomSystemPrompt(sessionID, customPrompt)
+		_ = service.SetCustomSystemPrompt(context.Background(), sessionID, customPrompt)
 
 		// Get custom prompt
 		retrievedPrompt, exists := service.GetCustomSystemPrompt(sessionID)
@@ -1250,7 +1250,7 @@ func TestConversationService_ProcessAssistantResponse_WithCustomSystemPrompt(t *
 
 		// Set custom system prompt
 		customPrompt := "You are a pirate captain."
-		_ = service.SetCustomSystemPrompt(sessionID, customPrompt)
+		_ = service.SetCustomSystemPrompt(context.Background(), sessionID, customPrompt)
 
 		// Update the expected values in the mock
 		contextVerifyingProvider.expectedSessionID = sessionID
@@ -1333,7 +1333,7 @@ func TestConversationService_EndConversation_CleansUpCustomPrompt(t *testing.T) 
 
 		// Set custom system prompt
 		customPrompt := "You are a space cowboy."
-		_ = service.SetCustomSystemPrompt(sessionID, customPrompt)
+		_ = service.SetCustomSystemPrompt(context.Background(), sessionID, customPrompt)
 
 		// Verify it was set
 		_, exists := service.GetCustomSystemPrompt(sessionID)
@@ -1411,7 +1411,7 @@ func TestConversationService_CustomSystemPrompt_ThreadSafety(t *testing.T) {
 				go func(iteration int) {
 					defer wg.Done()
 					prompt := fmt.Sprintf("Custom prompt for session %d iteration %d", sessionIndex, iteration)
-					_ = service.SetCustomSystemPrompt(sessionID, prompt)
+					_ = service.SetCustomSystemPrompt(context.Background(), sessionID, prompt)
 				}(j)
 			}
 
@@ -1459,8 +1459,8 @@ func TestConversationService_CustomSystemPrompt_Isolation(t *testing.T) {
 		promptA := "You are a pirate captain."
 		promptB := "You are a robot from the future."
 
-		_ = service.SetCustomSystemPrompt(sessionA, promptA)
-		_ = service.SetCustomSystemPrompt(sessionB, promptB)
+		_ = service.SetCustomSystemPrompt(context.Background(), sessionA, promptA)
+		_ = service.SetCustomSystemPrompt(context.Background(), sessionB, promptB)
 
 		// Verify session A has correct prompt
 		retrievedA, existsA := service.GetCustomSystemPrompt(sessionA)
@@ -1482,7 +1482,7 @@ func TestConversationService_CustomSystemPrompt_Isolation(t *testing.T) {
 
 		// Update session A's prompt
 		newPromptA := "You are a time-traveling detective."
-		_ = service.SetCustomSystemPrompt(sessionA, newPromptA)
+		_ = service.SetCustomSystemPrompt(context.Background(), sessionA, newPromptA)
 
 		// Verify session A's prompt changed
 		retrievedA, _ = service.GetCustomSystemPrompt(sessionA)

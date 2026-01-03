@@ -35,6 +35,7 @@ type investigationRunnerConvServiceMock struct {
 	addUserMessageCalls   int
 	addUserMessageError   error
 	addUserMessageContent []string
+	onAddUserMessage      func() // Callback for tracking call order
 
 	// ProcessAssistantResponse tracking
 	processResponseCalls     int
@@ -51,6 +52,12 @@ type investigationRunnerConvServiceMock struct {
 	endConversationCalls   int
 	endConversationError   error
 	endConversationSession string
+
+	// SetCustomSystemPrompt tracking
+	setCustomSystemPromptCalls   int
+	setCustomSystemPromptError   error
+	setCustomSystemPromptContent []string
+	onSetCustomSystemPrompt      func() // Callback for tracking call order
 }
 
 func newInvestigationRunnerConvServiceMock() *investigationRunnerConvServiceMock {
@@ -79,6 +86,9 @@ func (m *investigationRunnerConvServiceMock) AddUserMessage(
 	defer m.mu.Unlock()
 	m.addUserMessageCalls++
 	m.addUserMessageContent = append(m.addUserMessageContent, content)
+	if m.onAddUserMessage != nil {
+		m.onAddUserMessage()
+	}
 	if m.addUserMessageError != nil {
 		return nil, m.addUserMessageError
 	}
@@ -126,6 +136,20 @@ func (m *investigationRunnerConvServiceMock) EndConversation(ctx context.Context
 	m.endConversationCalls++
 	m.endConversationSession = sessionID
 	return m.endConversationError
+}
+
+func (m *investigationRunnerConvServiceMock) SetCustomSystemPrompt(
+	ctx context.Context,
+	sessionID, prompt string,
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.setCustomSystemPromptCalls++
+	m.setCustomSystemPromptContent = append(m.setCustomSystemPromptContent, prompt)
+	if m.onSetCustomSystemPrompt != nil {
+		m.onSetCustomSystemPrompt()
+	}
+	return m.setCustomSystemPromptError
 }
 
 // investigationRunnerToolExecutorMock implements port.ToolExecutor for testing.
@@ -532,14 +556,14 @@ func TestInvestigationRunner_UsesPromptBuilder(t *testing.T) {
 			promptBuilder.buildPromptForAlertCalls)
 	}
 
-	// Verify the prompt was included in the message
-	if convService.addUserMessageCalls < 1 {
-		t.Fatal("AddUserMessage() was not called")
+	// Verify the prompt was set as system prompt
+	if convService.setCustomSystemPromptCalls < 1 {
+		t.Fatal("SetCustomSystemPrompt() was not called")
 	}
 
-	messageContent := convService.addUserMessageContent[0]
-	if !strings.Contains(messageContent, "Custom investigation prompt") {
-		t.Errorf("Message should contain prompt builder output, got: %s", messageContent)
+	systemPrompt := convService.setCustomSystemPromptContent[0]
+	if !strings.Contains(systemPrompt, "Custom investigation prompt") {
+		t.Errorf("System prompt should contain prompt builder output, got: %s", systemPrompt)
 	}
 }
 
@@ -3428,4 +3452,284 @@ func TestInvestigationRunner_MixedToolCallsWithCompletion(t *testing.T) {
 	if result.Confidence != 0.88 {
 		t.Errorf("Result.Confidence = %v, want 0.88", result.Confidence)
 	}
+}
+
+// =============================================================================
+// InvestigationRunner System Prompt Tests (RED PHASE - EXPECTED TO FAIL)
+// These tests verify that InvestigationRunner uses custom system prompts
+// instead of embedding the investigation prompt in user messages.
+// =============================================================================
+
+func TestInvestigationRunner_Run_CallsSetCustomSystemPrompt(t *testing.T) {
+	// Create mocks
+	convService := newInvestigationRunnerConvServiceMock()
+	toolExecutor := newInvestigationRunnerToolExecutorMock()
+	promptBuilder := newInvestigationRunnerPromptBuilderMock()
+
+	// Configure prompt builder to return a known prompt
+	expectedSystemPrompt := "You are investigating alert: test-alert. Use the following tools: bash, read_file"
+	promptBuilder.buildPromptResult = expectedSystemPrompt
+
+	// Configure mock to return completion immediately
+	completionToolCall := port.ToolCallInfo{
+		ToolID:   "complete-1",
+		ToolName: "complete_investigation",
+		Input: map[string]interface{}{
+			"findings":   []interface{}{"Investigation completed"},
+			"confidence": 0.95,
+		},
+	}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{{completionToolCall}}
+
+	// Create runner
+	runner := NewInvestigationRunner(
+		convService,
+		toolExecutor,
+		nil,
+		promptBuilder,
+		AlertInvestigationUseCaseConfig{MaxActions: 20},
+	)
+
+	// Create test alert
+	alert := &AlertForInvestigation{
+		id:          "test-alert-123",
+		title:       "Test Alert",
+		description: "Test description",
+		source:      "test-source",
+		severity:    "high",
+	}
+
+	// Run investigation
+	ctx := context.Background()
+	_, err := runner.Run(ctx, alert, "inv-123")
+	// Test should FAIL because SetCustomSystemPrompt is not implemented yet
+	if err != nil {
+		t.Fatalf("Run() returned error: %v", err)
+	}
+
+	// EXPECTED BEHAVIOR: SetCustomSystemPrompt should be called with the investigation prompt
+	// This will fail because the mock doesn't have this method yet
+	if convService.setCustomSystemPromptCalls != 1 {
+		t.Errorf("SetCustomSystemPrompt() called %d times, want 1", convService.setCustomSystemPromptCalls)
+	}
+
+	// Verify the prompt content matches what the builder returned
+	if len(convService.setCustomSystemPromptContent) == 0 {
+		t.Fatal("SetCustomSystemPrompt() was not called with any content")
+	}
+
+	actualPrompt := convService.setCustomSystemPromptContent[0]
+	if actualPrompt != expectedSystemPrompt {
+		t.Errorf("SetCustomSystemPrompt() called with prompt = %q, want %q", actualPrompt, expectedSystemPrompt)
+	}
+}
+
+func TestInvestigationRunner_Run_SetCustomSystemPromptCalledBeforeAddUserMessage(t *testing.T) {
+	// Create mocks
+	convService := newInvestigationRunnerConvServiceMock()
+	toolExecutor := newInvestigationRunnerToolExecutorMock()
+	promptBuilder := newInvestigationRunnerPromptBuilderMock()
+
+	// Track call order
+	var callOrder []string
+	convService.onSetCustomSystemPrompt = func() {
+		callOrder = append(callOrder, "SetCustomSystemPrompt")
+	}
+	convService.onAddUserMessage = func() {
+		callOrder = append(callOrder, "AddUserMessage")
+	}
+
+	// Configure mock to return completion immediately
+	completionToolCall := port.ToolCallInfo{
+		ToolID:   "complete-1",
+		ToolName: "complete_investigation",
+		Input: map[string]interface{}{
+			"findings":   []interface{}{"Done"},
+			"confidence": 0.9,
+		},
+	}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{{completionToolCall}}
+
+	// Create runner
+	runner := NewInvestigationRunner(
+		convService,
+		toolExecutor,
+		nil,
+		promptBuilder,
+		AlertInvestigationUseCaseConfig{MaxActions: 20},
+	)
+
+	// Create test alert
+	alert := &AlertForInvestigation{
+		id:       "test-alert-456",
+		title:    "Order Test Alert",
+		severity: "critical",
+	}
+
+	// Run investigation
+	ctx := context.Background()
+	_, err := runner.Run(ctx, alert, "inv-456")
+	if err != nil {
+		t.Fatalf("Run() returned error: %v", err)
+	}
+
+	// EXPECTED BEHAVIOR: SetCustomSystemPrompt must be called BEFORE AddUserMessage
+	if len(callOrder) < 2 {
+		t.Fatalf("Expected at least 2 calls, got %d: %v", len(callOrder), callOrder)
+	}
+
+	if callOrder[0] != "SetCustomSystemPrompt" {
+		t.Errorf("First call should be SetCustomSystemPrompt, got %s", callOrder[0])
+	}
+
+	if callOrder[1] != "AddUserMessage" {
+		t.Errorf("Second call should be AddUserMessage, got %s", callOrder[1])
+	}
+}
+
+func TestInvestigationRunner_Run_AddUserMessageContainsMinimalAlertOnly(t *testing.T) {
+	// Create mocks
+	convService := newInvestigationRunnerConvServiceMock()
+	toolExecutor := newInvestigationRunnerToolExecutorMock()
+	promptBuilder := newInvestigationRunnerPromptBuilderMock()
+
+	// Configure prompt builder to return a large prompt
+	promptBuilder.buildPromptResult = "This is a very long investigation prompt with many instructions about how to investigate alerts. It contains tool descriptions, guidelines, safety rules, and much more. This should NOT appear in the user message."
+
+	// Configure mock to return completion immediately
+	completionToolCall := port.ToolCallInfo{
+		ToolID:   "complete-1",
+		ToolName: "complete_investigation",
+		Input: map[string]interface{}{
+			"findings":   []interface{}{"Found the issue"},
+			"confidence": 0.85,
+		},
+	}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{{completionToolCall}}
+
+	// Create runner
+	runner := NewInvestigationRunner(
+		convService,
+		toolExecutor,
+		nil,
+		promptBuilder,
+		AlertInvestigationUseCaseConfig{MaxActions: 20},
+	)
+
+	// Create test alert
+	alert := &AlertForInvestigation{
+		id:          "alert-789",
+		title:       "Minimal Message Test",
+		description: "This should not appear in user message",
+		source:      "test",
+		severity:    "medium",
+	}
+
+	// Run investigation
+	ctx := context.Background()
+	_, err := runner.Run(ctx, alert, "inv-789")
+	if err != nil {
+		t.Fatalf("Run() returned error: %v", err)
+	}
+
+	// EXPECTED BEHAVIOR: AddUserMessage should receive MINIMAL content (just alert ID and title)
+	// NOT the full investigation prompt
+	if len(convService.addUserMessageContent) == 0 {
+		t.Fatal("AddUserMessage() was not called")
+	}
+
+	userMessage := convService.addUserMessageContent[0]
+
+	// Verify the user message does NOT contain the investigation prompt
+	if strings.Contains(userMessage, "investigation prompt") {
+		t.Error("User message should NOT contain investigation prompt text")
+	}
+
+	if strings.Contains(userMessage, "tool descriptions") {
+		t.Error("User message should NOT contain tool descriptions")
+	}
+
+	if strings.Contains(userMessage, "guidelines") {
+		t.Error("User message should NOT contain guidelines")
+	}
+
+	// Verify the user message DOES contain minimal alert info
+	if !strings.Contains(userMessage, alert.ID()) {
+		t.Errorf("User message should contain alert ID %q, got: %q", alert.ID(), userMessage)
+	}
+
+	if !strings.Contains(userMessage, alert.Title()) {
+		t.Errorf("User message should contain alert title %q, got: %q", alert.Title(), userMessage)
+	}
+
+	// Verify message is SHORT (just ID and title, not full prompt)
+	// Current implementation sends long prompt, new implementation should be < 200 chars
+	if len(userMessage) > 200 {
+		t.Errorf(
+			"User message is too long (%d chars), should be minimal (<200 chars). Got: %q",
+			len(userMessage),
+			userMessage,
+		)
+	}
+}
+
+func TestInvestigationRunner_Run_SetCustomSystemPromptErrorPropagated(t *testing.T) {
+	// Create mocks
+	convService := newInvestigationRunnerConvServiceMock()
+	toolExecutor := newInvestigationRunnerToolExecutorMock()
+	promptBuilder := newInvestigationRunnerPromptBuilderMock()
+
+	// Configure SetCustomSystemPrompt to return an error
+	expectedError := errors.New("system prompt configuration failed")
+	convService.setCustomSystemPromptError = expectedError
+
+	// Create runner
+	runner := NewInvestigationRunner(
+		convService,
+		toolExecutor,
+		nil,
+		promptBuilder,
+		AlertInvestigationUseCaseConfig{MaxActions: 20},
+	)
+
+	// Create test alert
+	alert := &AlertForInvestigation{
+		id:       "alert-error",
+		title:    "Error Test",
+		severity: "high",
+	}
+
+	// Run investigation
+	ctx := context.Background()
+	result, err := runner.Run(ctx, alert, "inv-error")
+
+	// EXPECTED BEHAVIOR: Error from SetCustomSystemPrompt should be propagated
+	if err == nil {
+		t.Fatal("Run() should return error when SetCustomSystemPrompt fails")
+	}
+
+	if !errors.Is(err, expectedError) && err.Error() != expectedError.Error() {
+		t.Errorf("Run() error = %v, want %v", err, expectedError)
+	}
+
+	// Result should indicate failure
+	if result == nil {
+		t.Fatal("Result should not be nil even on error")
+	}
+
+	if result.Status != "failed" {
+		t.Errorf("Result.Status = %q, want %q", result.Status, "failed")
+	}
+}
+
+func TestInvestigationRunner_ConversationServiceInterfaceIncludesSetCustomSystemPrompt(t *testing.T) {
+	// This test verifies that ConversationServiceInterface has the SetCustomSystemPrompt method
+	// by attempting to compile-time check. If the interface doesn't have the method,
+	// this test will fail to compile.
+
+	// Create a minimal mock that implements the interface
+	var _ ConversationServiceInterface = &investigationRunnerConvServiceMock{}
+
+	// If we get here, the interface includes SetCustomSystemPrompt
+	// This test will FAIL TO COMPILE until the interface is updated
 }

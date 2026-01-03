@@ -333,27 +333,56 @@ func (r *InvestigationRunner) validationFailedResult(
 }
 
 func (r *InvestigationRunner) sendInitialPrompt(rc *runContext) error {
-	alertStub := &AlertView{
-		id: rc.alert.ID(), source: rc.alert.Source(), severity: rc.alert.Severity(),
-		title: rc.alert.Title(), description: rc.alert.Description(), labels: rc.alert.Labels(),
-	}
+	// Create alert view for prompt building
+	alertView := r.createAlertView(rc.alert)
 
-	// Get and filter tools for investigation prompt
+	// Get available tools for this investigation
 	tools, err := r.getInvestigationTools()
 	if err != nil {
 		return err
 	}
 
-	prompt, err := r.promptBuilder.BuildPromptForAlert(alertStub, tools)
+	// Build investigation prompt with full context and instructions
+	prompt, err := r.promptBuilder.BuildPromptForAlert(alertView, tools)
 	if err != nil {
 		return err
 	}
-	_, err = r.convService.AddUserMessage(
-		rc.ctx,
-		rc.sessionID,
-		prompt+"\n\nAlert ID: "+rc.alert.ID()+"\nTitle: "+rc.alert.Title(),
-	)
-	return err
+
+	// Set the full investigation prompt as a custom system prompt.
+	// This keeps the detailed instructions, tool descriptions, and guidelines
+	// in the system context rather than cluttering the conversation history.
+	if err := r.convService.SetCustomSystemPrompt(rc.ctx, rc.sessionID, prompt); err != nil {
+		return err
+	}
+
+	// Send a minimal user message to trigger the investigation.
+	// Since the system prompt already contains all context, we only need
+	// basic alert identifiers here to start the conversation.
+	userMessage := r.formatTriggerMessage(rc.alert)
+	if _, err := r.convService.AddUserMessage(rc.ctx, rc.sessionID, userMessage); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// createAlertView converts an AlertForInvestigation into an AlertView for prompt building.
+func (r *InvestigationRunner) createAlertView(alert *AlertForInvestigation) *AlertView {
+	return &AlertView{
+		id:          alert.ID(),
+		source:      alert.Source(),
+		severity:    alert.Severity(),
+		title:       alert.Title(),
+		description: alert.Description(),
+		labels:      alert.Labels(),
+	}
+}
+
+// formatTriggerMessage creates a minimal user message to trigger the investigation.
+// This message contains only the essential alert identifiers since the full context
+// is already provided in the system prompt.
+func (r *InvestigationRunner) formatTriggerMessage(alert *AlertForInvestigation) string {
+	return fmt.Sprintf("Alert ID: %s\nTitle: %s", alert.ID(), alert.Title())
 }
 
 // getInvestigationTools returns the filtered list of tools for investigation prompts.

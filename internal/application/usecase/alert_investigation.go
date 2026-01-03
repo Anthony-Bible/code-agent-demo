@@ -20,6 +20,7 @@ type ConversationServiceInterface interface {
 	ProcessAssistantResponse(ctx context.Context, sessionID string) (*entity.Message, []port.ToolCallInfo, error)
 	AddToolResultMessage(ctx context.Context, sessionID string, toolResults []entity.ToolResult) error
 	EndConversation(ctx context.Context, sessionID string) error
+	SetCustomSystemPrompt(ctx context.Context, sessionID, prompt string) error
 }
 
 // SafetyEnforcer defines the interface for safety checks during investigations.

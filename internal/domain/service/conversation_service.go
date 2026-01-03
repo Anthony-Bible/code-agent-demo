@@ -412,7 +412,13 @@ func (cs *ConversationService) IsPlanMode(sessionID string) (bool, error) {
 // This allows overriding the default AI system prompt with session-specific instructions.
 // The custom prompt is included in the context when calling the AI provider.
 // The operation is thread-safe.
-func (cs *ConversationService) SetCustomSystemPrompt(sessionID, prompt string) error {
+func (cs *ConversationService) SetCustomSystemPrompt(ctx context.Context, sessionID, prompt string) error {
+	select {
+	case <-ctx.Done():
+		return context.Canceled
+	default:
+	}
+
 	_, exists := cs.conversations[sessionID]
 	if !exists {
 		return ErrConversationNotFound
