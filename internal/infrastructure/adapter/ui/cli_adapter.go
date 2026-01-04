@@ -294,6 +294,19 @@ func (c *CLIAdapter) DisplaySystemMessage(message string) error {
 	return err
 }
 
+// DisplaySubagentStatus displays a status message for subagent execution.
+// Uses magenta color (ANSI code 35) to distinguish from regular system messages.
+func (c *CLIAdapter) DisplaySubagentStatus(agentName string, status string, details string) error {
+	prefix := fmt.Sprintf("[SUBAGENT: %s]", agentName)
+	msg := fmt.Sprintf("%s %s", prefix, status)
+	if details != "" {
+		msg += " - " + details
+	}
+	// Magenta color for subagent status
+	_, err := fmt.Fprintf(c.output, "\x1b[35m%s\x1b[0m\n", msg)
+	return err
+}
+
 // SetPrompt sets the user input prompt.
 func (c *CLIAdapter) SetPrompt(prompt string) error {
 	if prompt == "" {

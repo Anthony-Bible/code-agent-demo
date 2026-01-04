@@ -1971,7 +1971,7 @@ func TestSpawnMultiple_PreCancelledContext(t *testing.T) {
 	}
 
 	// All should have cancellation errors
-	for i := range len(requests) {
+	for i := range requests {
 		if result.Results[i] != nil {
 			t.Errorf("Result %d should be nil for cancelled context", i)
 		}
@@ -2025,7 +2025,7 @@ func TestSpawnMultiple_TimeoutDuringExecution(t *testing.T) {
 	}
 
 	// All should timeout
-	for i := range len(requests) {
+	for i := range requests {
 		if result.Errors[i] == nil {
 			t.Errorf("Error %d should be set for timeout", i)
 			continue

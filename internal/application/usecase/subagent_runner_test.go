@@ -5,6 +5,7 @@ import (
 	"code-editing-agent/internal/domain/port"
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -351,7 +352,7 @@ func TestNewSubagentRunner_WithAllDependencies(t *testing.T) {
 	}
 
 	// Act
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 
 	// Assert
 	if runner == nil {
@@ -372,7 +373,7 @@ func TestNewSubagentRunner_PanicsWithNilConversationService(t *testing.T) {
 		}
 	}()
 
-	NewSubagentRunner(nil, toolExecutor, aiProvider, config)
+	NewSubagentRunner(nil, toolExecutor, aiProvider, nil, config)
 }
 
 func TestNewSubagentRunner_PanicsWithNilToolExecutor(t *testing.T) {
@@ -388,7 +389,7 @@ func TestNewSubagentRunner_PanicsWithNilToolExecutor(t *testing.T) {
 		}
 	}()
 
-	NewSubagentRunner(convService, nil, aiProvider, config)
+	NewSubagentRunner(convService, nil, aiProvider, nil, config)
 }
 
 func TestNewSubagentRunner_PanicsWithNilAIProvider(t *testing.T) {
@@ -404,7 +405,7 @@ func TestNewSubagentRunner_PanicsWithNilAIProvider(t *testing.T) {
 		}
 	}()
 
-	NewSubagentRunner(convService, toolExecutor, nil, config)
+	NewSubagentRunner(convService, toolExecutor, nil, nil, config)
 }
 
 // =============================================================================
@@ -430,7 +431,7 @@ func TestSubagentRunner_Run_SuccessfulExecution(t *testing.T) {
 		AllowedTools: []string{"bash", "read_file"},
 	}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-001", "Code Analyzer")
 	taskPrompt := "Analyze the error logs and identify the root cause"
 
@@ -461,7 +462,7 @@ func TestSubagentRunner_Run_HandlesNilAgent(t *testing.T) {
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 
 	// Act
 	result, err := runner.Run(context.Background(), nil, "some task", "subagent-002")
@@ -485,7 +486,7 @@ func TestSubagentRunner_Run_HandlesEmptyTaskPrompt(t *testing.T) {
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-003", "Helper")
 
 	// Act
@@ -520,7 +521,7 @@ func TestSubagentRunner_CreatesIsolatedSession(t *testing.T) {
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{MaxActions: 10}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-iso", "Isolated Agent")
 
 	// Act
@@ -547,7 +548,7 @@ func TestSubagentRunner_CleansUpSessionOnCompletion(t *testing.T) {
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{MaxActions: 10}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-cleanup", "Test Agent")
 
 	// Act
@@ -576,7 +577,7 @@ func TestSubagentRunner_CleansUpSessionOnError(t *testing.T) {
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{MaxActions: 10}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-error", "Test Agent")
 
 	// Act
@@ -603,7 +604,7 @@ func TestSubagentRunner_HandlesStartConversationError(t *testing.T) {
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-start-err", "Test Agent")
 
 	// Act
@@ -638,7 +639,7 @@ func TestSubagentRunner_SetsCustomSystemPrompt(t *testing.T) {
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{MaxActions: 10}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-prompt", "Specialized Agent")
 	agent.RawContent = "You are a specialized agent for code analysis"
 
@@ -674,7 +675,7 @@ func TestSubagentRunner_AddsUserMessageWithTaskPrompt(t *testing.T) {
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{MaxActions: 10}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-task", "Task Agent")
 	taskPrompt := "Analyze the error logs and identify the root cause"
 
@@ -731,7 +732,7 @@ func TestSubagentRunner_ExecutesToolCalls(t *testing.T) {
 		AllowedTools: []string{"bash", "read_file"},
 	}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-tools", "Tool User Agent")
 
 	// Act
@@ -780,7 +781,7 @@ func TestSubagentRunner_FeedsToolResultsBackToAI(t *testing.T) {
 		AllowedTools: []string{"read_file"},
 	}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-feedback", "Feedback Agent")
 
 	// Act
@@ -825,7 +826,7 @@ func TestSubagentRunner_HandlesToolExecutionError(t *testing.T) {
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{MaxActions: 10}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-tool-err", "Error Agent")
 
 	// Act
@@ -874,7 +875,7 @@ func TestSubagentRunner_RespectsMaxActionsLimit(t *testing.T) {
 		AllowedTools: []string{"bash"},
 	}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-limit", "Limited Agent")
 
 	// Act
@@ -915,7 +916,7 @@ func TestSubagentRunner_StopsWhenMaxActionsReached(t *testing.T) {
 		AllowedTools: []string{"bash"},
 	}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-stop", "Stop Agent")
 
 	// Act
@@ -957,7 +958,7 @@ func TestSubagentRunner_TracksActionsTaken(t *testing.T) {
 		AllowedTools: []string{"bash"},
 	}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-track", "Tracking Agent")
 
 	// Act
@@ -1020,7 +1021,7 @@ func TestSubagentRunner_HandlesConversationServiceErrors(t *testing.T) {
 			aiProvider := newSubagentRunnerAIProviderMock()
 			config := SubagentConfig{MaxActions: 10}
 
-			runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+			runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 			agent := createTestAgent("agent-err", "Error Agent")
 
 			// Act
@@ -1054,7 +1055,7 @@ func TestSubagentRunner_ReturnsResultWithStatus(t *testing.T) {
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{MaxActions: 10}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-status", "Status Agent")
 
 	// Act
@@ -1087,7 +1088,7 @@ func TestSubagentRunner_ReturnsResultWithOutput(t *testing.T) {
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{MaxActions: 10}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-output", "Output Agent")
 
 	// Act
@@ -1105,6 +1106,46 @@ func TestSubagentRunner_ReturnsResultWithOutput(t *testing.T) {
 	}
 }
 
+func TestSubagentRunner_OutputIncludesSubagentPrefix(t *testing.T) {
+	// Arrange
+	convService := newSubagentRunnerConvServiceMock()
+	convService.startConversationSession = "subagent-session-prefix-001"
+	outputMessage := "Analysis complete: no issues found"
+	convService.processResponseMessages = []*entity.Message{
+		createSubagentAssistantMessage(outputMessage),
+	}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
+
+	toolExecutor := newSubagentRunnerToolExecutorMock()
+	aiProvider := newSubagentRunnerAIProviderMock()
+	config := SubagentConfig{MaxActions: 10}
+
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+	agent := createTestAgent("test-agent", "Test Agent")
+
+	// Act
+	result, err := runner.Run(context.Background(), agent, "Analyze code", "subagent-prefix-001")
+	// Assert
+	if err != nil {
+		t.Errorf("Run() error = %v, want nil", err)
+	}
+	if result == nil {
+		t.Fatal("Run() returned nil result")
+	}
+
+	// Output should be prefixed with [SUBAGENT: agent-name]
+	expectedPrefix := "[SUBAGENT: Test Agent]\n\n"
+	if !strings.HasPrefix(result.Output, expectedPrefix) {
+		t.Errorf("Run() result.Output = %q, want prefix %q", result.Output, expectedPrefix)
+	}
+
+	// Output should contain the original message after the prefix
+	expectedOutput := expectedPrefix + outputMessage
+	if result.Output != expectedOutput {
+		t.Errorf("Run() result.Output = %q, want %q", result.Output, expectedOutput)
+	}
+}
+
 func TestSubagentRunner_ReturnsResultWithDuration(t *testing.T) {
 	// Arrange
 	convService := newSubagentRunnerConvServiceMock()
@@ -1118,7 +1159,7 @@ func TestSubagentRunner_ReturnsResultWithDuration(t *testing.T) {
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{MaxActions: 10}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-duration", "Duration Agent")
 
 	// Act
@@ -1169,7 +1210,7 @@ func TestSubagentRunner_AllowedTools_AllowsOnlySpecifiedTools(t *testing.T) {
 		AllowedTools: []string{"bash"}, // Only bash allowed
 	}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-filter", "Filter Agent")
 	agent.AllowedTools = []string{"bash"} // Agent also specifies allowed tools
 
@@ -1213,7 +1254,7 @@ func TestSubagentRunner_AllowedTools_BlocksNonAllowedTools(t *testing.T) {
 		AllowedTools: []string{"bash", "read_file"}, // list_files NOT allowed
 	}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-block", "Block Agent")
 
 	// Act
@@ -1255,7 +1296,7 @@ func TestSubagentRunner_AllowedTools_NilAllowedToolsAllowsAll(t *testing.T) {
 		AllowedTools: nil, // nil means allow all
 	}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-nil", "Nil Filter Agent")
 
 	// Act
@@ -1295,7 +1336,7 @@ func TestSubagentRunner_AllowedTools_EmptySliceBlocksAll(t *testing.T) {
 		AllowedTools: []string{}, // Empty slice means block all
 	}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-empty", "Empty Filter Agent")
 
 	// Act
@@ -1330,7 +1371,7 @@ func TestSubagentRunner_RecursionPrevention_AddsSubagentContextToContext(t *test
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{MaxActions: 10}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-ctx", "Context Agent")
 
 	// Act
@@ -1367,7 +1408,7 @@ func TestSubagentRunner_RecursionPrevention_BlocksTaskToolInSubagent(t *testing.
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{MaxActions: 10}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-no-recursion", "No Recursion Agent")
 
 	// Act
@@ -1411,7 +1452,7 @@ func TestSubagentRunner_RecursionPrevention_AllowsRegularToolsInSubagent(t *test
 		AllowedTools: []string{"bash", "read_file"},
 	}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-regular", "Regular Tools Agent")
 
 	// Act
@@ -1442,7 +1483,7 @@ func TestSubagentRunner_RecursionPrevention_DetectsNestedSubagentContext(t *test
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{MaxActions: 10}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-nested", "Nested Agent")
 
 	// Create a context that already has subagent info (simulating nested call)
@@ -1508,7 +1549,7 @@ func TestSubagentRunner_ModelSwitch_SetsModelHaiku(t *testing.T) {
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{MaxActions: 10}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-haiku", "Haiku Agent")
 	agent.Model = "haiku"
 
@@ -1543,7 +1584,7 @@ func TestSubagentRunner_ModelSwitch_SetsModelSonnet(t *testing.T) {
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{MaxActions: 10}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-sonnet", "Sonnet Agent")
 	agent.Model = "sonnet"
 
@@ -1578,7 +1619,7 @@ func TestSubagentRunner_ModelSwitch_SetsModelOpus(t *testing.T) {
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{MaxActions: 10}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-opus", "Opus Agent")
 	agent.Model = "opus"
 
@@ -1613,7 +1654,7 @@ func TestSubagentRunner_ModelSwitch_InheritDoesNotSetModel(t *testing.T) {
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{MaxActions: 10}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-inherit", "Inherit Agent")
 	agent.Model = "inherit"
 
@@ -1645,7 +1686,7 @@ func TestSubagentRunner_ModelSwitch_EmptyModelDoesNotSetModel(t *testing.T) {
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{MaxActions: 10}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-empty-model", "Empty Model Agent")
 	agent.Model = ""
 
@@ -1677,7 +1718,7 @@ func TestSubagentRunner_ModelSwitch_RestoresOriginalModelAfterCompletion(t *test
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{MaxActions: 10}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-restore", "Restore Agent")
 	agent.Model = "haiku"
 
@@ -1711,7 +1752,7 @@ func TestSubagentRunner_ModelSwitch_RestoresOriginalModelAfterError(t *testing.T
 	aiProvider := newSubagentRunnerAIProviderMock()
 	config := SubagentConfig{MaxActions: 10}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
 	agent := createTestAgent("agent-restore-error", "Restore Error Agent")
 	agent.Model = "haiku"
 

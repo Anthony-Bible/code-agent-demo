@@ -6,6 +6,7 @@ import (
 	"code-editing-agent/internal/domain/port"
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -66,10 +67,11 @@ func (r *SubagentResult) GetError() error {
 
 // SubagentRunner orchestrates isolated subagent execution for task delegation.
 type SubagentRunner struct {
-	convService  ConversationServiceInterface
-	toolExecutor port.ToolExecutor
-	aiProvider   port.AIProvider
-	config       SubagentConfig
+	convService   ConversationServiceInterface
+	toolExecutor  port.ToolExecutor
+	aiProvider    port.AIProvider
+	userInterface port.UserInterface
+	config        SubagentConfig
 }
 
 // subagentRunContext holds state for a subagent execution run.
@@ -83,6 +85,7 @@ type subagentRunContext struct {
 	actionsTaken int
 	maxActions   int
 	lastMessage  *entity.Message
+	runner       *SubagentRunner // Reference to runner for UI display
 }
 
 // NewSubagentRunner creates a new SubagentRunner with dependency validation.
@@ -90,6 +93,7 @@ func NewSubagentRunner(
 	convService ConversationServiceInterface,
 	toolExecutor port.ToolExecutor,
 	aiProvider port.AIProvider,
+	userInterface port.UserInterface,
 	config SubagentConfig,
 ) *SubagentRunner {
 	if convService == nil {
@@ -101,12 +105,14 @@ func NewSubagentRunner(
 	if aiProvider == nil {
 		panic("aiProvider cannot be nil")
 	}
+	// userInterface is optional (can be nil for tests)
 
 	return &SubagentRunner{
-		convService:  convService,
-		toolExecutor: toolExecutor,
-		aiProvider:   aiProvider,
-		config:       config,
+		convService:   convService,
+		toolExecutor:  toolExecutor,
+		aiProvider:    aiProvider,
+		userInterface: userInterface,
+		config:        config,
 	}
 }
 
@@ -166,6 +172,7 @@ func (r *SubagentRunner) Run(
 		subagentID: subagentID,
 		startTime:  time.Now(),
 		maxActions: r.config.MaxActions,
+		runner:     r,
 	}
 	if rc.maxActions == 0 {
 		rc.maxActions = 20
@@ -181,6 +188,9 @@ func (r *SubagentRunner) Run(
 	if err := r.setupAgentSession(rc); err != nil {
 		return rc.failedResult(err), err
 	}
+
+	// Display subagent starting
+	r.displayStatus(agent.Name, "Starting", "")
 
 	return r.runExecutionLoop(rc)
 }
@@ -216,6 +226,9 @@ func (r *SubagentRunner) validationFailedResult(
 
 // failedResult creates a failed result from the run context.
 func (rc *subagentRunContext) failedResult(err error) *SubagentResult {
+	// Display failure status
+	rc.runner.displayStatus(rc.agent.Name, "Failed", err.Error())
+
 	return &SubagentResult{
 		SubagentID:   rc.subagentID,
 		AgentName:    rc.agent.Name,
@@ -230,8 +243,15 @@ func (rc *subagentRunContext) failedResult(err error) *SubagentResult {
 func (rc *subagentRunContext) completedResult() *SubagentResult {
 	output := ""
 	if rc.lastMessage != nil {
-		output = rc.lastMessage.Content
+		// Prefix output with subagent identifier for clarity
+		output = "[SUBAGENT: " + rc.agent.Name + "]\n\n" + rc.lastMessage.Content
 	}
+
+	duration := time.Since(rc.startTime)
+
+	// Display completion status with details
+	details := fmt.Sprintf("%d actions, %.1fs", rc.actionsTaken, duration.Seconds())
+	rc.runner.displayStatus(rc.agent.Name, "Completed", details)
 
 	return &SubagentResult{
 		SubagentID:   rc.subagentID,
@@ -239,7 +259,7 @@ func (rc *subagentRunContext) completedResult() *SubagentResult {
 		Status:       "completed",
 		Output:       output,
 		ActionsTaken: rc.actionsTaken,
-		Duration:     time.Since(rc.startTime),
+		Duration:     duration,
 	}
 }
 
@@ -296,7 +316,16 @@ func (r *SubagentRunner) processToolCalls(rc *subagentRunContext, toolCalls []po
 
 	var toolResults []entity.ToolResult
 	for _, tc := range filteredCalls {
-		toolResults = append(toolResults, r.executeToolCall(rc.ctx, tc))
+		// Display tool execution start
+		r.displayToolExecution(rc.agent.Name, tc.ToolName)
+
+		// Execute the tool
+		result := r.executeToolCall(rc.ctx, tc)
+		toolResults = append(toolResults, result)
+
+		// Display tool execution result
+		r.displayToolResult(rc.agent.Name, tc.ToolName, result.IsError)
+
 		rc.actionsTaken++
 	}
 
@@ -361,5 +390,30 @@ func (r *SubagentRunner) executeToolCall(ctx context.Context, tc port.ToolCallIn
 		ToolID:  tc.ToolID,
 		Result:  result,
 		IsError: false,
+	}
+}
+
+// displayStatus displays a status message for the subagent if UI is available.
+func (r *SubagentRunner) displayStatus(agentName string, status string, details string) {
+	if r.userInterface != nil {
+		_ = r.userInterface.DisplaySubagentStatus(agentName, status, details)
+	}
+}
+
+// displayToolExecution displays a message before tool execution.
+func (r *SubagentRunner) displayToolExecution(agentName string, toolName string) {
+	if r.userInterface != nil {
+		_ = r.userInterface.DisplaySubagentStatus(agentName, fmt.Sprintf("Executing %s", toolName), "")
+	}
+}
+
+// displayToolResult displays a message after tool execution.
+func (r *SubagentRunner) displayToolResult(agentName string, toolName string, isError bool) {
+	if r.userInterface != nil {
+		status := "Tool completed"
+		if isError {
+			status = "Tool failed"
+		}
+		_ = r.userInterface.DisplaySubagentStatus(agentName, status, toolName)
 	}
 }

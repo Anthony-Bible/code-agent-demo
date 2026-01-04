@@ -179,7 +179,7 @@ func NewContainer(cfg *Config) (*Container, error) {
 
 	// Step 5: Create subagent components
 	subagentManager, subagentUseCase := createSubagentComponents(
-		cfg, convService, toolExecutor, aiAdapter, baseExecutor,
+		cfg, convService, toolExecutor, aiAdapter, baseExecutor, uiAdapter,
 	)
 
 	return &Container{
@@ -268,6 +268,7 @@ func createSubagentComponents(
 	toolExecutor port.ToolExecutor,
 	aiAdapter port.AIProvider,
 	baseExecutor *tool.ExecutorAdapter,
+	uiAdapter port.UserInterface,
 ) (port.SubagentManager, *usecase.SubagentUseCase) {
 	// Create LocalSubagentManager with discovery directories (priority order: highest to lowest)
 	// Discovery order follows agentskills.io spec:
@@ -291,6 +292,7 @@ func createSubagentComponents(
 		convService,
 		toolExecutor,
 		aiAdapter,
+		uiAdapter,
 		usecase.SubagentConfig{
 			MaxActions:    20,
 			MaxDuration:   5 * time.Minute,

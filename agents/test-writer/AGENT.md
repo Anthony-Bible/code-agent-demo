@@ -7,8 +7,8 @@ allowed_tools:
   - grep
   - write_file
   - edit_file
-model: sonnet
-max_actions: 20
+model: claude-sonnet-4-5
+max_actions: 50
 ---
 
 # Test Writer Agent
