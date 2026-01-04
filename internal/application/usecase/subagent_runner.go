@@ -1,0 +1,330 @@
+// Package usecase contains application use cases.
+package usecase
+
+import (
+	"code-editing-agent/internal/domain/entity"
+	"code-editing-agent/internal/domain/port"
+	"context"
+	"errors"
+	"time"
+)
+
+// SubagentConfig holds configuration for subagent execution.
+type SubagentConfig struct {
+	MaxActions      int
+	MaxDuration     time.Duration
+	MaxConcurrent   int
+	AllowedTools    []string
+	BlockedCommands []string
+}
+
+// SubagentResult holds the result of a subagent execution.
+type SubagentResult struct {
+	SubagentID   string
+	AgentName    string
+	Status       string
+	Output       string
+	ActionsTaken int
+	Duration     time.Duration
+	Error        error
+}
+
+// SubagentRunner orchestrates isolated subagent execution for task delegation.
+type SubagentRunner struct {
+	convService  ConversationServiceInterface
+	toolExecutor port.ToolExecutor
+	aiProvider   port.AIProvider
+	config       SubagentConfig
+}
+
+// subagentRunContext holds state for a subagent execution run.
+type subagentRunContext struct {
+	ctx          context.Context
+	agent        *Agent
+	taskPrompt   string
+	subagentID   string
+	sessionID    string
+	startTime    time.Time
+	actionsTaken int
+	maxActions   int
+	lastMessage  *entity.Message
+}
+
+// NewSubagentRunner creates a new SubagentRunner with dependency validation.
+func NewSubagentRunner(
+	convService ConversationServiceInterface,
+	toolExecutor port.ToolExecutor,
+	aiProvider port.AIProvider,
+	config SubagentConfig,
+) *SubagentRunner {
+	if convService == nil {
+		panic("convService cannot be nil")
+	}
+	if toolExecutor == nil {
+		panic("toolExecutor cannot be nil")
+	}
+	if aiProvider == nil {
+		panic("aiProvider cannot be nil")
+	}
+
+	return &SubagentRunner{
+		convService:  convService,
+		toolExecutor: toolExecutor,
+		aiProvider:   aiProvider,
+		config:       config,
+	}
+}
+
+// Run executes a subagent task with the given agent configuration.
+//
+// The subagent execution follows this flow:
+//  1. Validate inputs (agent, taskPrompt, subagentID)
+//  2. Start a new isolated conversation session
+//  3. Set agent's custom system prompt
+//  4. Send the task prompt as user message
+//  5. Process AI responses in a loop:
+//     - If AI requests tools: execute tools, feed results back
+//     - If AI completes: extract output and return result
+//     - If action limit exceeded: stop and return
+//  6. Clean up conversation session
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout
+//   - agent: The agent configuration to use
+//   - taskPrompt: The task to execute
+//   - subagentID: Unique identifier for this subagent execution
+//
+// Returns:
+//   - *SubagentResult: Result of the subagent execution
+//   - error: Any error that occurred during execution
+func (r *SubagentRunner) Run(
+	ctx context.Context,
+	agent *Agent,
+	taskPrompt string,
+	subagentID string,
+) (*SubagentResult, error) {
+	if err := r.validateInputs(agent, taskPrompt); err != nil {
+		return r.validationFailedResult(subagentID, agent, err), err
+	}
+
+	// Model switching: Set agent model if specified and restore afterward
+	if agent.Model != "" && agent.Model != "inherit" {
+		originalModel := r.aiProvider.GetModel()
+		if err := r.aiProvider.SetModel(agent.Model); err != nil {
+			return r.validationFailedResult(subagentID, agent, err), err
+		}
+		defer func() { _ = r.aiProvider.SetModel(originalModel) }()
+	}
+
+	// Wrap context with subagent info for recursion prevention
+	ctx = port.WithSubagentContext(ctx, port.SubagentContextInfo{
+		SubagentID:      subagentID,
+		ParentSessionID: "",
+		IsSubagent:      true,
+		Depth:           1,
+	})
+
+	rc := &subagentRunContext{
+		ctx:        ctx,
+		agent:      agent,
+		taskPrompt: taskPrompt,
+		subagentID: subagentID,
+		startTime:  time.Now(),
+		maxActions: r.config.MaxActions,
+	}
+	if rc.maxActions == 0 {
+		rc.maxActions = 20
+	}
+
+	sessionID, err := r.convService.StartConversation(ctx)
+	if err != nil {
+		return rc.failedResult(err), err
+	}
+	rc.sessionID = sessionID
+	defer func() { _ = r.convService.EndConversation(ctx, sessionID) }()
+
+	if err := r.setupAgentSession(rc); err != nil {
+		return rc.failedResult(err), err
+	}
+
+	return r.runExecutionLoop(rc)
+}
+
+// validateInputs validates the input parameters for subagent execution.
+func (r *SubagentRunner) validateInputs(agent *Agent, taskPrompt string) error {
+	if agent == nil {
+		return errors.New("nil agent")
+	}
+	if taskPrompt == "" {
+		return errors.New("empty task prompt")
+	}
+	return nil
+}
+
+// validationFailedResult creates a failed result for validation errors.
+func (r *SubagentRunner) validationFailedResult(
+	subagentID string,
+	agent *Agent,
+	err error,
+) *SubagentResult {
+	agentName := ""
+	if agent != nil {
+		agentName = agent.Name
+	}
+	return &SubagentResult{
+		SubagentID: subagentID,
+		AgentName:  agentName,
+		Status:     "failed",
+		Error:      err,
+	}
+}
+
+// failedResult creates a failed result from the run context.
+func (rc *subagentRunContext) failedResult(err error) *SubagentResult {
+	return &SubagentResult{
+		SubagentID:   rc.subagentID,
+		AgentName:    rc.agent.Name,
+		Status:       "failed",
+		ActionsTaken: rc.actionsTaken,
+		Duration:     time.Since(rc.startTime),
+		Error:        err,
+	}
+}
+
+// completedResult creates a successful completion result from the run context.
+func (rc *subagentRunContext) completedResult() *SubagentResult {
+	output := ""
+	if rc.lastMessage != nil {
+		output = rc.lastMessage.Content
+	}
+
+	return &SubagentResult{
+		SubagentID:   rc.subagentID,
+		AgentName:    rc.agent.Name,
+		Status:       "completed",
+		Output:       output,
+		ActionsTaken: rc.actionsTaken,
+		Duration:     time.Since(rc.startTime),
+	}
+}
+
+// setupAgentSession configures the agent's system prompt and sends the initial task message.
+func (r *SubagentRunner) setupAgentSession(rc *subagentRunContext) error {
+	// Set custom system prompt from agent configuration
+	systemPrompt := rc.agent.SystemPrompt
+	if err := r.convService.SetCustomSystemPrompt(rc.ctx, rc.sessionID, systemPrompt); err != nil {
+		return err
+	}
+
+	// Add user message with task prompt
+	if _, err := r.convService.AddUserMessage(rc.ctx, rc.sessionID, rc.taskPrompt); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// runExecutionLoop runs the main tool execution loop until completion or limit.
+func (r *SubagentRunner) runExecutionLoop(rc *subagentRunContext) (*SubagentResult, error) {
+	for rc.actionsTaken < rc.maxActions {
+		// Process assistant response
+		msg, toolCalls, err := r.convService.ProcessAssistantResponse(rc.ctx, rc.sessionID)
+		if err != nil {
+			return rc.failedResult(err), err
+		}
+
+		rc.lastMessage = msg
+
+		// No tool calls means completion
+		if len(toolCalls) == 0 {
+			break
+		}
+
+		// Execute tools and feed results back
+		if err := r.processToolCalls(rc, toolCalls); err != nil {
+			return rc.failedResult(err), err
+		}
+
+		// Stop at MaxActions
+		if rc.actionsTaken >= rc.maxActions {
+			break
+		}
+	}
+
+	return rc.completedResult(), nil
+}
+
+// processToolCalls executes tool calls and feeds results back to the conversation.
+func (r *SubagentRunner) processToolCalls(rc *subagentRunContext, toolCalls []port.ToolCallInfo) error {
+	// Filter tools based on AllowedTools
+	filteredCalls := r.filterToolCalls(toolCalls)
+
+	var toolResults []entity.ToolResult
+	for _, tc := range filteredCalls {
+		toolResults = append(toolResults, r.executeToolCall(rc.ctx, tc))
+		rc.actionsTaken++
+	}
+
+	if len(toolResults) > 0 {
+		return r.convService.AddToolResultMessage(rc.ctx, rc.sessionID, toolResults)
+	}
+	return nil
+}
+
+// filterToolCalls filters tool calls based on config's AllowedTools.
+func (r *SubagentRunner) filterToolCalls(toolCalls []port.ToolCallInfo) []port.ToolCallInfo {
+	// If AllowedTools is nil, allow all tools
+	if r.config.AllowedTools == nil {
+		return toolCalls
+	}
+
+	// If AllowedTools is empty slice, block all tools
+	if len(r.config.AllowedTools) == 0 {
+		return nil
+	}
+
+	// Filter to only allowed tools
+	var filtered []port.ToolCallInfo
+	for _, tc := range toolCalls {
+		if r.isToolAllowed(r.config.AllowedTools, tc.ToolName) {
+			filtered = append(filtered, tc)
+		}
+	}
+	return filtered
+}
+
+// isToolAllowed checks if a tool is in the allowed list.
+func (r *SubagentRunner) isToolAllowed(allowedTools []string, toolName string) bool {
+	for _, allowed := range allowedTools {
+		if allowed == toolName {
+			return true
+		}
+	}
+	return false
+}
+
+// executeToolCall executes a single tool call and returns the result.
+func (r *SubagentRunner) executeToolCall(ctx context.Context, tc port.ToolCallInfo) entity.ToolResult {
+	// Recursion prevention: block "task" tool in subagent context
+	if tc.ToolName == "task" && port.IsSubagentContext(ctx) {
+		return entity.ToolResult{
+			ToolID:  tc.ToolID,
+			Result:  "task tool is blocked in subagent context to prevent recursion",
+			IsError: true,
+		}
+	}
+
+	result, execErr := r.toolExecutor.ExecuteTool(ctx, tc.ToolName, tc.Input)
+	if execErr != nil {
+		return entity.ToolResult{
+			ToolID:  tc.ToolID,
+			Result:  execErr.Error(),
+			IsError: true,
+		}
+	}
+	return entity.ToolResult{
+		ToolID:  tc.ToolID,
+		Result:  result,
+		IsError: false,
+	}
+}
