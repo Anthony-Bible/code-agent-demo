@@ -29,6 +29,41 @@ type SubagentResult struct {
 	Error        error
 }
 
+// GetSubagentID returns the subagent ID.
+func (r *SubagentResult) GetSubagentID() string {
+	return r.SubagentID
+}
+
+// GetAgentName returns the agent name.
+func (r *SubagentResult) GetAgentName() string {
+	return r.AgentName
+}
+
+// GetStatus returns the execution status.
+func (r *SubagentResult) GetStatus() string {
+	return r.Status
+}
+
+// GetOutput returns the output from the subagent.
+func (r *SubagentResult) GetOutput() string {
+	return r.Output
+}
+
+// GetActionsTaken returns the number of actions taken.
+func (r *SubagentResult) GetActionsTaken() int {
+	return r.ActionsTaken
+}
+
+// GetDuration returns the execution duration.
+func (r *SubagentResult) GetDuration() time.Duration {
+	return r.Duration
+}
+
+// GetError returns any error that occurred.
+func (r *SubagentResult) GetError() error {
+	return r.Error
+}
+
 // SubagentRunner orchestrates isolated subagent execution for task delegation.
 type SubagentRunner struct {
 	convService  ConversationServiceInterface

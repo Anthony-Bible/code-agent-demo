@@ -2,6 +2,7 @@ package tool
 
 import (
 	"bytes"
+	"code-editing-agent/internal/application/usecase"
 	"code-editing-agent/internal/domain/entity"
 	"code-editing-agent/internal/domain/port"
 	"context"
@@ -25,6 +26,24 @@ import (
 	"golang.org/x/net/html"
 )
 
+// SubagentUseCaseInterface defines the interface for spawning subagents.
+//
+// This interface enables the task tool to delegate work to specialized subagents,
+// allowing the main agent to offload complex tasks to focused agents with specific
+// capabilities. The interface abstracts the subagent spawning mechanism, allowing
+// the tool executor to remain decoupled from the concrete use case implementation.
+//
+// Example usage:
+//
+//	result, err := useCase.SpawnSubagent(ctx, "code-reviewer", "Review PR #123")
+//	if err != nil {
+//	    // Handle error
+//	}
+//	fmt.Println(result.Output) // Subagent's analysis
+type SubagentUseCaseInterface interface {
+	SpawnSubagent(ctx context.Context, agentName string, prompt string) (*usecase.SubagentResult, error)
+}
+
 // DangerousCommandCallback is called when a dangerous command is detected.
 // It receives the command and reason, and returns true if execution should proceed.
 type DangerousCommandCallback func(command, reason string) bool
@@ -38,6 +57,7 @@ type CommandConfirmationCallback func(command string, isDangerous bool, reason s
 type ExecutorAdapter struct {
 	fileManager                 port.FileManager
 	skillManager                port.SkillManager
+	subagentUseCase             SubagentUseCaseInterface
 	tools                       map[string]entity.Tool
 	mu                          sync.RWMutex
 	dangerousCommandCallback    DangerousCommandCallback
@@ -109,6 +129,21 @@ func NewExecutorAdapter(fileManager port.FileManager) *ExecutorAdapter {
 // This should be called after creation to enable skill activation features.
 func (a *ExecutorAdapter) SetSkillManager(sm port.SkillManager) {
 	a.skillManager = sm
+}
+
+// SetSubagentUseCase sets the subagent use case for task delegation.
+//
+// This method must be called during initialization (typically in the DI container)
+// to enable the task tool. Without a subagent use case, the task tool will return
+// an error when invoked. The method is thread-safe and can be called multiple times
+// to update the use case implementation.
+//
+// This design allows the tool executor to remain independent of the application layer
+// while still supporting task delegation functionality.
+func (a *ExecutorAdapter) SetSubagentUseCase(uc SubagentUseCaseInterface) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.subagentUseCase = uc
 }
 
 // SetDangerousCommandCallback sets the callback for dangerous command confirmation.
@@ -458,6 +493,29 @@ The tool returns aggregated results showing success/failure counts and individua
 	}
 	a.tools[batchToolTool.Name] = batchToolTool
 
+	// Register task tool
+	taskTool := entity.Tool{
+		ID:          "task",
+		Name:        "task",
+		Description: "Spawns a subagent to handle a delegated task. Returns the subagent's result when complete. Cannot be called from within a subagent (prevents recursion).",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"agent_name": map[string]interface{}{
+					"type":        "string",
+					"description": "Name of the subagent to spawn (e.g., 'code-reviewer', 'test-writer')",
+				},
+				"prompt": map[string]interface{}{
+					"type":        "string",
+					"description": "Task description/instructions for the subagent to execute",
+				},
+			},
+			"required": []string{"agent_name", "prompt"},
+		},
+		RequiredFields: []string{"agent_name", "prompt"},
+	}
+	a.tools[taskTool.Name] = taskTool
+
 	// Register investigation tools
 	a.registerInvestigationTools()
 }
@@ -479,6 +537,8 @@ func (a *ExecutorAdapter) executeByName(ctx context.Context, name string, input 
 		return a.executeActivateSkill(ctx, input)
 	case "batch_tool":
 		return a.executeBatchTool(ctx, input)
+	case "task":
+		return a.executeTask(ctx, input)
 	case "complete_investigation":
 		return a.executeCompleteInvestigation(ctx, input)
 	case "escalate_investigation":
@@ -701,6 +761,12 @@ type batchToolInput struct {
 type batchInvocation struct {
 	ToolName  string          `json:"tool_name"`
 	Arguments json.RawMessage `json:"arguments"`
+}
+
+// taskInput represents the input for the task tool.
+type taskInput struct {
+	AgentName string `json:"agent_name"`
+	Prompt    string `json:"prompt"`
 }
 
 // batchToolOutput represents the output from the batch_tool tool.
@@ -1607,6 +1673,88 @@ func (a *ExecutorAdapter) executeReportInvestigation(ctx context.Context, input 
 	}
 
 	return string(result), nil
+}
+
+// executeTask spawns a subagent to handle a delegated task.
+//
+// This method implements the task tool, which allows the main agent to delegate
+// work to specialized subagents. The execution flow is:
+//
+//  1. Recursion prevention: Blocks execution if called from within a subagent context
+//  2. Availability check: Ensures the subagent use case has been configured
+//  3. Input parsing: Extracts agent_name and prompt from the tool input
+//  4. Input validation: Verifies required fields are non-empty
+//  5. Subagent spawning: Delegates to the use case to create and run the subagent
+//  6. Result formatting: Converts the SubagentResult to a JSON string
+//
+// Error cases:
+//   - Returns "prevents infinite recursion" if called from a subagent context
+//   - Returns "not available" if SetSubagentUseCase was never called
+//   - Returns "required" errors if agent_name or prompt are empty
+//   - Propagates errors from the subagent use case with "execution failed" wrapper
+//   - Returns "nil result" if the use case returns success but nil result
+//
+// The result JSON includes: subagent_id, agent_name, status, output, actions_taken,
+// duration_ms, and error (if the subagent encountered an error).
+func (a *ExecutorAdapter) executeTask(ctx context.Context, input json.RawMessage) (string, error) {
+	// Check for recursion (subagents cannot spawn subagents)
+	if port.IsSubagentContext(ctx) {
+		return "", errors.New("task tool cannot be called from within a subagent (prevents infinite recursion)")
+	}
+
+	// Check if use case is set
+	a.mu.RLock()
+	useCase := a.subagentUseCase
+	a.mu.RUnlock()
+
+	if useCase == nil {
+		return "", errors.New("subagent use case not available")
+	}
+
+	// Parse input
+	var params taskInput
+	if err := json.Unmarshal(input, &params); err != nil {
+		return "", fmt.Errorf("failed to parse task input: %w", err)
+	}
+
+	// Validate inputs
+	if params.AgentName == "" {
+		return "", errors.New("agent_name is required")
+	}
+	if params.Prompt == "" {
+		return "", errors.New("prompt is required")
+	}
+
+	// Spawn subagent
+	result, err := useCase.SpawnSubagent(ctx, params.AgentName, params.Prompt)
+	if err != nil {
+		return "", fmt.Errorf("subagent execution failed: %w", err)
+	}
+
+	if result == nil {
+		return "", errors.New("subagent execution returned nil result")
+	}
+
+	// Format result as JSON
+	resultJSON := map[string]interface{}{
+		"subagent_id":   result.SubagentID,
+		"agent_name":    result.AgentName,
+		"status":        result.Status,
+		"output":        result.Output,
+		"actions_taken": result.ActionsTaken,
+		"duration_ms":   result.Duration.Milliseconds(),
+	}
+
+	if result.Error != nil {
+		resultJSON["error"] = result.Error.Error()
+	}
+
+	resultBytes, err := json.MarshalIndent(resultJSON, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to format result: %w", err)
+	}
+
+	return string(resultBytes), nil
 }
 
 // executeBatchTool executes the batch_tool tool.
