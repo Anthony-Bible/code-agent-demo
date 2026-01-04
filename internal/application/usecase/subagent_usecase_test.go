@@ -1590,7 +1590,7 @@ func TestSpawnMultiple_LargeBatch(t *testing.T) {
 
 	// Create 15 requests
 	requests := make([]*SubagentRequest, 15)
-	for i := 0; i < 15; i++ {
+	for i := range 15 {
 		requests[i] = &SubagentRequest{
 			AgentName: "test-agent",
 			Prompt:    fmt.Sprintf("task %d", i),
@@ -1610,7 +1610,7 @@ func TestSpawnMultiple_LargeBatch(t *testing.T) {
 	}
 
 	// Verify all completed successfully
-	for i := 0; i < 15; i++ {
+	for i := range 15 {
 		if result.Results[i].Status != "completed" {
 			t.Errorf("Request %d failed", i)
 		}
@@ -1847,14 +1847,14 @@ func TestSpawnMultiple_AllFailuresReturnsAllErrors(t *testing.T) {
 	}
 
 	// Verify all results are nil
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if result.Results[i] != nil {
 			t.Errorf("Result %d should be nil on error", i)
 		}
 	}
 
 	// Verify all errors are set
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if result.Errors[i] == nil {
 			t.Errorf("Error %d should be set", i)
 		}
@@ -1919,7 +1919,7 @@ func TestSpawnMultiple_ContextCancellationStopsPendingSpawns(t *testing.T) {
 
 	// All results should have errors due to cancellation
 	cancelledCount := 0
-	for i := 0; i < len(result.Errors); i++ {
+	for i := range len(result.Errors) {
 		if result.Errors[i] != nil && errors.Is(result.Errors[i], context.Canceled) {
 			cancelledCount++
 		}
@@ -1971,7 +1971,7 @@ func TestSpawnMultiple_PreCancelledContext(t *testing.T) {
 	}
 
 	// All should have cancellation errors
-	for i := 0; i < len(requests); i++ {
+	for i := range len(requests) {
 		if result.Results[i] != nil {
 			t.Errorf("Result %d should be nil for cancelled context", i)
 		}
@@ -2025,7 +2025,7 @@ func TestSpawnMultiple_TimeoutDuringExecution(t *testing.T) {
 	}
 
 	// All should timeout
-	for i := 0; i < len(requests); i++ {
+	for i := range len(requests) {
 		if result.Errors[i] == nil {
 			t.Errorf("Error %d should be set for timeout", i)
 			continue
@@ -2066,7 +2066,7 @@ func TestSpawnMultiple_ConcurrentWritesDontCorruptResults(t *testing.T) {
 
 	// Create many requests to stress-test concurrent writes
 	requests := make([]*SubagentRequest, 20)
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		requests[i] = &SubagentRequest{
 			AgentName: "test-agent",
 			Prompt:    fmt.Sprintf("task %d", i),
@@ -2084,7 +2084,7 @@ func TestSpawnMultiple_ConcurrentWritesDontCorruptResults(t *testing.T) {
 	}
 
 	// Verify each result matches its request
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		if result.Results[i] == nil {
 			t.Errorf("Result %d is nil (possible corruption)", i)
 			continue
@@ -2124,9 +2124,9 @@ func TestSpawnMultiple_RaceFlagPasses(t *testing.T) {
 	ctx := context.Background()
 
 	// Run multiple parallel batches to stress test
-	for batch := 0; batch < 3; batch++ {
+	for batch := range 3 {
 		requests := make([]*SubagentRequest, 10)
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			requests[i] = &SubagentRequest{
 				AgentName: "test-agent",
 				Prompt:    fmt.Sprintf("batch %d task %d", batch, i),

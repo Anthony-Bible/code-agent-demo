@@ -4,6 +4,7 @@ package config
 
 import (
 	"code-editing-agent/internal/application/usecase"
+	"code-editing-agent/internal/domain/entity"
 	"code-editing-agent/internal/domain/port"
 	"code-editing-agent/internal/domain/service"
 	"code-editing-agent/internal/infrastructure/adapter/ai"
@@ -11,11 +12,13 @@ import (
 	"code-editing-agent/internal/infrastructure/adapter/file"
 	"code-editing-agent/internal/infrastructure/adapter/investigation"
 	"code-editing-agent/internal/infrastructure/adapter/skill"
+	"code-editing-agent/internal/infrastructure/adapter/subagent"
 	"code-editing-agent/internal/infrastructure/adapter/tool"
 	"code-editing-agent/internal/infrastructure/adapter/ui"
 	"code-editing-agent/internal/infrastructure/adapter/webhook"
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -74,6 +77,8 @@ type Container struct {
 	alertSourceManager   port.AlertSourceManager
 	investigationUseCase *usecase.AlertInvestigationUseCase
 	webhookAdapter       *webhook.HTTPAdapter
+	subagentManager      port.SubagentManager
+	subagentUseCase      *usecase.SubagentUseCase
 }
 
 // NewContainer creates a new DI container and wires all dependencies.
@@ -172,6 +177,11 @@ func NewContainer(cfg *Config) (*Container, error) {
 		return nil, err
 	}
 
+	// Step 5: Create subagent components
+	subagentManager, subagentUseCase := createSubagentComponents(
+		cfg, convService, toolExecutor, aiAdapter, baseExecutor,
+	)
+
 	return &Container{
 		config:               cfg,
 		chatService:          chatService,
@@ -184,6 +194,8 @@ func NewContainer(cfg *Config) (*Container, error) {
 		alertSourceManager:   alertSourceManager,
 		investigationUseCase: investigationUseCase,
 		webhookAdapter:       webhookAdapter,
+		subagentManager:      subagentManager,
+		subagentUseCase:      subagentUseCase,
 	}, nil
 }
 
@@ -245,6 +257,60 @@ func createInvestigationComponents(
 	webhookAdapter.SetAlertHandler(alertHandler.HandleEntityAlert)
 
 	return investigationUseCase, alertSourceManager, webhookAdapter, nil
+}
+
+// createSubagentComponents sets up the subagent system including the manager,
+// runner, and use case. Subagents are specialized AI agents that can be spawned
+// to handle delegated tasks in isolated conversation sessions.
+func createSubagentComponents(
+	cfg *Config,
+	convService *service.ConversationService,
+	toolExecutor port.ToolExecutor,
+	aiAdapter port.AIProvider,
+	baseExecutor *tool.ExecutorAdapter,
+) (port.SubagentManager, *usecase.SubagentUseCase) {
+	// Create LocalSubagentManager with discovery directories (priority order: highest to lowest)
+	// Discovery order follows agentskills.io spec:
+	// 1. ./agents (project root) - highest priority, project-specific agents
+	// 2. ./.claude/agents (project .claude) - middle priority, project-level shared agents
+	// 3. ~/.claude/agents (user global) - lowest priority, user-level reusable agents
+	subagentManager := subagent.NewLocalSubagentManagerWithDirs([]subagent.DirConfig{
+		{Path: filepath.Join(cfg.WorkingDir, "agents"), SourceType: entity.SubagentSourceProject},
+		{Path: filepath.Join(cfg.WorkingDir, ".claude", "agents"), SourceType: entity.SubagentSourceProjectClaude},
+		{Path: filepath.Join(getUserHome(), ".claude", "agents"), SourceType: entity.SubagentSourceUser},
+	})
+
+	// Create SubagentRunner with dependencies and safety configuration
+	// SubagentRunner executes subagent tasks with resource limits to prevent runaway execution.
+	// Config values:
+	// - MaxActions: 20 (prevents infinite loops by limiting tool executions per subagent)
+	// - MaxDuration: 5 minutes (prevents hanging subagents)
+	// - MaxConcurrent: 5 (limits parallel subagent execution to control resource usage)
+	// - AllowedTools: nil (allow all tools by default; can be restricted per agent via AGENT.md)
+	subagentRunner := usecase.NewSubagentRunner(
+		convService,
+		toolExecutor,
+		aiAdapter,
+		usecase.SubagentConfig{
+			MaxActions:    20,
+			MaxDuration:   5 * time.Minute,
+			MaxConcurrent: 5,
+			AllowedTools:  nil, // nil means allow all tools (can be overridden per agent)
+		},
+	)
+
+	// Create SubagentUseCase to orchestrate subagent spawning and execution
+	// This use case coordinates between the manager (discovery) and runner (execution)
+	subagentUseCase := usecase.NewSubagentUseCase(
+		subagentManager,
+		subagentRunner,
+	)
+
+	// Wire SubagentUseCase to base ToolExecutor
+	// This enables the 'task' tool, allowing the main AI to delegate work to subagents
+	baseExecutor.SetSubagentUseCase(subagentUseCase)
+
+	return subagentManager, subagentUseCase
 }
 
 // ChatService returns the application chat service.
@@ -310,4 +376,31 @@ func (c *Container) InvestigationUseCase() *usecase.AlertInvestigationUseCase {
 // Useful for starting the webhook server to receive alerts via HTTP.
 func (c *Container) WebhookAdapter() *webhook.HTTPAdapter {
 	return c.webhookAdapter
+}
+
+// SubagentManager returns the subagent manager port implementation.
+// The manager is responsible for discovering and loading subagent definitions
+// from configured directories (./agents, ./.claude/agents, ~/.claude/agents).
+// Useful for direct subagent discovery and metadata operations.
+func (c *Container) SubagentManager() port.SubagentManager {
+	return c.subagentManager
+}
+
+// SubagentUseCase returns the subagent use case for orchestrating subagent execution.
+// This use case coordinates between the manager (discovery) and runner (execution),
+// providing high-level operations like SpawnSubagent for delegating tasks to specialized agents.
+// Useful for spawning and managing subagent lifecycles.
+func (c *Container) SubagentUseCase() *usecase.SubagentUseCase {
+	return c.subagentUseCase
+}
+
+// getUserHome returns the user's home directory.
+// Returns an empty string if the home directory cannot be determined.
+// This is used for resolving the global ~/.claude/agents directory.
+func getUserHome() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return home
 }
