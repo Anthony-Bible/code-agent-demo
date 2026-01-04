@@ -26,11 +26,11 @@ type SubagentDiscoveryResult struct {
 // This port represents the outbound dependency for subagent operations and follows
 // hexagonal architecture principles by abstracting subagent management implementations.
 type SubagentManager interface {
-	// DiscoverAgents scans the subagents directories for available subagents.
+	// DiscoverAgents scans the agents directories for available subagents.
 	// Subagents are discovered from three locations in priority order:
-	// 1. ./subagents (project root, highest priority)
-	// 2. ./.claude/subagents (project .claude directory)
-	// 3. ~/.claude/subagents (user global, lowest priority)
+	// 1. ./agents (project root, highest priority)
+	// 2. ./.claude/agents (project .claude directory)
+	// 3. ~/.claude/agents (user global, lowest priority)
 	// Returns information about all discovered subagents including metadata.
 	DiscoverAgents(ctx context.Context) (*SubagentDiscoveryResult, error)
 

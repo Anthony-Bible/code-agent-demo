@@ -12,7 +12,7 @@ import (
 type SubagentSourceType string
 
 const (
-	// SubagentSourceProject indicates a subagent from ./subagents (project root, highest priority).
+	// SubagentSourceProject indicates a subagent from ./agents (project root, highest priority).
 	SubagentSourceProject SubagentSourceType = "project"
 	// SubagentSourceProjectClaude indicates a subagent from ./.claude/subagents (project .claude directory).
 	SubagentSourceProjectClaude SubagentSourceType = "project-claude"
@@ -106,24 +106,26 @@ func (s *Subagent) parseAllowedTools(raw map[string]interface{}) {
 	}
 }
 
-// Validate checks if the subagent has valid required fields.
-func (s *Subagent) Validate() error {
-	if s.Name == "" {
+// ValidateSubagentName validates a subagent name according to the agentskills.io spec.
+// Names must be 1-64 lowercase alphanumeric characters and hyphens, cannot start/end
+// with hyphen or have consecutive hyphens.
+func ValidateSubagentName(name string) error {
+	if name == "" {
 		return errors.New("subagent name cannot be empty")
 	}
-	if len(s.Name) > 64 {
+	if len(name) > 64 {
 		return errors.New("subagent name must be 64 characters or less")
 	}
 
 	// Validate name format: lowercase alphanumeric and hyphens only
 	// Cannot start/end with hyphen, cannot have consecutive hyphens
-	if s.Name[0] == '-' || s.Name[len(s.Name)-1] == '-' {
+	if name[0] == '-' || name[len(name)-1] == '-' {
 		return errors.New("subagent name cannot start or end with a hyphen")
 	}
 
 	prevChar := byte(0)
-	for i := range len(s.Name) {
-		c := s.Name[i]
+	for i := range len(name) {
+		c := name[i]
 		// Check for consecutive hyphens
 		if c == '-' && prevChar == '-' {
 			return errors.New("subagent name cannot contain consecutive hyphens")
@@ -133,6 +135,15 @@ func (s *Subagent) Validate() error {
 			return errors.New("subagent name must contain only lowercase letters, numbers, and hyphens")
 		}
 		prevChar = c
+	}
+
+	return nil
+}
+
+// Validate checks if the subagent has valid required fields.
+func (s *Subagent) Validate() error {
+	if err := ValidateSubagentName(s.Name); err != nil {
+		return err
 	}
 
 	if s.Description == "" {
