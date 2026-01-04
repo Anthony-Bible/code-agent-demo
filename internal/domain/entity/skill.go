@@ -178,33 +178,11 @@ func (s *Skill) ValidateDirectoryName(dirName string) error {
 // ---
 // Content here.
 func ParseSkillFromYAML(content string) (*Skill, error) {
-	// Find the frontmatter boundaries
-	content = strings.TrimSpace(content)
-	if !strings.HasPrefix(content, "---") {
-		return nil, errors.New("invalid YAML frontmatter: missing opening ---")
+	// Extract frontmatter using shared helper
+	frontmatter, rawContent, err := extractFrontmatter(content)
+	if err != nil {
+		return nil, err
 	}
-
-	// Find the closing ---
-	firstLineEnd := strings.Index(content[3:], "\n---")
-	if firstLineEnd == -1 {
-		// Try to find it at the start of a line without the preceding newline
-		firstLineEnd = strings.Index(content, "\n---")
-		if firstLineEnd == -1 {
-			return nil, errors.New("invalid YAML frontmatter: missing closing ---")
-		}
-	}
-
-	// Get the frontmatter part
-	frontmatterEnd := firstLineEnd + 4
-	frontmatter := content[:frontmatterEnd]
-
-	// Get the content after frontmatter
-	rawContent := strings.TrimSpace(content[frontmatterEnd+3:])
-
-	// Remove the opening and closing --- from frontmatter
-	frontmatter = strings.TrimPrefix(frontmatter, "---")
-	frontmatter = strings.TrimSuffix(frontmatter, "\n---")
-	frontmatter = strings.TrimSpace(frontmatter)
 
 	// Parse YAML
 	var skill Skill
@@ -238,30 +216,11 @@ func ParseSkillFromYAML(content string) (*Skill, error) {
 // ---
 // Content here (ignored).
 func ParseSkillMetadataFromYAML(content string) (*Skill, error) {
-	// Find the frontmatter boundaries (same logic as ParseSkillFromYAML)
-	content = strings.TrimSpace(content)
-	if !strings.HasPrefix(content, "---") {
-		return nil, errors.New("invalid YAML frontmatter: missing opening ---")
+	// Extract frontmatter using shared helper (ignoring remaining content)
+	frontmatter, _, err := extractFrontmatter(content)
+	if err != nil {
+		return nil, err
 	}
-
-	// Find the closing ---
-	firstLineEnd := strings.Index(content[3:], "\n---")
-	if firstLineEnd == -1 {
-		// Try to find it at the start of a line without the preceding newline
-		firstLineEnd = strings.Index(content, "\n---")
-		if firstLineEnd == -1 {
-			return nil, errors.New("invalid YAML frontmatter: missing closing ---")
-		}
-	}
-
-	// Get the frontmatter part
-	frontmatterEnd := firstLineEnd + 4
-	frontmatter := content[:frontmatterEnd]
-
-	// Remove the opening and closing --- from frontmatter
-	frontmatter = strings.TrimPrefix(frontmatter, "---")
-	frontmatter = strings.TrimSuffix(frontmatter, "\n---")
-	frontmatter = strings.TrimSpace(frontmatter)
 
 	// Parse YAML
 	var skill Skill
