@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // MockSubagentManager implements port.SubagentManager for testing.
@@ -489,5 +490,725 @@ func TestSpawnSubagent_ContextCancellation(t *testing.T) {
 	}
 	if result != nil && result.Status == "completed" {
 		t.Error("SpawnSubagent() should not return success result with cancelled context")
+	}
+}
+
+// ==================== Async Spawn Tests (Cycle 5.2) ====================
+
+// ==================== Input Validation Tests (Async) ====================
+
+func TestSpawnSubagentAsync_EmptyAgentName(t *testing.T) {
+	manager := &MockSubagentManager{}
+	runner := &MockSubagentRunner{}
+	uc := NewSubagentUseCase(manager, runner)
+
+	ctx := context.Background()
+	handle, err := uc.SpawnSubagentAsync(ctx, "", "some prompt")
+
+	if err == nil {
+		t.Error("SpawnSubagentAsync() did not return error for empty agentName")
+	}
+	if handle != nil {
+		t.Error("SpawnSubagentAsync() should return nil handle for empty agentName")
+	}
+	if err != nil && !strings.Contains(err.Error(), "agentName") {
+		t.Errorf("Expected error message to mention 'agentName', got: %v", err)
+	}
+}
+
+func TestSpawnSubagentAsync_EmptyPrompt(t *testing.T) {
+	manager := &MockSubagentManager{}
+	runner := &MockSubagentRunner{}
+	uc := NewSubagentUseCase(manager, runner)
+
+	ctx := context.Background()
+	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "")
+
+	if err == nil {
+		t.Error("SpawnSubagentAsync() did not return error for empty prompt")
+	}
+	if handle != nil {
+		t.Error("SpawnSubagentAsync() should return nil handle for empty prompt")
+	}
+	if err != nil && !strings.Contains(err.Error(), "prompt") {
+		t.Errorf("Expected error message to mention 'prompt', got: %v", err)
+	}
+}
+
+func TestSpawnSubagentAsync_AgentNotFound(t *testing.T) {
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return nil, errors.New("agent not found")
+		},
+	}
+	runner := &MockSubagentRunner{}
+	uc := NewSubagentUseCase(manager, runner)
+
+	ctx := context.Background()
+	handle, err := uc.SpawnSubagentAsync(ctx, "nonexistent-agent", "do something")
+
+	if err == nil {
+		t.Error("SpawnSubagentAsync() did not return error when agent not found")
+	}
+	if handle != nil {
+		t.Error("SpawnSubagentAsync() should return nil handle when agent not found")
+	}
+}
+
+// ==================== Non-Blocking Behavior Tests ====================
+
+func TestSpawnSubagentAsync_ReturnsImmediately(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name:        "test-agent",
+		Description: "A test agent",
+		RawContent:  "Test system prompt",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	// Mock runner with intentional delay to verify non-blocking behavior
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			// Simulate slow execution (100ms)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(100 * time.Millisecond):
+				return &SubagentResult{
+					Status:    "completed",
+					AgentName: "test-agent",
+					Output:    "Task completed",
+				}, nil
+			}
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	start := time.Now()
+	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "test prompt")
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("SpawnSubagentAsync() returned error: %v", err)
+	}
+
+	// Should return immediately (much less than 100ms - allow 50ms for overhead)
+	if elapsed > 50*time.Millisecond {
+		t.Errorf("Expected non-blocking return within 50ms, but took %v", elapsed)
+	}
+
+	if handle == nil {
+		t.Fatal("SpawnSubagentAsync() returned nil handle")
+	}
+
+	// Wait for result to avoid goroutine leak
+	select {
+	case <-handle.Result:
+	case <-handle.Error:
+	case <-time.After(200 * time.Millisecond):
+		t.Error("Timeout waiting for async execution to complete")
+	}
+}
+
+func TestSpawnSubagentAsync_ReturnsValidHandle(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			return &SubagentResult{Status: "completed"}, nil
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "test prompt")
+	if err != nil {
+		t.Fatalf("SpawnSubagentAsync() returned error: %v", err)
+	}
+	if handle == nil {
+		t.Fatal("SpawnSubagentAsync() returned nil handle")
+	}
+	if handle.Result == nil {
+		t.Error("Handle.Result channel is nil")
+	}
+	if handle.Error == nil {
+		t.Error("Handle.Error channel is nil")
+	}
+
+	// Wait for result to avoid goroutine leak
+	select {
+	case <-handle.Result:
+	case <-handle.Error:
+	case <-time.After(100 * time.Millisecond):
+		t.Error("Timeout waiting for async execution")
+	}
+}
+
+func TestSpawnSubagentAsync_GeneratesUniqueSubagentID(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			return &SubagentResult{Status: "completed"}, nil
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	// Spawn multiple async subagents
+	handle1, err1 := uc.SpawnSubagentAsync(ctx, "test-agent", "task 1")
+	handle2, err2 := uc.SpawnSubagentAsync(ctx, "test-agent", "task 2")
+
+	if err1 != nil || err2 != nil {
+		t.Fatalf("SpawnSubagentAsync() returned errors: %v, %v", err1, err2)
+	}
+
+	if handle1.SubagentID == "" || handle2.SubagentID == "" {
+		t.Error("SpawnSubagentAsync() generated empty subagent ID")
+	}
+
+	if handle1.SubagentID == handle2.SubagentID {
+		t.Error("SpawnSubagentAsync() generated duplicate subagent IDs")
+	}
+
+	// Cleanup
+	for _, h := range []*SubagentHandle{handle1, handle2} {
+		select {
+		case <-h.Result:
+		case <-h.Error:
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func TestSpawnSubagentAsync_HandleContainsCorrectAgentName(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "super-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			return &SubagentResult{Status: "completed"}, nil
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	handle, err := uc.SpawnSubagentAsync(ctx, "super-agent", "test prompt")
+	if err != nil {
+		t.Fatalf("SpawnSubagentAsync() returned error: %v", err)
+	}
+	if handle.AgentName != "super-agent" {
+		t.Errorf("Expected handle.AgentName to be 'super-agent', got '%s'", handle.AgentName)
+	}
+
+	// Cleanup
+	select {
+	case <-handle.Result:
+	case <-handle.Error:
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// ==================== Background Execution Tests ====================
+
+func TestSpawnSubagentAsync_ResultSentToChannel(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	expectedResult := &SubagentResult{
+		Status:    "completed",
+		AgentName: "test-agent",
+		Output:    "Task completed successfully",
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			return expectedResult, nil
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "test prompt")
+	if err != nil {
+		t.Fatalf("SpawnSubagentAsync() returned error: %v", err)
+	}
+
+	// Wait for result from channel
+	select {
+	case result := <-handle.Result:
+		if result == nil {
+			t.Fatal("Received nil result from Result channel")
+		}
+		if result.Status != "completed" {
+			t.Errorf("Expected status 'completed', got '%s'", result.Status)
+		}
+		if result.AgentName != "test-agent" {
+			t.Errorf("Expected AgentName 'test-agent', got '%s'", result.AgentName)
+		}
+		if result.Output != "Task completed successfully" {
+			t.Errorf("Expected output 'Task completed successfully', got '%s'", result.Output)
+		}
+	case err := <-handle.Error:
+		t.Fatalf("Received error instead of result: %v", err)
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("Timeout waiting for result on Result channel")
+	}
+}
+
+func TestSpawnSubagentAsync_ErrorSentToChannel(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	expectedErr := errors.New("runner execution failed")
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			return nil, expectedErr
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "test prompt")
+	if err != nil {
+		t.Fatalf("SpawnSubagentAsync() returned error: %v", err)
+	}
+
+	// Wait for error from channel
+	select {
+	case result := <-handle.Result:
+		t.Fatalf("Received result instead of error: %v", result)
+	case err := <-handle.Error:
+		if err == nil {
+			t.Fatal("Received nil error from Error channel")
+		}
+		if !errors.Is(err, expectedErr) && err.Error() != expectedErr.Error() {
+			t.Errorf("Expected error '%v', got '%v'", expectedErr, err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("Timeout waiting for error on Error channel")
+	}
+}
+
+func TestSpawnSubagentAsync_ChannelsClosedAfterResult(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			return &SubagentResult{Status: "completed"}, nil
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "test prompt")
+	if err != nil {
+		t.Fatalf("SpawnSubagentAsync() returned error: %v", err)
+	}
+
+	// Receive result
+	select {
+	case <-handle.Result:
+	case <-handle.Error:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("Timeout waiting for result")
+	}
+
+	// Give a moment for channels to close
+	time.Sleep(10 * time.Millisecond)
+
+	// Verify Result channel is closed
+	select {
+	case _, ok := <-handle.Result:
+		if ok {
+			t.Error("Result channel should be closed after sending result")
+		}
+	default:
+		// Channel might be closed but no value available
+	}
+
+	// Verify Error channel is closed
+	select {
+	case _, ok := <-handle.Error:
+		if ok {
+			t.Error("Error channel should be closed after sending result")
+		}
+	default:
+		// Channel might be closed but no value available
+	}
+}
+
+func TestSpawnSubagentAsync_OnlyOneMessageSent(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			return &SubagentResult{Status: "completed"}, nil
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "test prompt")
+	if err != nil {
+		t.Fatalf("SpawnSubagentAsync() returned error: %v", err)
+	}
+
+	resultReceived := false
+	errorReceived := false
+
+	// Receive from Result channel
+	select {
+	case _, ok := <-handle.Result:
+		if ok {
+			resultReceived = true
+		}
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// Receive from Error channel
+	select {
+	case _, ok := <-handle.Error:
+		if ok {
+			errorReceived = true
+		}
+	case <-time.After(10 * time.Millisecond):
+	}
+
+	// Verify only one message was sent (result OR error, not both)
+	if resultReceived && errorReceived {
+		t.Error("Both result and error were sent to channels (should be mutually exclusive)")
+	}
+	if !resultReceived && !errorReceived {
+		t.Error("Neither result nor error was sent to channels")
+	}
+}
+
+func TestSpawnSubagentAsync_MultipleSpawnsDontInterfere(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	var callCount int
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			callCount++
+			// Different delays to ensure they execute concurrently
+			delay := time.Duration(callCount*10) * time.Millisecond
+			time.Sleep(delay)
+			return &SubagentResult{
+				Status: "completed",
+				Output: taskPrompt, // Echo prompt to verify isolation
+			}, nil
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	// Spawn 3 subagents concurrently
+	handle1, err1 := uc.SpawnSubagentAsync(ctx, "test-agent", "task 1")
+	handle2, err2 := uc.SpawnSubagentAsync(ctx, "test-agent", "task 2")
+	handle3, err3 := uc.SpawnSubagentAsync(ctx, "test-agent", "task 3")
+
+	if err1 != nil || err2 != nil || err3 != nil {
+		t.Fatalf("SpawnSubagentAsync() returned errors: %v, %v, %v", err1, err2, err3)
+	}
+
+	// Collect results
+	results := make(map[string]string)
+	for _, h := range []*SubagentHandle{handle1, handle2, handle3} {
+		select {
+		case result := <-h.Result:
+			results[h.SubagentID] = result.Output
+		case err := <-h.Error:
+			t.Fatalf("Received error from handle: %v", err)
+		case <-time.After(300 * time.Millisecond):
+			t.Fatal("Timeout waiting for results")
+		}
+	}
+
+	// Verify all 3 tasks completed with correct outputs
+	if len(results) != 3 {
+		t.Errorf("Expected 3 results, got %d", len(results))
+	}
+}
+
+// ==================== Context Cancellation Tests ====================
+
+func TestSpawnSubagentAsync_ContextCancellationDuringExecution(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			// Simulate long-running task that respects context
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(200 * time.Millisecond):
+				return &SubagentResult{Status: "completed"}, nil
+			}
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+
+	// Create cancellable context
+	ctx, cancel := context.WithCancel(context.Background())
+
+	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "test prompt")
+	if err != nil {
+		t.Fatalf("SpawnSubagentAsync() returned error: %v", err)
+	}
+
+	// Cancel context after spawn but during execution
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	// Should receive error from Error channel
+	select {
+	case result := <-handle.Result:
+		t.Fatalf("Received result instead of error after cancellation: %v", result)
+	case err := <-handle.Error:
+		if err == nil {
+			t.Fatal("Received nil error after context cancellation")
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("Expected context.Canceled error, got: %v", err)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("Timeout waiting for cancellation error")
+	}
+}
+
+func TestSpawnSubagentAsync_CancelledContextBeforeSpawn(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			default:
+				return &SubagentResult{Status: "completed"}, nil
+			}
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+
+	// Create already-cancelled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "test prompt")
+
+	// Should return immediately with error (no goroutine spawned for cancelled context)
+	if err == nil {
+		t.Error("SpawnSubagentAsync() did not return error for already-cancelled context")
+	}
+	if handle != nil {
+		t.Error("SpawnSubagentAsync() should return nil handle for cancelled context")
+	}
+}
+
+func TestSpawnSubagentAsync_ContextTimeoutPropagates(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			// Simulate long task
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(300 * time.Millisecond):
+				return &SubagentResult{Status: "completed"}, nil
+			}
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+
+	// Context with short timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "test prompt")
+	if err != nil {
+		t.Fatalf("SpawnSubagentAsync() returned error: %v", err)
+	}
+
+	// Should receive timeout error
+	select {
+	case result := <-handle.Result:
+		t.Fatalf("Received result instead of timeout error: %v", result)
+	case err := <-handle.Error:
+		if err == nil {
+			t.Fatal("Received nil error after timeout")
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("Expected context.DeadlineExceeded error, got: %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("Timeout waiting for context timeout error")
+	}
+}
+
+// ==================== LoadAgentMetadata Error Tests ====================
+
+func TestSpawnSubagentAsync_LoadAgentMetadataError(t *testing.T) {
+	expectedErr := errors.New("metadata load failure")
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return nil, expectedErr
+		},
+	}
+	runner := &MockSubagentRunner{}
+	uc := NewSubagentUseCase(manager, runner)
+
+	ctx := context.Background()
+	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "test prompt")
+
+	// Should return error immediately (synchronously) without spawning goroutine
+	if err == nil {
+		t.Error("SpawnSubagentAsync() did not return error for LoadAgentMetadata failure")
+	}
+	if handle != nil {
+		t.Error("SpawnSubagentAsync() should return nil handle for LoadAgentMetadata failure")
+	}
+	if !errors.Is(err, expectedErr) && !strings.Contains(err.Error(), expectedErr.Error()) {
+		t.Errorf("Expected error to wrap '%v', got: %v", expectedErr, err)
+	}
+}
+
+func TestSpawnSubagentAsync_LoadAgentMetadataNoChannelsSent(t *testing.T) {
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return nil, errors.New("agent not found")
+		},
+	}
+
+	// Runner should NOT be called if LoadAgentMetadata fails
+	runnerCalled := false
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			runnerCalled = true
+			return &SubagentResult{Status: "completed"}, nil
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "test prompt")
+
+	if err == nil {
+		t.Error("Expected error when LoadAgentMetadata fails")
+	}
+	if handle != nil {
+		t.Error("Handle should be nil when LoadAgentMetadata fails")
+	}
+
+	// Wait a bit to ensure no goroutine was spawned
+	time.Sleep(50 * time.Millisecond)
+
+	if runnerCalled {
+		t.Error("SubagentRunner.Run() should not be called when LoadAgentMetadata fails")
 	}
 }
