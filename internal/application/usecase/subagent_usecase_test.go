@@ -5,7 +5,10 @@ import (
 	"code-editing-agent/internal/domain/port"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -1211,4 +1214,934 @@ func TestSpawnSubagentAsync_LoadAgentMetadataNoChannelsSent(t *testing.T) {
 	if runnerCalled {
 		t.Error("SubagentRunner.Run() should not be called when LoadAgentMetadata fails")
 	}
+}
+
+// ==================== Parallel Spawn Tests (Cycle 5.3) ====================
+
+// ==================== Input Validation Tests (Parallel) ====================
+
+func TestSpawnMultiple_NilRequestsSlice(t *testing.T) {
+	manager := &MockSubagentManager{}
+	runner := &MockSubagentRunner{}
+	uc := NewSubagentUseCase(manager, runner)
+
+	ctx := context.Background()
+	result, err := uc.SpawnMultiple(ctx, nil)
+	if err != nil {
+		t.Errorf("SpawnMultiple() returned error for nil requests: %v", err)
+	}
+	if result == nil {
+		t.Fatal("SpawnMultiple() should return empty result, not nil, for nil requests")
+	}
+	if len(result.Results) != 0 {
+		t.Errorf("Expected 0 results for nil requests, got %d", len(result.Results))
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("Expected 0 errors for nil requests, got %d", len(result.Errors))
+	}
+}
+
+func TestSpawnMultiple_EmptyRequestsSlice(t *testing.T) {
+	manager := &MockSubagentManager{}
+	runner := &MockSubagentRunner{}
+	uc := NewSubagentUseCase(manager, runner)
+
+	ctx := context.Background()
+	result, err := uc.SpawnMultiple(ctx, []*SubagentRequest{})
+	if err != nil {
+		t.Errorf("SpawnMultiple() returned error for empty requests: %v", err)
+	}
+	if result == nil {
+		t.Fatal("SpawnMultiple() should return empty result, not nil, for empty requests")
+	}
+	if len(result.Results) != 0 {
+		t.Errorf("Expected 0 results for empty requests, got %d", len(result.Results))
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("Expected 0 errors for empty requests, got %d", len(result.Errors))
+	}
+}
+
+func TestSpawnMultiple_SingleRequest(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name:        "test-agent",
+		Description: "A test agent",
+		RawContent:  "Test system prompt",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	expectedResult := &SubagentResult{
+		Status:    "completed",
+		AgentName: "test-agent",
+		Output:    "Task completed",
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			return expectedResult, nil
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	requests := []*SubagentRequest{
+		{AgentName: "test-agent", Prompt: "do something"},
+	}
+
+	result, err := uc.SpawnMultiple(ctx, requests)
+	if err != nil {
+		t.Fatalf("SpawnMultiple() returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("SpawnMultiple() returned nil result")
+	}
+	if len(result.Results) != 1 {
+		t.Fatalf("Expected 1 result, got %d", len(result.Results))
+	}
+	if len(result.Errors) != 1 {
+		t.Fatalf("Expected 1 error entry, got %d", len(result.Errors))
+	}
+	if result.Results[0].Status != "completed" {
+		t.Errorf("Expected status 'completed', got '%s'", result.Results[0].Status)
+	}
+	if result.Errors[0] != nil {
+		t.Errorf("Expected nil error for successful request, got: %v", result.Errors[0])
+	}
+}
+
+// ==================== Parallel Execution Tests ====================
+
+func TestSpawnMultiple_MultipleSuccessfulSpawns(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name:        "test-agent",
+		Description: "A test agent",
+		RawContent:  "Test system prompt",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			// Simulate work to verify parallel execution
+			time.Sleep(10 * time.Millisecond)
+			return &SubagentResult{
+				Status:    "completed",
+				AgentName: agent.Name,
+				Output:    taskPrompt,
+			}, nil
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	// Create 3 requests
+	requests := []*SubagentRequest{
+		{AgentName: "test-agent", Prompt: "task 1"},
+		{AgentName: "test-agent", Prompt: "task 2"},
+		{AgentName: "test-agent", Prompt: "task 3"},
+	}
+
+	start := time.Now()
+	result, err := uc.SpawnMultiple(ctx, requests)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("SpawnMultiple() returned error: %v", err)
+	}
+
+	// Should complete in ~10ms (parallel) not ~30ms (sequential)
+	// Allow 25ms overhead for goroutine scheduling
+	if elapsed > 25*time.Millisecond {
+		t.Errorf("Expected parallel execution ~10ms, took %v (likely sequential)", elapsed)
+	}
+
+	if len(result.Results) != 3 {
+		t.Fatalf("Expected 3 results, got %d", len(result.Results))
+	}
+	if len(result.Errors) != 3 {
+		t.Fatalf("Expected 3 error entries, got %d", len(result.Errors))
+	}
+
+	// Verify all successful
+	for i, res := range result.Results {
+		if res == nil {
+			t.Errorf("Result %d is nil", i)
+			continue
+		}
+		if res.Status != "completed" {
+			t.Errorf("Request %d failed with status '%s'", i, res.Status)
+		}
+		if result.Errors[i] != nil {
+			t.Errorf("Request %d has error: %v", i, result.Errors[i])
+		}
+	}
+}
+
+func TestSpawnMultiple_ResultsMatchRequestOrder(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			// Different delays to ensure non-sequential completion
+			// This tests that results are properly ordered despite completion order
+			delay := time.Duration(0)
+			switch taskPrompt {
+			case "task 1":
+				delay = 20 * time.Millisecond
+			case "task 2":
+				delay = 10 * time.Millisecond
+			case "task 3":
+				delay = 5 * time.Millisecond
+			}
+			time.Sleep(delay)
+
+			return &SubagentResult{
+				Status:    "completed",
+				AgentName: agent.Name,
+				Output:    taskPrompt, // Echo prompt to verify ordering
+			}, nil
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	requests := []*SubagentRequest{
+		{AgentName: "test-agent", Prompt: "task 1"},
+		{AgentName: "test-agent", Prompt: "task 2"},
+		{AgentName: "test-agent", Prompt: "task 3"},
+	}
+
+	result, err := uc.SpawnMultiple(ctx, requests)
+	if err != nil {
+		t.Fatalf("SpawnMultiple() returned error: %v", err)
+	}
+
+	// Verify results match request order despite task 3 finishing first
+	if result.Results[0].Output != "task 1" {
+		t.Errorf("Result[0] expected 'task 1', got '%s'", result.Results[0].Output)
+	}
+	if result.Results[1].Output != "task 2" {
+		t.Errorf("Result[1] expected 'task 2', got '%s'", result.Results[1].Output)
+	}
+	if result.Results[2].Output != "task 3" {
+		t.Errorf("Result[2] expected 'task 3', got '%s'", result.Results[2].Output)
+	}
+}
+
+func TestSpawnMultiple_EachSpawnGetsUniqueSubagentID(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	var capturedIDs []string
+	var mu sync.Mutex
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			mu.Lock()
+			capturedIDs = append(capturedIDs, subagentID)
+			mu.Unlock()
+			return &SubagentResult{Status: "completed"}, nil
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	requests := []*SubagentRequest{
+		{AgentName: "test-agent", Prompt: "task 1"},
+		{AgentName: "test-agent", Prompt: "task 2"},
+		{AgentName: "test-agent", Prompt: "task 3"},
+	}
+
+	_, err := uc.SpawnMultiple(ctx, requests)
+	if err != nil {
+		t.Fatalf("SpawnMultiple() returned error: %v", err)
+	}
+
+	if len(capturedIDs) != 3 {
+		t.Fatalf("Expected 3 subagent IDs, got %d", len(capturedIDs))
+	}
+
+	// Verify all IDs are unique
+	idSet := make(map[string]bool)
+	for _, id := range capturedIDs {
+		if id == "" {
+			t.Error("Generated empty subagent ID")
+		}
+		if idSet[id] {
+			t.Errorf("Duplicate subagent ID: %s", id)
+		}
+		idSet[id] = true
+	}
+}
+
+func TestSpawnMultiple_ActuallyRunsInParallel(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	// Track concurrent execution using counter
+	var concurrentCount int32
+	var maxConcurrent int32
+	var mu sync.Mutex
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			// Increment concurrent counter
+			current := atomic.AddInt32(&concurrentCount, 1)
+
+			// Track maximum concurrent executions
+			mu.Lock()
+			if current > maxConcurrent {
+				maxConcurrent = current
+			}
+			mu.Unlock()
+
+			// Simulate work
+			time.Sleep(20 * time.Millisecond)
+
+			// Decrement concurrent counter
+			atomic.AddInt32(&concurrentCount, -1)
+
+			return &SubagentResult{Status: "completed"}, nil
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	// Create 5 requests to ensure we see parallel execution
+	requests := []*SubagentRequest{
+		{AgentName: "test-agent", Prompt: "task 1"},
+		{AgentName: "test-agent", Prompt: "task 2"},
+		{AgentName: "test-agent", Prompt: "task 3"},
+		{AgentName: "test-agent", Prompt: "task 4"},
+		{AgentName: "test-agent", Prompt: "task 5"},
+	}
+
+	_, err := uc.SpawnMultiple(ctx, requests)
+	if err != nil {
+		t.Fatalf("SpawnMultiple() returned error: %v", err)
+	}
+
+	// If running in parallel, we should have seen multiple concurrent executions
+	if maxConcurrent < 2 {
+		t.Errorf(
+			"Expected concurrent execution (maxConcurrent >= 2), got maxConcurrent=%d (likely sequential)",
+			maxConcurrent,
+		)
+	}
+}
+
+func TestSpawnMultiple_LargeBatch(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			return &SubagentResult{
+				Status: "completed",
+				Output: taskPrompt,
+			}, nil
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	// Create 15 requests
+	requests := make([]*SubagentRequest, 15)
+	for i := 0; i < 15; i++ {
+		requests[i] = &SubagentRequest{
+			AgentName: "test-agent",
+			Prompt:    fmt.Sprintf("task %d", i),
+		}
+	}
+
+	result, err := uc.SpawnMultiple(ctx, requests)
+	if err != nil {
+		t.Fatalf("SpawnMultiple() returned error: %v", err)
+	}
+
+	if len(result.Results) != 15 {
+		t.Fatalf("Expected 15 results, got %d", len(result.Results))
+	}
+	if len(result.Errors) != 15 {
+		t.Fatalf("Expected 15 error entries, got %d", len(result.Errors))
+	}
+
+	// Verify all completed successfully
+	for i := 0; i < 15; i++ {
+		if result.Results[i].Status != "completed" {
+			t.Errorf("Request %d failed", i)
+		}
+		if result.Errors[i] != nil {
+			t.Errorf("Request %d has error: %v", i, result.Errors[i])
+		}
+		expectedOutput := fmt.Sprintf("task %d", i)
+		if result.Results[i].Output != expectedOutput {
+			t.Errorf("Result %d output mismatch: expected '%s', got '%s'", i, expectedOutput, result.Results[i].Output)
+		}
+	}
+}
+
+// ==================== Individual Error Handling Tests ====================
+
+func TestSpawnMultiple_OneFailedSpawnDoesntAffectOthers(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			// Fail only the second task
+			if taskPrompt == "task 2" {
+				return nil, errors.New("task 2 failed")
+			}
+			return &SubagentResult{
+				Status: "completed",
+				Output: taskPrompt,
+			}, nil
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	requests := []*SubagentRequest{
+		{AgentName: "test-agent", Prompt: "task 1"},
+		{AgentName: "test-agent", Prompt: "task 2"},
+		{AgentName: "test-agent", Prompt: "task 3"},
+	}
+
+	result, err := uc.SpawnMultiple(ctx, requests)
+	if err != nil {
+		t.Fatalf("SpawnMultiple() returned error: %v", err)
+	}
+
+	// Verify task 1 succeeded
+	if result.Results[0] == nil || result.Results[0].Status != "completed" {
+		t.Error("Task 1 should have succeeded")
+	}
+	if result.Errors[0] != nil {
+		t.Errorf("Task 1 should have no error, got: %v", result.Errors[0])
+	}
+
+	// Verify task 2 failed
+	if result.Results[1] != nil {
+		t.Error("Task 2 should have nil result on error")
+	}
+	if result.Errors[1] == nil {
+		t.Error("Task 2 should have error")
+	}
+	if result.Errors[1] != nil && !strings.Contains(result.Errors[1].Error(), "task 2 failed") {
+		t.Errorf("Expected 'task 2 failed' error, got: %v", result.Errors[1])
+	}
+
+	// Verify task 3 succeeded
+	if result.Results[2] == nil || result.Results[2].Status != "completed" {
+		t.Error("Task 3 should have succeeded")
+	}
+	if result.Errors[2] != nil {
+		t.Errorf("Task 3 should have no error, got: %v", result.Errors[2])
+	}
+}
+
+func TestSpawnMultiple_MixedSuccessAndFailure(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			// Fail tasks with even numbers in the prompt
+			if strings.Contains(taskPrompt, "2") || strings.Contains(taskPrompt, "4") {
+				return nil, fmt.Errorf("%s failed", taskPrompt)
+			}
+			return &SubagentResult{
+				Status: "completed",
+				Output: taskPrompt,
+			}, nil
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	requests := []*SubagentRequest{
+		{AgentName: "test-agent", Prompt: "task 1"},
+		{AgentName: "test-agent", Prompt: "task 2"},
+		{AgentName: "test-agent", Prompt: "task 3"},
+		{AgentName: "test-agent", Prompt: "task 4"},
+		{AgentName: "test-agent", Prompt: "task 5"},
+	}
+
+	result, err := uc.SpawnMultiple(ctx, requests)
+	if err != nil {
+		t.Fatalf("SpawnMultiple() returned error: %v", err)
+	}
+
+	// Verify successes (1, 3, 5)
+	successIndices := []int{0, 2, 4}
+	for _, i := range successIndices {
+		if result.Results[i] == nil {
+			t.Errorf("Task %d should have result", i+1)
+		}
+		if result.Errors[i] != nil {
+			t.Errorf("Task %d should have no error, got: %v", i+1, result.Errors[i])
+		}
+	}
+
+	// Verify failures (2, 4)
+	failureIndices := []int{1, 3}
+	for _, i := range failureIndices {
+		if result.Results[i] != nil {
+			t.Errorf("Task %d should have nil result on error", i+1)
+		}
+		if result.Errors[i] == nil {
+			t.Errorf("Task %d should have error", i+1)
+		}
+	}
+}
+
+func TestSpawnMultiple_ErrorsArrayMatchesRequestOrder(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			// Fail with error message containing task name
+			if strings.Contains(taskPrompt, "fail") {
+				return nil, fmt.Errorf("error for %s", taskPrompt)
+			}
+			return &SubagentResult{Status: "completed"}, nil
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	requests := []*SubagentRequest{
+		{AgentName: "test-agent", Prompt: "task 1 success"},
+		{AgentName: "test-agent", Prompt: "task 2 fail"},
+		{AgentName: "test-agent", Prompt: "task 3 success"},
+		{AgentName: "test-agent", Prompt: "task 4 fail"},
+	}
+
+	result, err := uc.SpawnMultiple(ctx, requests)
+	if err != nil {
+		t.Fatalf("SpawnMultiple() returned error: %v", err)
+	}
+
+	// Verify error at index 1 contains "task 2 fail"
+	if result.Errors[1] == nil {
+		t.Error("Expected error at index 1")
+	} else if !strings.Contains(result.Errors[1].Error(), "task 2 fail") {
+		t.Errorf("Error at index 1 should contain 'task 2 fail', got: %v", result.Errors[1])
+	}
+
+	// Verify error at index 3 contains "task 4 fail"
+	if result.Errors[3] == nil {
+		t.Error("Expected error at index 3")
+	} else if !strings.Contains(result.Errors[3].Error(), "task 4 fail") {
+		t.Errorf("Error at index 3 should contain 'task 4 fail', got: %v", result.Errors[3])
+	}
+
+	// Verify successes have nil errors
+	if result.Errors[0] != nil {
+		t.Errorf("Expected nil error at index 0, got: %v", result.Errors[0])
+	}
+	if result.Errors[2] != nil {
+		t.Errorf("Expected nil error at index 2, got: %v", result.Errors[2])
+	}
+}
+
+func TestSpawnMultiple_AllFailuresReturnsAllErrors(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			// All tasks fail
+			return nil, fmt.Errorf("error: %s", taskPrompt)
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	requests := []*SubagentRequest{
+		{AgentName: "test-agent", Prompt: "task 1"},
+		{AgentName: "test-agent", Prompt: "task 2"},
+		{AgentName: "test-agent", Prompt: "task 3"},
+	}
+
+	result, err := uc.SpawnMultiple(ctx, requests)
+	if err != nil {
+		t.Fatalf("SpawnMultiple() returned error: %v", err)
+	}
+
+	// Verify all results are nil
+	for i := 0; i < 3; i++ {
+		if result.Results[i] != nil {
+			t.Errorf("Result %d should be nil on error", i)
+		}
+	}
+
+	// Verify all errors are set
+	for i := 0; i < 3; i++ {
+		if result.Errors[i] == nil {
+			t.Errorf("Error %d should be set", i)
+		}
+		expectedMsg := fmt.Sprintf("task %d", i+1)
+		if !strings.Contains(result.Errors[i].Error(), expectedMsg) {
+			t.Errorf("Error %d should contain '%s', got: %v", i, expectedMsg, result.Errors[i])
+		}
+	}
+}
+
+// ==================== Context Cancellation Tests ====================
+
+func TestSpawnMultiple_ContextCancellationStopsPendingSpawns(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	var startedCount int32
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			atomic.AddInt32(&startedCount, 1)
+
+			// Simulate long-running task that respects context
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(200 * time.Millisecond):
+				return &SubagentResult{Status: "completed"}, nil
+			}
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+
+	// Create cancellable context
+	ctx, cancel := context.WithCancel(context.Background())
+
+	requests := []*SubagentRequest{
+		{AgentName: "test-agent", Prompt: "task 1"},
+		{AgentName: "test-agent", Prompt: "task 2"},
+		{AgentName: "test-agent", Prompt: "task 3"},
+		{AgentName: "test-agent", Prompt: "task 4"},
+		{AgentName: "test-agent", Prompt: "task 5"},
+	}
+
+	// Cancel context shortly after starting
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		cancel()
+	}()
+
+	result, err := uc.SpawnMultiple(ctx, requests)
+	if err != nil {
+		t.Fatalf("SpawnMultiple() returned error: %v", err)
+	}
+
+	// All results should have errors due to cancellation
+	cancelledCount := 0
+	for i := 0; i < len(result.Errors); i++ {
+		if result.Errors[i] != nil && errors.Is(result.Errors[i], context.Canceled) {
+			cancelledCount++
+		}
+	}
+
+	// At least some should be cancelled
+	if cancelledCount == 0 {
+		t.Error("Expected at least some spawns to be cancelled")
+	}
+}
+
+func TestSpawnMultiple_PreCancelledContext(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			default:
+				return &SubagentResult{Status: "completed"}, nil
+			}
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+
+	// Create already-cancelled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	requests := []*SubagentRequest{
+		{AgentName: "test-agent", Prompt: "task 1"},
+		{AgentName: "test-agent", Prompt: "task 2"},
+		{AgentName: "test-agent", Prompt: "task 3"},
+	}
+
+	result, err := uc.SpawnMultiple(ctx, requests)
+	if err != nil {
+		t.Fatalf("SpawnMultiple() returned error: %v", err)
+	}
+
+	// All should have cancellation errors
+	for i := 0; i < len(requests); i++ {
+		if result.Results[i] != nil {
+			t.Errorf("Result %d should be nil for cancelled context", i)
+		}
+		if result.Errors[i] == nil {
+			t.Errorf("Error %d should be set for cancelled context", i)
+		}
+		if result.Errors[i] != nil && !errors.Is(result.Errors[i], context.Canceled) {
+			t.Errorf("Error %d should be context.Canceled, got: %v", i, result.Errors[i])
+		}
+	}
+}
+
+func TestSpawnMultiple_TimeoutDuringExecution(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			// Simulate long task
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(200 * time.Millisecond):
+				return &SubagentResult{Status: "completed"}, nil
+			}
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+
+	// Context with short timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	requests := []*SubagentRequest{
+		{AgentName: "test-agent", Prompt: "task 1"},
+		{AgentName: "test-agent", Prompt: "task 2"},
+		{AgentName: "test-agent", Prompt: "task 3"},
+	}
+
+	result, err := uc.SpawnMultiple(ctx, requests)
+	if err != nil {
+		t.Fatalf("SpawnMultiple() returned error: %v", err)
+	}
+
+	// All should timeout
+	for i := 0; i < len(requests); i++ {
+		if result.Errors[i] == nil {
+			t.Errorf("Error %d should be set for timeout", i)
+			continue
+		}
+		if !errors.Is(result.Errors[i], context.DeadlineExceeded) {
+			t.Errorf("Error %d should be context.DeadlineExceeded, got: %v", i, result.Errors[i])
+		}
+	}
+}
+
+// ==================== Race Condition Tests ====================
+
+func TestSpawnMultiple_ConcurrentWritesDontCorruptResults(t *testing.T) {
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			// Random small delay to increase likelihood of races
+			delay := time.Duration(1+len(taskPrompt)%5) * time.Millisecond
+			time.Sleep(delay)
+			return &SubagentResult{
+				Status: "completed",
+				Output: taskPrompt,
+			}, nil
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	// Create many requests to stress-test concurrent writes
+	requests := make([]*SubagentRequest, 20)
+	for i := 0; i < 20; i++ {
+		requests[i] = &SubagentRequest{
+			AgentName: "test-agent",
+			Prompt:    fmt.Sprintf("task %d", i),
+		}
+	}
+
+	result, err := uc.SpawnMultiple(ctx, requests)
+	if err != nil {
+		t.Fatalf("SpawnMultiple() returned error: %v", err)
+	}
+
+	// Verify no results were corrupted or lost
+	if len(result.Results) != 20 {
+		t.Fatalf("Expected 20 results, got %d (possible corruption)", len(result.Results))
+	}
+
+	// Verify each result matches its request
+	for i := 0; i < 20; i++ {
+		if result.Results[i] == nil {
+			t.Errorf("Result %d is nil (possible corruption)", i)
+			continue
+		}
+		expectedOutput := fmt.Sprintf("task %d", i)
+		if result.Results[i].Output != expectedOutput {
+			t.Errorf("Result %d corrupted: expected '%s', got '%s'", i, expectedOutput, result.Results[i].Output)
+		}
+	}
+}
+
+func TestSpawnMultiple_RaceFlagPasses(t *testing.T) {
+	// NOTE: This test should be run with: go test -race ./internal/application/usecase -v -run TestSpawnMultiple_RaceFlagPasses
+	testAgent := &entity.Subagent{
+		Name: "test-agent",
+	}
+
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			return testAgent, nil
+		},
+	}
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			// Small random delays to trigger race detector if there are issues
+			delay := time.Duration(1+(len(taskPrompt)*7)%10) * time.Millisecond
+			time.Sleep(delay)
+			return &SubagentResult{
+				Status: "completed",
+				Output: taskPrompt,
+			}, nil
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	// Run multiple parallel batches to stress test
+	for batch := 0; batch < 3; batch++ {
+		requests := make([]*SubagentRequest, 10)
+		for i := 0; i < 10; i++ {
+			requests[i] = &SubagentRequest{
+				AgentName: "test-agent",
+				Prompt:    fmt.Sprintf("batch %d task %d", batch, i),
+			}
+		}
+
+		result, err := uc.SpawnMultiple(ctx, requests)
+		if err != nil {
+			t.Fatalf("Batch %d failed: %v", batch, err)
+		}
+
+		if len(result.Results) != 10 {
+			t.Fatalf("Batch %d: expected 10 results, got %d", batch, len(result.Results))
+		}
+	}
+
+	// If there are race conditions, the -race flag will detect them
 }

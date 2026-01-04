@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -100,6 +101,29 @@ func validateSpawnInputs(agentName, prompt string) error {
 // generateSubagentID generates a unique identifier for a subagent execution.
 func generateSubagentID() string {
 	return fmt.Sprintf("subagent-%d", time.Now().UnixNano())
+}
+
+// SubagentRequest represents a single subagent spawn request for batch operations.
+//
+// Used by SpawnMultiple to execute multiple subagent tasks in parallel.
+// Each request specifies the agent to spawn and the task prompt to execute.
+type SubagentRequest struct {
+	AgentName string // Name of the subagent to spawn (must be non-empty)
+	Prompt    string // Task prompt to execute (must be non-empty)
+}
+
+// SubagentBatchResult holds the results from spawning multiple subagents in parallel.
+//
+// The Results and Errors slices are guaranteed to match the order of the input requests.
+// For each request at index i:
+//   - If successful: Results[i] contains the result, Errors[i] is nil
+//   - If failed: Results[i] is nil, Errors[i] contains the error
+//
+// This design allows callers to iterate through results and errors together,
+// knowing they correspond to the same request index.
+type SubagentBatchResult struct {
+	Results []*SubagentResult // Results for each request, in same order as input
+	Errors  []error           // Errors for each request, nil if successful
 }
 
 // SubagentHandle provides access to an asynchronously running subagent.
@@ -218,4 +242,79 @@ func (uc *SubagentUseCase) executeInBackground(
 	} else {
 		resultChan <- result
 	}
+}
+
+// SpawnMultiple spawns multiple subagents in parallel and returns results for all requests.
+//
+// This method executes each subagent request concurrently using goroutines, making it
+// significantly faster than sequential execution for multiple requests. All spawns execute
+// simultaneously, and the method waits for all to complete before returning.
+//
+// Ordering Guarantee:
+//   - Results and Errors slices are pre-allocated with length = len(requests)
+//   - Each goroutine writes to a unique index matching its request position
+//   - No locks needed for writes (different memory locations)
+//   - Results maintain input request order regardless of completion order
+//
+// Error Handling:
+//   - This method never returns an error (second return value is always nil)
+//   - Individual request errors are captured in SubagentBatchResult.Errors
+//   - Failed requests don't affect other requests in the batch
+//   - Use SubagentBatchResult.Errors to check for individual failures
+//
+// Behavior:
+//   - Returns empty result (not error) for nil or empty requests
+//   - Each request gets a unique SubagentID
+//   - Context cancellation propagates to all spawns
+//   - Thread-safe concurrent execution
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout
+//   - requests: Array of subagent spawn requests
+//
+// Returns:
+//   - *SubagentBatchResult: Results and errors for all requests
+//   - error: Always nil (individual errors are in SubagentBatchResult.Errors)
+func (uc *SubagentUseCase) SpawnMultiple(
+	ctx context.Context,
+	requests []*SubagentRequest,
+) (*SubagentBatchResult, error) {
+	// 1. Handle empty requests
+	if len(requests) == 0 {
+		return &SubagentBatchResult{
+			Results: []*SubagentResult{},
+			Errors:  []error{},
+		}, nil
+	}
+
+	// 2. Pre-allocate results and errors slices
+	results := make([]*SubagentResult, len(requests))
+	errors := make([]error, len(requests))
+
+	// 3. Use WaitGroup for coordination
+	var wg sync.WaitGroup
+
+	// 4. Spawn goroutines for parallel execution
+	for i, req := range requests {
+		wg.Add(1)
+		go func(index int, request *SubagentRequest) {
+			defer wg.Done()
+
+			// Call synchronous SpawnSubagent (reuse existing logic)
+			result, err := uc.SpawnSubagent(ctx, request.AgentName, request.Prompt)
+
+			// Store in pre-allocated position (maintains order)
+			results[index] = result
+			errors[index] = err
+		}(i, req)
+	}
+
+	// 5. Wait for all goroutines to complete
+	wg.Wait()
+
+	// 6. Return batch result
+	return &SubagentBatchResult{
+		Results: results,
+		Errors:  errors,
+	}, nil
 }
