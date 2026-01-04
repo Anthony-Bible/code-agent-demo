@@ -3798,3 +3798,551 @@ func TestInvestigationRunner_ConversationServiceInterfaceIncludesSetCustomSystem
 	// If we get here, the interface includes SetCustomSystemPrompt
 	// This test will FAIL TO COMPILE until the interface is updated
 }
+
+// =============================================================================
+// Turn Warning Feature Tests
+// =============================================================================
+
+// TestInvestigationRunner_buildTurnWarningMessage tests the buildTurnWarningMessage method.
+func TestInvestigationRunner_buildTurnWarningMessage(t *testing.T) {
+	tests := []struct {
+		name      string
+		remaining int
+		want      string
+	}{
+		{
+			name:      "remaining is 5 - returns batch_tool warning",
+			remaining: 5,
+			want: `TURN LIMIT WARNING: You have 5 turns remaining before the investigation reaches its turn limit.
+
+Please prioritize your remaining actions carefully. Consider using the batch_tool to execute multiple operations efficiently in a single turn.`,
+		},
+		{
+			name:      "remaining is 4 - returns countdown warning",
+			remaining: 4,
+			want:      "TURN LIMIT WARNING: You have 4 turns remaining.",
+		},
+		{
+			name:      "remaining is 3 - returns countdown warning",
+			remaining: 3,
+			want:      "TURN LIMIT WARNING: You have 3 turns remaining.",
+		},
+		{
+			name:      "remaining is 2 - returns countdown warning",
+			remaining: 2,
+			want:      "TURN LIMIT WARNING: You have 2 turns remaining.",
+		},
+		{
+			name:      "remaining is 1 - returns countdown warning",
+			remaining: 1,
+			want:      "TURN LIMIT WARNING: You have 1 turn remaining.",
+		},
+		{
+			name:      "remaining is 6 - returns empty string",
+			remaining: 6,
+			want:      "",
+		},
+		{
+			name:      "remaining is 10 - returns empty string",
+			remaining: 10,
+			want:      "",
+		},
+		{
+			name:      "remaining is 0 - returns empty string",
+			remaining: 0,
+			want:      "",
+		},
+		{
+			name:      "remaining is negative - returns empty string",
+			remaining: -1,
+			want:      "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create minimal runner instance
+			convService := newInvestigationRunnerConvServiceMock()
+			toolExecutor := newInvestigationRunnerToolExecutorMock()
+			promptBuilder := newInvestigationRunnerPromptBuilderMock()
+
+			runner := NewInvestigationRunner(
+				convService,
+				toolExecutor,
+				nil,
+				promptBuilder,
+				nil,
+				AlertInvestigationUseCaseConfig{MaxActions: 20},
+			)
+
+			// Call buildTurnWarningMessage (this method doesn't exist yet - will fail)
+			got := runner.buildTurnWarningMessage(tt.remaining)
+
+			// Verify result
+			if got != tt.want {
+				t.Errorf("buildTurnWarningMessage(%d) = %q, want %q", tt.remaining, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestInvestigationRunner_InjectsWarningAtMaxActionsMinus5 verifies warning injection at turn limit - 5.
+func TestInvestigationRunner_InjectsWarningAtMaxActionsMinus5(t *testing.T) {
+	// Setup mocks
+	convService := newInvestigationRunnerConvServiceMock()
+	toolExecutor := newInvestigationRunnerToolExecutorMock()
+	promptBuilder := newInvestigationRunnerPromptBuilderMock()
+
+	maxActions := 20
+	actionsBeforeWarning := maxActions - 5 // 15 actions to trigger warning at remaining=5
+
+	// Configure mock to simulate tool calls that will reach maxActions - 5
+	convService.processResponseToolCalls = make([][]port.ToolCallInfo, maxActions+5)
+
+	// Set up tool calls until we trigger the warning
+	for i := range actionsBeforeWarning {
+		convService.processResponseToolCalls[i] = []port.ToolCallInfo{
+			{
+				ToolID:   fmt.Sprintf("tool-%d", i),
+				ToolName: "bash",
+				Input:    map[string]interface{}{"command": "echo test"},
+			},
+		}
+	}
+
+	// Remaining calls: empty to allow natural completion
+	for i := actionsBeforeWarning; i < len(convService.processResponseToolCalls); i++ {
+		convService.processResponseToolCalls[i] = []port.ToolCallInfo{}
+	}
+
+	// Track AddUserMessage calls
+	var userMessageContents []string
+	var userMessageCallOrder []int
+	callCount := 0
+	convService.onAddUserMessage = func() {
+		callCount++
+		userMessageCallOrder = append(userMessageCallOrder, callCount)
+		// Capture the message content
+		if len(convService.addUserMessageContent) > 0 {
+			userMessageContents = append(
+				userMessageContents,
+				convService.addUserMessageContent[len(convService.addUserMessageContent)-1],
+			)
+		}
+	}
+
+	// Create runner
+	runner := NewInvestigationRunner(
+		convService,
+		toolExecutor,
+		nil,
+		promptBuilder,
+		nil,
+		AlertInvestigationUseCaseConfig{MaxActions: maxActions},
+	)
+
+	// Create test alert
+	alert := &AlertForInvestigation{
+		id:       "alert-warning-test",
+		title:    "Warning Test",
+		severity: "high",
+	}
+
+	// Run investigation
+	ctx := context.Background()
+	_, err := runner.Run(ctx, alert, "inv-warning-test")
+	if err != nil {
+		t.Fatalf("Run() returned unexpected error: %v", err)
+	}
+
+	// EXPECTED BEHAVIOR: At actionsTaken = 15 (remaining = 5), a warning should be injected
+	// Expected: Initial message (1) + Warning message at turn 15 (1) = 2 AddUserMessage calls
+	expectedMinCalls := 2
+	if convService.addUserMessageCalls < expectedMinCalls {
+		t.Errorf(
+			"AddUserMessage called %d times, expected at least %d",
+			convService.addUserMessageCalls,
+			expectedMinCalls,
+		)
+	}
+
+	// Verify warning message was sent
+	warningFound := false
+	for _, content := range userMessageContents {
+		if strings.Contains(content, "TURN LIMIT WARNING") && strings.Contains(content, "5 turns remaining") {
+			warningFound = true
+			// Verify it mentions batch_tool for the 5-turn warning
+			if !strings.Contains(content, "batch_tool") {
+				t.Error("Warning at 5 turns remaining should mention batch_tool")
+			}
+			break
+		}
+	}
+
+	if !warningFound {
+		t.Errorf("Expected warning message at maxActions - 5 not found. Messages: %v", userMessageContents)
+	}
+}
+
+// TestInvestigationRunner_InjectsCountdownWarnings verifies countdown warnings at turns 1-4 remaining.
+// setupToolCallsForCountdownTest configures mock tool calls for countdown warning tests.
+func setupToolCallsForCountdownTest(convService *investigationRunnerConvServiceMock, totalCalls, maxActions int) {
+	convService.processResponseToolCalls = make([][]port.ToolCallInfo, maxActions+10)
+
+	for i := range totalCalls {
+		convService.processResponseToolCalls[i] = []port.ToolCallInfo{
+			{
+				ToolID:   fmt.Sprintf("tool-%d", i),
+				ToolName: "bash",
+				Input:    map[string]interface{}{"command": "echo test"},
+			},
+		}
+	}
+
+	for i := totalCalls; i < len(convService.processResponseToolCalls); i++ {
+		convService.processResponseToolCalls[i] = []port.ToolCallInfo{}
+	}
+}
+
+// verifyWarningExists checks if a warning message for the given remaining count exists.
+func verifyWarningExists(t *testing.T, remaining int, messages []string) {
+	expectedText := fmt.Sprintf("TURN LIMIT WARNING: You have %d turn", remaining)
+
+	for _, content := range messages {
+		if strings.Contains(content, expectedText) {
+			return
+		}
+	}
+
+	t.Errorf("Expected warning for %d turns remaining not found. Messages: %v", remaining, messages)
+}
+
+func TestInvestigationRunner_InjectsCountdownWarnings(t *testing.T) {
+	tests := []struct {
+		name             string
+		maxActions       int
+		expectedWarnings []int // Expected remaining turn counts in warnings
+	}{
+		{
+			name:             "warnings at 4,3,2,1 remaining (maxActions=20)",
+			maxActions:       20,
+			expectedWarnings: []int{4, 3, 2, 1},
+		},
+		{
+			name:             "warnings at 3,2,1 remaining (maxActions=15)",
+			maxActions:       15,
+			expectedWarnings: []int{3, 2, 1},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			convService := newInvestigationRunnerConvServiceMock()
+			toolExecutor := newInvestigationRunnerToolExecutorMock()
+			promptBuilder := newInvestigationRunnerPromptBuilderMock()
+
+			// Calculate how many actions to take before first warning
+			// First warning appears when remaining = expectedWarnings[0]
+			// So we need to take (maxActions - expectedWarnings[0]) actions
+			firstWarningRemaining := tt.expectedWarnings[0]
+			setupToolCallsCount := tt.maxActions - firstWarningRemaining
+			totalCalls := setupToolCallsCount + len(tt.expectedWarnings)
+			setupToolCallsForCountdownTest(convService, totalCalls, tt.maxActions)
+
+			var userMessageContents []string
+			convService.onAddUserMessage = func() {
+				if len(convService.addUserMessageContent) > 0 {
+					userMessageContents = append(
+						userMessageContents,
+						convService.addUserMessageContent[len(convService.addUserMessageContent)-1],
+					)
+				}
+			}
+
+			runner := NewInvestigationRunner(
+				convService,
+				toolExecutor,
+				nil,
+				promptBuilder,
+				nil,
+				AlertInvestigationUseCaseConfig{MaxActions: tt.maxActions},
+			)
+
+			alert := &AlertForInvestigation{
+				id:       "alert-countdown-test",
+				title:    "Countdown Test",
+				severity: "high",
+			}
+
+			ctx := context.Background()
+			_, err := runner.Run(ctx, alert, "inv-countdown-test")
+			if err != nil {
+				t.Fatalf("Run() returned unexpected error: %v", err)
+			}
+
+			for _, expectedRemaining := range tt.expectedWarnings {
+				verifyWarningExists(t, expectedRemaining, userMessageContents)
+			}
+		})
+	}
+}
+
+// TestInvestigationRunner_SendsSummaryRequestAtMaxActions verifies summary request at turn limit.
+func TestInvestigationRunner_SendsSummaryRequestAtMaxActions(t *testing.T) {
+	// Setup mocks
+	convService := newInvestigationRunnerConvServiceMock()
+	toolExecutor := newInvestigationRunnerToolExecutorMock()
+	promptBuilder := newInvestigationRunnerPromptBuilderMock()
+
+	maxActions := 20
+
+	// Configure mock to simulate exactly maxActions tool calls
+	convService.processResponseToolCalls = make([][]port.ToolCallInfo, maxActions+5)
+
+	// Set up maxActions iterations of regular tool calls
+	for i := range maxActions {
+		convService.processResponseToolCalls[i] = []port.ToolCallInfo{
+			{
+				ToolID:   fmt.Sprintf("tool-%d", i),
+				ToolName: "bash",
+				Input:    map[string]interface{}{"command": "echo test"},
+			},
+		}
+	}
+
+	// After maxActions: empty tool calls
+	for i := maxActions; i < len(convService.processResponseToolCalls); i++ {
+		convService.processResponseToolCalls[i] = []port.ToolCallInfo{}
+	}
+
+	// Track AddUserMessage calls
+	var userMessageContents []string
+	convService.onAddUserMessage = func() {
+		if len(convService.addUserMessageContent) > 0 {
+			userMessageContents = append(
+				userMessageContents,
+				convService.addUserMessageContent[len(convService.addUserMessageContent)-1],
+			)
+		}
+	}
+
+	// Create runner
+	runner := NewInvestigationRunner(
+		convService,
+		toolExecutor,
+		nil,
+		promptBuilder,
+		nil,
+		AlertInvestigationUseCaseConfig{MaxActions: maxActions},
+	)
+
+	// Create test alert
+	alert := &AlertForInvestigation{
+		id:       "alert-summary-test",
+		title:    "Summary Test",
+		severity: "high",
+	}
+
+	// Run investigation
+	ctx := context.Background()
+	_, err := runner.Run(ctx, alert, "inv-summary-test")
+	if err != nil {
+		t.Fatalf("Run() returned unexpected error: %v", err)
+	}
+
+	// EXPECTED BEHAVIOR: At maxActions, a summary request should be sent
+	summaryRequestFound := false
+	for _, content := range userMessageContents {
+		if strings.Contains(content, "TURN LIMIT REACHED") &&
+			strings.Contains(content, "Please provide a summary") {
+			summaryRequestFound = true
+			break
+		}
+	}
+
+	if !summaryRequestFound {
+		t.Errorf("Expected summary request at maxActions not found. Messages: %v", userMessageContents)
+	}
+
+	// EXPECTED BEHAVIOR: AI gets one final response opportunity after summary request
+	// ProcessAssistantResponse should be called at least maxActions + 1 times
+	// (once per tool call iteration + once for summary response)
+	expectedMinProcessCalls := maxActions + 1
+	if convService.processResponseCalls < expectedMinProcessCalls {
+		t.Errorf(
+			"ProcessAssistantResponse called %d times, expected at least %d (one final call after summary request)",
+			convService.processResponseCalls,
+			expectedMinProcessCalls,
+		)
+	}
+}
+
+// TestInvestigationRunner_WarningMessageOrdering verifies warnings are sent in correct order.
+func TestInvestigationRunner_WarningMessageOrdering(t *testing.T) {
+	// Setup mocks
+	convService := newInvestigationRunnerConvServiceMock()
+	toolExecutor := newInvestigationRunnerToolExecutorMock()
+	promptBuilder := newInvestigationRunnerPromptBuilderMock()
+
+	maxActions := 20
+
+	// Configure mock to reach maxActions
+	convService.processResponseToolCalls = make([][]port.ToolCallInfo, maxActions+5)
+
+	for i := range maxActions {
+		convService.processResponseToolCalls[i] = []port.ToolCallInfo{
+			{
+				ToolID:   fmt.Sprintf("tool-%d", i),
+				ToolName: "bash",
+				Input:    map[string]interface{}{"command": "echo test"},
+			},
+		}
+	}
+
+	for i := maxActions; i < len(convService.processResponseToolCalls); i++ {
+		convService.processResponseToolCalls[i] = []port.ToolCallInfo{}
+	}
+
+	// Track message order
+	type messageRecord struct {
+		callNumber int
+		content    string
+	}
+	var messages []messageRecord
+	callCount := 0
+
+	convService.onAddUserMessage = func() {
+		callCount++
+		if len(convService.addUserMessageContent) > 0 {
+			messages = append(messages, messageRecord{
+				callNumber: callCount,
+				content:    convService.addUserMessageContent[len(convService.addUserMessageContent)-1],
+			})
+		}
+	}
+
+	// Create runner
+	runner := NewInvestigationRunner(
+		convService,
+		toolExecutor,
+		nil,
+		promptBuilder,
+		nil,
+		AlertInvestigationUseCaseConfig{MaxActions: maxActions},
+	)
+
+	// Create test alert
+	alert := &AlertForInvestigation{
+		id:       "alert-order-test",
+		title:    "Order Test",
+		severity: "high",
+	}
+
+	// Run investigation
+	ctx := context.Background()
+	_, err := runner.Run(ctx, alert, "inv-order-test")
+	if err != nil {
+		t.Fatalf("Run() returned unexpected error: %v", err)
+	}
+
+	// EXPECTED BEHAVIOR: Messages should appear in this order:
+	// 1. Initial trigger message
+	// 2. Warning at 5 remaining (after maxActions-5 actions)
+	// 3. Warnings at 4, 3, 2, 1 remaining (countdown)
+	// 4. Summary request (after maxActions actions)
+
+	// Build expected sequence dynamically
+	expectedSequence := []string{"Alert ID:"} // Initial message
+
+	// Add warnings for remaining 5, 4, 3, 2, 1
+	for remaining := 5; remaining >= 2; remaining-- {
+		expectedSequence = append(expectedSequence, fmt.Sprintf("%d turns remaining", remaining))
+	}
+	expectedSequence = append(expectedSequence, "1 turn remaining")   // Singular form for 1
+	expectedSequence = append(expectedSequence, "TURN LIMIT REACHED") // Summary request
+
+	// Find each expected message in order
+	lastFoundIndex := -1
+	for _, expectedContent := range expectedSequence {
+		found := false
+		for i := lastFoundIndex + 1; i < len(messages); i++ {
+			if strings.Contains(messages[i].content, expectedContent) {
+				found = true
+				lastFoundIndex = i
+				break
+			}
+		}
+		if !found {
+			t.Errorf(
+				"Expected message sequence broken. Missing or out of order: %q. Messages: %+v",
+				expectedContent,
+				messages,
+			)
+		}
+	}
+}
+
+// TestInvestigationRunner_NoWarningsWhenNotReachingLimit verifies no warnings when investigation completes early.
+func TestInvestigationRunner_NoWarningsWhenNotReachingLimit(t *testing.T) {
+	// Setup mocks
+	convService := newInvestigationRunnerConvServiceMock()
+	toolExecutor := newInvestigationRunnerToolExecutorMock()
+	promptBuilder := newInvestigationRunnerPromptBuilderMock()
+
+	// Configure mock to complete after only 5 actions (well before warnings)
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{
+		{{ToolID: "1", ToolName: "bash", Input: map[string]interface{}{"command": "echo 1"}}},
+		{{ToolID: "2", ToolName: "bash", Input: map[string]interface{}{"command": "echo 2"}}},
+		{{ToolID: "3", ToolName: "bash", Input: map[string]interface{}{"command": "echo 3"}}},
+		{{ToolID: "4", ToolName: "bash", Input: map[string]interface{}{"command": "echo 4"}}},
+		{{ToolID: "5", ToolName: "bash", Input: map[string]interface{}{"command": "echo 5"}}},
+		{}, // AI completes without more tool calls
+	}
+
+	// Track AddUserMessage calls
+	var userMessageContents []string
+	convService.onAddUserMessage = func() {
+		if len(convService.addUserMessageContent) > 0 {
+			userMessageContents = append(
+				userMessageContents,
+				convService.addUserMessageContent[len(convService.addUserMessageContent)-1],
+			)
+		}
+	}
+
+	// Create runner with MaxActions = 20
+	runner := NewInvestigationRunner(
+		convService,
+		toolExecutor,
+		nil,
+		promptBuilder,
+		nil,
+		AlertInvestigationUseCaseConfig{MaxActions: 20},
+	)
+
+	// Create test alert
+	alert := &AlertForInvestigation{
+		id:       "alert-early-complete",
+		title:    "Early Complete Test",
+		severity: "high",
+	}
+
+	// Run investigation
+	ctx := context.Background()
+	_, err := runner.Run(ctx, alert, "inv-early-complete")
+	if err != nil {
+		t.Fatalf("Run() returned unexpected error: %v", err)
+	}
+
+	// EXPECTED BEHAVIOR: No warning messages should be sent
+	for _, content := range userMessageContents {
+		if strings.Contains(content, "TURN LIMIT WARNING") || strings.Contains(content, "TURN LIMIT REACHED") {
+			t.Errorf("Unexpected warning message when investigation completed early: %q", content)
+		}
+	}
+
+	// Should only have the initial trigger message
+	if convService.addUserMessageCalls != 1 {
+		t.Errorf("AddUserMessage called %d times, expected 1 (only initial message)", convService.addUserMessageCalls)
+	}
+}

@@ -58,6 +58,7 @@ func getToolExample(toolName string) string {
 		"bash":                   `{"command": "ps aux --sort=-%cpu | head -20"}`,
 		"read_file":              `{"path": "/var/log/syslog"}`,
 		"list_files":             `{"path": "/var/log"}`,
+		"batch_tool":             `{"invocations": [{"tool_name": "read_file", "arguments": {"path": "config.yaml"}}, {"tool_name": "bash", "arguments": {"command": "df -h"}}]}`,
 		"activate_skill":         `{"name": "cloud-metrics"}`,
 		"complete_investigation": `{"findings": ["Root cause identified"], "confidence": 0.85}`,
 		"escalate_investigation": `{"reason": "Unable to determine root cause", "partial_findings": ["Observed high CPU"]}`,

@@ -408,7 +408,7 @@ In plan mode, you will:
 	batchToolTool := entity.Tool{
 		ID:   "batch_tool",
 		Name: "batch_tool",
-		Description: `Execute multiple tool invocations in a single batch operation. Prefer this whwen running multiple toos.
+		Description: `Execute multiple tool invocations in a single batch operation. Prefer this when running multiple tools.
 
 Use this tool when you need to:
 - Execute the same operation on multiple items

@@ -1,0 +1,1 @@
+When adding a new tool accessible to the agent, make sure to add it to the example array at internal/application/usecase/investigation_prompt_builder.go:56 

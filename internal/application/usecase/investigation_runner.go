@@ -583,21 +583,9 @@ func (r *InvestigationRunner) runInvestigationLoop(rc *runContext) (*Investigati
 		if err != nil {
 			return rc.failedResult(err), err
 		}
+
 		if len(toolCalls) == 0 {
-			// Check for low confidence escalation before completing
-			if result := r.checkConfidenceEscalation(rc, msg); result != nil {
-				return result, nil
-			}
-			// AI responded without tool calls - log the message
-			msgContent := ""
-			if msg != nil {
-				msgContent = msg.Content
-				if len(msgContent) > 200 {
-					msgContent = msgContent[:200] + "..."
-				}
-			}
-			fmt.Fprintf(os.Stderr, "[InvestigationRunner] AI responded without tool calls. Message: %s\n", msgContent)
-			break
+			return r.handleNoToolCalls(rc, msg)
 		}
 
 		if err := r.checkSafetyBudget(rc); err != nil {
@@ -609,13 +597,12 @@ func (r *InvestigationRunner) runInvestigationLoop(rc *runContext) (*Investigati
 			return result, err
 		}
 
+		r.injectTurnWarningIfNeeded(rc)
+
 		if rc.actionsTaken >= rc.maxActions {
-			fmt.Fprintf(
-				os.Stderr,
-				"[InvestigationRunner] Max actions limit reached (%d/%d). Investigation stopping without completion.\n",
-				rc.actionsTaken,
-				rc.maxActions,
-			)
+			if err := r.handleMaxActionsReached(rc); err != nil {
+				fmt.Fprintf(os.Stderr, "[InvestigationRunner] Error handling max actions: %v\n", err)
+			}
 			break
 		}
 	}
@@ -624,6 +611,68 @@ func (r *InvestigationRunner) runInvestigationLoop(rc *runContext) (*Investigati
 		"[InvestigationRunner] Investigation loop ended naturally (no complete_investigation call). Using default completedResult.\n",
 	)
 	return rc.completedResult(), nil
+}
+
+// handleNoToolCalls handles the case where AI responds without requesting any tools.
+// Returns the appropriate investigation result based on confidence checks.
+func (r *InvestigationRunner) handleNoToolCalls(rc *runContext, msg *entity.Message) (*InvestigationResult, error) {
+	// Check for low confidence escalation before completing
+	if result := r.checkConfidenceEscalation(rc, msg); result != nil {
+		return result, nil
+	}
+
+	// AI responded without tool calls - log the message
+	msgContent := ""
+	if msg != nil {
+		msgContent = msg.Content
+		if len(msgContent) > 200 {
+			msgContent = msgContent[:200] + "..."
+		}
+	}
+	fmt.Fprintf(os.Stderr, "[InvestigationRunner] AI responded without tool calls. Message: %s\n", msgContent)
+
+	// End loop naturally and return completed result
+	fmt.Fprintf(
+		os.Stderr,
+		"[InvestigationRunner] Investigation loop ended naturally (no complete_investigation call). Using default completedResult.\n",
+	)
+	return rc.completedResult(), nil
+}
+
+// injectTurnWarningIfNeeded injects a warning message if the agent is approaching the turn limit.
+func (r *InvestigationRunner) injectTurnWarningIfNeeded(rc *runContext) {
+	remaining := rc.maxActions - rc.actionsTaken
+	warningMsg := r.buildTurnWarningMessage(remaining)
+	if warningMsg != "" {
+		if _, err := r.convService.AddUserMessage(rc.ctx, rc.sessionID, warningMsg); err != nil {
+			fmt.Fprintf(os.Stderr, "[InvestigationRunner] Failed to add warning message: %v\n", err)
+		}
+	}
+}
+
+// handleMaxActionsReached handles the scenario where max actions limit is reached.
+// Sends a summary request and allows one final AI response.
+func (r *InvestigationRunner) handleMaxActionsReached(rc *runContext) error {
+	fmt.Fprintf(
+		os.Stderr,
+		"[InvestigationRunner] Max actions limit reached (%d/%d). Requesting summary.\n",
+		rc.actionsTaken,
+		rc.maxActions,
+	)
+
+	summaryMsg := "TURN LIMIT REACHED: You have reached the maximum number of allowed turns for this investigation. Please provide a summary of your findings and conclusions based on the investigation performed so far."
+	if _, err := r.convService.AddUserMessage(rc.ctx, rc.sessionID, summaryMsg); err != nil {
+		fmt.Fprintf(os.Stderr, "[InvestigationRunner] Failed to add summary request: %v\n", err)
+		return err
+	}
+
+	_, _, err := r.convService.ProcessAssistantResponse(rc.ctx, rc.sessionID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[InvestigationRunner] Error processing final summary response: %v\n", err)
+		return err
+	}
+
+	return nil
 }
 
 // getNextToolCalls retrieves and limits the next batch of tool calls.
@@ -713,4 +762,21 @@ func (r *InvestigationRunner) filterToolsByAllowedList(toolCalls []port.ToolCall
 		}
 	}
 	return filtered
+}
+
+// buildTurnWarningMessage generates a warning message based on remaining actions.
+// Returns empty string if no warning should be displayed.
+func (r *InvestigationRunner) buildTurnWarningMessage(remaining int) string {
+	if remaining == 5 {
+		return `TURN LIMIT WARNING: You have 5 turns remaining before the investigation reaches its turn limit.
+
+Please prioritize your remaining actions carefully. Consider using the batch_tool to execute multiple operations efficiently in a single turn.`
+	}
+	if remaining == 1 {
+		return "TURN LIMIT WARNING: You have 1 turn remaining."
+	}
+	if remaining >= 2 && remaining <= 4 {
+		return fmt.Sprintf("TURN LIMIT WARNING: You have %d turns remaining.", remaining)
+	}
+	return ""
 }
