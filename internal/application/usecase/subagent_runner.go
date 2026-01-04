@@ -40,7 +40,7 @@ type SubagentRunner struct {
 // subagentRunContext holds state for a subagent execution run.
 type subagentRunContext struct {
 	ctx          context.Context
-	agent        *Agent
+	agent        *entity.Subagent
 	taskPrompt   string
 	subagentID   string
 	sessionID    string
@@ -99,7 +99,7 @@ func NewSubagentRunner(
 //   - error: Any error that occurred during execution
 func (r *SubagentRunner) Run(
 	ctx context.Context,
-	agent *Agent,
+	agent *entity.Subagent,
 	taskPrompt string,
 	subagentID string,
 ) (*SubagentResult, error) {
@@ -151,7 +151,7 @@ func (r *SubagentRunner) Run(
 }
 
 // validateInputs validates the input parameters for subagent execution.
-func (r *SubagentRunner) validateInputs(agent *Agent, taskPrompt string) error {
+func (r *SubagentRunner) validateInputs(agent *entity.Subagent, taskPrompt string) error {
 	if agent == nil {
 		return errors.New("nil agent")
 	}
@@ -164,7 +164,7 @@ func (r *SubagentRunner) validateInputs(agent *Agent, taskPrompt string) error {
 // validationFailedResult creates a failed result for validation errors.
 func (r *SubagentRunner) validationFailedResult(
 	subagentID string,
-	agent *Agent,
+	agent *entity.Subagent,
 	err error,
 ) *SubagentResult {
 	agentName := ""
@@ -211,7 +211,7 @@ func (rc *subagentRunContext) completedResult() *SubagentResult {
 // setupAgentSession configures the agent's system prompt and sends the initial task message.
 func (r *SubagentRunner) setupAgentSession(rc *subagentRunContext) error {
 	// Set custom system prompt from agent configuration
-	systemPrompt := rc.agent.SystemPrompt
+	systemPrompt := rc.agent.RawContent
 	if err := r.convService.SetCustomSystemPrompt(rc.ctx, rc.sessionID, systemPrompt); err != nil {
 		return err
 	}

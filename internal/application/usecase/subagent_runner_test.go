@@ -287,21 +287,12 @@ func (m *subagentRunnerAIProviderMock) GetModel() string {
 // Helper Functions
 // =============================================================================
 
-// Agent represents a configured subagent for testing.
-type Agent struct {
-	ID           string
-	Name         string
-	SystemPrompt string
-	AllowedTools []string
-	Model        string
-}
-
-func createTestAgent(id, name string) *Agent {
-	return &Agent{
-		ID:           id,
+func createTestAgent(_, name string) *entity.Subagent {
+	return &entity.Subagent{
 		Name:         name,
-		SystemPrompt: "You are a helpful assistant specialized in " + name,
+		RawContent:   "You are a helpful assistant specialized in " + name,
 		AllowedTools: []string{"bash", "read_file"},
+		Model:        "",
 	}
 }
 
@@ -649,7 +640,7 @@ func TestSubagentRunner_SetsCustomSystemPrompt(t *testing.T) {
 
 	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, config)
 	agent := createTestAgent("agent-prompt", "Specialized Agent")
-	agent.SystemPrompt = "You are a specialized agent for code analysis"
+	agent.RawContent = "You are a specialized agent for code analysis"
 
 	// Act
 	_, err := runner.Run(context.Background(), agent, "Analyze code", "subagent-prompt-001")
