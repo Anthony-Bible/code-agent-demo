@@ -224,6 +224,7 @@ func createInvestigationComponents(
 			"bash", "read_file", "list_files",
 			"activate_skill", "complete_investigation", "escalate_investigation",
 			"report_investigation",
+			"task", "delegate",
 		},
 		BlockedCommands: []string{"rm -rf", "dd if=", "mkfs"},
 	}

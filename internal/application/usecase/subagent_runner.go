@@ -357,6 +357,8 @@ func (r *SubagentRunner) processToolCalls(rc *subagentRunContext, toolCalls []po
 		toolResults = append(toolResults, result)
 		r.displayToolResult(rc.agent.Name, tc.ToolName, result.IsError)
 
+		// NOTE: actionsTaken increments are safe because tool execution is currently sequential.
+		// If tool execution becomes concurrent in the future, use atomic.AddInt32() instead.
 		rc.actionsTaken++ // Only executed tools count
 	}
 
