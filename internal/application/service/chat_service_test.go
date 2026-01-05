@@ -190,82 +190,67 @@ func TestChatService_HandleModeCommand(t *testing.T) {
 }
 
 func TestChatService_PlanModeResponse(t *testing.T) {
-	t.Run("assistant response prefixed with [PLAN MODE] when plan mode active", func(t *testing.T) {
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		toolExecutor := tool.NewExecutorAdapter(fileManager)
-		uiOutput := &strings.Builder{}
-		userInterface := ui.NewCLIAdapterWithIO(strings.NewReader(""), uiOutput)
+	tests := []struct {
+		name              string
+		planModeEnabled   bool
+		responseContent   string
+		userMessage       string
+		expectPlanPrefix  bool
+	}{
+		{
+			name:              "assistant response prefixed with [PLAN MODE] when plan mode active",
+			planModeEnabled:   true,
+			responseContent:   "I will help you with that task.",
+			userMessage:       "Help me with a task",
+			expectPlanPrefix:  true,
+		},
+		{
+			name:              "no [PLAN MODE] prefix when in normal mode",
+			planModeEnabled:   false,
+			responseContent:   "Here is my response.",
+			userMessage:       "Hello",
+			expectPlanPrefix:  false,
+		},
+	}
 
-		// Create an AI provider that returns a response
-		aiProvider := &mockAIProviderForChat{
-			response: &entity.Message{
-				Role:    entity.RoleAssistant,
-				Content: "I will help you with that task.",
-			},
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			fileManager := file.NewLocalFileManager(tempDir)
+			toolExecutor := tool.NewExecutorAdapter(fileManager)
+			uiOutput := &strings.Builder{}
+			userInterface := ui.NewCLIAdapterWithIO(strings.NewReader(""), uiOutput)
 
-		convService, _ := serviceDomain.NewConversationService(aiProvider, toolExecutor)
-		chatService, _ := NewChatServiceFromDomain(convService, userInterface, aiProvider, toolExecutor, fileManager)
+			aiProvider := &mockAIProviderForChat{
+				response: &entity.Message{
+					Role:    entity.RoleAssistant,
+					Content: tt.responseContent,
+				},
+			}
 
-		ctx := context.Background()
-		startResp, _ := chatService.StartSession(ctx, "")
-		sessionID := startResp.SessionID
+			convService, _ := serviceDomain.NewConversationService(aiProvider, toolExecutor)
+			chatService, _ := NewChatServiceFromDomain(convService, userInterface, aiProvider, toolExecutor, fileManager)
 
-		// Enable plan mode
-		_ = convService.SetPlanMode(sessionID, true)
+			ctx := context.Background()
+			startResp, _ := chatService.StartSession(ctx, "")
+			sessionID := startResp.SessionID
 
-		// Send a message
-		_, err := chatService.SendMessage(ctx, sessionID, "Help me with a task")
-		if err != nil {
-			t.Fatalf("Failed to send message: %v", err)
-		}
+			_ = convService.SetPlanMode(sessionID, tt.planModeEnabled)
 
-		// Verify [PLAN MODE] prefix in UI output
-		output := uiOutput.String()
-		if strings.Contains(output, "[PLAN MODE]") {
-			// The ChatService should add the prefix when in plan mode
-			// This test verifies the behavior
-			t.Logf("Found [PLAN MODE] prefix in output - correct behavior")
-		}
-	})
+			_, err := chatService.SendMessage(ctx, sessionID, tt.userMessage)
+			if err != nil {
+				t.Fatalf("Failed to send message: %v", err)
+			}
 
-	t.Run("no [PLAN MODE] prefix when in normal mode", func(t *testing.T) {
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		toolExecutor := tool.NewExecutorAdapter(fileManager)
-		uiOutput := &strings.Builder{}
-		userInterface := ui.NewCLIAdapterWithIO(strings.NewReader(""), uiOutput)
-
-		aiProvider := &mockAIProviderForChat{
-			response: &entity.Message{
-				Role:    entity.RoleAssistant,
-				Content: "Here is my response.",
-			},
-		}
-
-		convService, _ := serviceDomain.NewConversationService(aiProvider, toolExecutor)
-		chatService, _ := NewChatServiceFromDomain(convService, userInterface, aiProvider, toolExecutor, fileManager)
-
-		ctx := context.Background()
-		startResp, _ := chatService.StartSession(ctx, "")
-		sessionID := startResp.SessionID
-
-		// Ensure plan mode is disabled
-		_ = convService.SetPlanMode(sessionID, false)
-
-		// Send a message
-		_, err := chatService.SendMessage(ctx, sessionID, "Hello")
-		if err != nil {
-			t.Fatalf("Failed to send message: %v", err)
-		}
-
-		// Verify NO [PLAN MODE] prefix
-		output := uiOutput.String()
-		if strings.Contains(output, "[PLAN MODE]") {
-			t.Errorf("Should not include [PLAN MODE] prefix in normal mode")
-		}
-	})
+			output := uiOutput.String()
+			hasPlanPrefix := strings.Contains(output, "[PLAN MODE]")
+			if tt.expectPlanPrefix && hasPlanPrefix {
+				t.Logf("Found [PLAN MODE] prefix in output - correct behavior")
+			} else if !tt.expectPlanPrefix && hasPlanPrefix {
+				t.Errorf("Should not include [PLAN MODE] prefix in normal mode")
+			}
+		})
+	}
 
 	t.Run("plan mode indicator persists across multiple responses", func(t *testing.T) {
 		tempDir := t.TempDir()

@@ -3,8 +3,6 @@ package service
 import (
 	"code-editing-agent/internal/domain/entity"
 	"code-editing-agent/internal/domain/port"
-	"code-editing-agent/internal/infrastructure/adapter/file"
-	"code-editing-agent/internal/infrastructure/adapter/tool"
 	"context"
 	"errors"
 	"fmt"
@@ -728,12 +726,7 @@ func (m *mockToolExecutor) ValidateToolInput(name string, input interface{}) err
 
 func TestConversationService_SetPlanMode(t *testing.T) {
 	t.Run("enables plan mode for a session", func(t *testing.T) {
-		// Use real ExecutorAdapter and real FileManager with temp directory
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		executorAdapter := tool.NewExecutorAdapter(fileManager)
-
-		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
 		if err != nil {
 			t.Fatalf("Failed to create service: %v", err)
 		}
@@ -761,11 +754,7 @@ func TestConversationService_SetPlanMode(t *testing.T) {
 	})
 
 	t.Run("disables plan mode for a session", func(t *testing.T) {
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		executorAdapter := tool.NewExecutorAdapter(fileManager)
-
-		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
 		if err != nil {
 			t.Fatalf("Failed to create service: %v", err)
 		}
@@ -796,11 +785,7 @@ func TestConversationService_SetPlanMode(t *testing.T) {
 	})
 
 	t.Run("returns error for non-existent session", func(t *testing.T) {
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		executorAdapter := tool.NewExecutorAdapter(fileManager)
-
-		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
 		if err != nil {
 			t.Fatalf("Failed to create service: %v", err)
 		}
@@ -816,11 +801,7 @@ func TestConversationService_SetPlanMode(t *testing.T) {
 	})
 
 	t.Run("initial mode is not plan mode by default", func(t *testing.T) {
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		executorAdapter := tool.NewExecutorAdapter(fileManager)
-
-		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
 		if err != nil {
 			t.Fatalf("Failed to create service: %v", err)
 		}
@@ -844,11 +825,7 @@ func TestConversationService_SetPlanMode(t *testing.T) {
 
 func TestConversationService_IsPlanMode(t *testing.T) {
 	t.Run("returns correct mode after SetPlanMode", func(t *testing.T) {
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		executorAdapter := tool.NewExecutorAdapter(fileManager)
-
-		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
 		if err != nil {
 			t.Fatalf("Failed to create service: %v", err)
 		}
@@ -884,11 +861,7 @@ func TestConversationService_IsPlanMode(t *testing.T) {
 	})
 
 	t.Run("returns error for non-existent session", func(t *testing.T) {
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		executorAdapter := tool.NewExecutorAdapter(fileManager)
-
-		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
 		if err != nil {
 			t.Fatalf("Failed to create service: %v", err)
 		}
@@ -906,11 +879,7 @@ func TestConversationService_IsPlanMode(t *testing.T) {
 
 func TestConversationService_ModeStateIsolation(t *testing.T) {
 	t.Run("sessions have independent mode states", func(t *testing.T) {
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		executorAdapter := tool.NewExecutorAdapter(fileManager)
-
-		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
 		if err != nil {
 			t.Fatalf("Failed to create service: %v", err)
 		}
@@ -967,11 +936,7 @@ func TestConversationService_ModeStateIsolation(t *testing.T) {
 
 func TestConversationService_ModeStatePersistence(t *testing.T) {
 	t.Run("mode persists across multiple sessions", func(t *testing.T) {
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		executorAdapter := tool.NewExecutorAdapter(fileManager)
-
-		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
 		if err != nil {
 			t.Fatalf("Failed to create service: %v", err)
 		}
@@ -1005,11 +970,7 @@ func TestConversationService_ModeStatePersistence(t *testing.T) {
 	})
 
 	t.Run("mode persists after processing state changes", func(t *testing.T) {
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		executorAdapter := tool.NewExecutorAdapter(fileManager)
-
-		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
 		if err != nil {
 			t.Fatalf("Failed to create service: %v", err)
 		}
