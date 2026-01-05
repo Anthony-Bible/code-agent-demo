@@ -854,80 +854,80 @@ func TestBatchTool_StopOnError_True(t *testing.T) {
 	}
 }
 
-func TestBatchTool_StopOnError_False(t *testing.T) {
-	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
-
-	if err := fileManager.WriteFile("exists.txt", "content"); err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
-	defer fileManager.DeleteFile("exists.txt")
-
-	// Test that stop_on_error: false continues through all failures
-	input := `{
-		"invocations": [
-			{"tool_name": "read_file", "arguments": {"path": "exists.txt"}},
-			{"tool_name": "read_file", "arguments": {"path": "nonexistent1.txt"}},
-			{"tool_name": "read_file", "arguments": {"path": "exists.txt"}},
-			{"tool_name": "read_file", "arguments": {"path": "nonexistent2.txt"}},
-			{"tool_name": "read_file", "arguments": {"path": "exists.txt"}}
-		],
-		"stop_on_error": false
-	}`
-
-	result, err := adapter.ExecuteTool(context.Background(), "batch_tool", input)
-	if err != nil {
-		t.Fatalf("ExecuteTool failed: %v", err)
-	}
-
-	var output batchToolOutput
-	if err := json.Unmarshal([]byte(result), &output); err != nil {
-		t.Fatalf("Failed to unmarshal result: %v", err)
-	}
-
-	if len(output.Results) != 5 || output.SuccessCount != 3 || output.FailedCount != 2 {
-		t.Errorf("Expected 5 results (3 success, 2 fail), got results=%d success=%d failed=%d",
-			len(output.Results), output.SuccessCount, output.FailedCount)
-	}
-	if output.StoppedEarly {
-		t.Errorf("Expected stopped_early=false, got true")
-	}
-}
-
-func TestBatchTool_StopOnError_Default(t *testing.T) {
-	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
-
-	if err := fileManager.WriteFile("default_test.txt", "content"); err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
-	defer fileManager.DeleteFile("default_test.txt")
-
-	// Test that default (omitted) stop_on_error continues through failures
-	input := `{
-		"invocations": [
-			{"tool_name": "read_file", "arguments": {"path": "default_test.txt"}},
-			{"tool_name": "read_file", "arguments": {"path": "nonexistent.txt"}},
-			{"tool_name": "read_file", "arguments": {"path": "default_test.txt"}}
-		]
-	}`
-
-	result, err := adapter.ExecuteTool(context.Background(), "batch_tool", input)
-	if err != nil {
-		t.Fatalf("ExecuteTool failed: %v", err)
+func TestBatchTool_StopOnError_ContinuesModes(t *testing.T) {
+	tests := []struct {
+		name            string
+		testFile        string
+		input           string
+		wantResults     int
+		wantSuccess     int
+		wantFailed      int
+		wantStoppedEarly bool
+	}{
+		{
+			name:     "stop_on_error false continues through all failures",
+			testFile: "exists.txt",
+			input: `{
+				"invocations": [
+					{"tool_name": "read_file", "arguments": {"path": "exists.txt"}},
+					{"tool_name": "read_file", "arguments": {"path": "nonexistent1.txt"}},
+					{"tool_name": "read_file", "arguments": {"path": "exists.txt"}},
+					{"tool_name": "read_file", "arguments": {"path": "nonexistent2.txt"}},
+					{"tool_name": "read_file", "arguments": {"path": "exists.txt"}}
+				],
+				"stop_on_error": false
+			}`,
+			wantResults:      5,
+			wantSuccess:      3,
+			wantFailed:       2,
+			wantStoppedEarly: false,
+		},
+		{
+			name:     "default stop_on_error continues through failures",
+			testFile: "default_test.txt",
+			input: `{
+				"invocations": [
+					{"tool_name": "read_file", "arguments": {"path": "default_test.txt"}},
+					{"tool_name": "read_file", "arguments": {"path": "nonexistent.txt"}},
+					{"tool_name": "read_file", "arguments": {"path": "default_test.txt"}}
+				]
+			}`,
+			wantResults:      3,
+			wantSuccess:      2,
+			wantFailed:       1,
+			wantStoppedEarly: false,
+		},
 	}
 
-	var output batchToolOutput
-	if err := json.Unmarshal([]byte(result), &output); err != nil {
-		t.Fatalf("Failed to unmarshal result: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fileManager := file.NewLocalFileManager(".")
+			adapter := NewExecutorAdapter(fileManager)
 
-	if len(output.Results) != 3 || output.SuccessCount != 2 || output.FailedCount != 1 {
-		t.Errorf("Expected 3 results (2 success, 1 fail), got results=%d success=%d failed=%d",
-			len(output.Results), output.SuccessCount, output.FailedCount)
-	}
-	if output.StoppedEarly {
-		t.Errorf("Expected stopped_early=false (default behavior), got true")
+			if err := fileManager.WriteFile(tt.testFile, "content"); err != nil {
+				t.Fatalf("Failed to create test file: %v", err)
+			}
+			defer fileManager.DeleteFile(tt.testFile)
+
+			result, err := adapter.ExecuteTool(context.Background(), "batch_tool", tt.input)
+			if err != nil {
+				t.Fatalf("ExecuteTool failed: %v", err)
+			}
+
+			var output batchToolOutput
+			if err := json.Unmarshal([]byte(result), &output); err != nil {
+				t.Fatalf("Failed to unmarshal result: %v", err)
+			}
+
+			if len(output.Results) != tt.wantResults || output.SuccessCount != tt.wantSuccess || output.FailedCount != tt.wantFailed {
+				t.Errorf("Expected %d results (%d success, %d fail), got results=%d success=%d failed=%d",
+					tt.wantResults, tt.wantSuccess, tt.wantFailed,
+					len(output.Results), output.SuccessCount, output.FailedCount)
+			}
+			if output.StoppedEarly != tt.wantStoppedEarly {
+				t.Errorf("Expected stopped_early=%v, got %v", tt.wantStoppedEarly, output.StoppedEarly)
+			}
+		})
 	}
 }
 

@@ -477,59 +477,61 @@ func TestInMemoryInvestigationStore_Query_ByMultipleStatuses(t *testing.T) {
 	}
 }
 
-func TestInMemoryInvestigationStore_Query_BySince(t *testing.T) {
-	store := NewInMemoryInvestigationStore()
-	if store == nil {
-		t.Skip("NewInMemoryInvestigationStore() returned nil")
+func TestInMemoryInvestigationStore_Query_ByTimeRange(t *testing.T) {
+	tests := []struct {
+		name         string
+		oldStatus    string
+		recentStatus string
+		buildQuery   func(now time.Time) InvestigationQuery
+		wantLen      int
+		errMsg       string
+	}{
+		{
+			name:         "by Since filter",
+			oldStatus:    "started",
+			recentStatus: "running",
+			buildQuery:   func(now time.Time) InvestigationQuery { return InvestigationQuery{Since: now.Add(-1 * time.Hour)} },
+			wantLen:      1,
+			errMsg:       "Query(Since=1h ago) len = %v, want 1",
+		},
+		{
+			name:         "by Until filter",
+			oldStatus:    "completed",
+			recentStatus: "running",
+			buildQuery:   func(now time.Time) InvestigationQuery { return InvestigationQuery{Until: now.Add(-1 * time.Hour)} },
+			wantLen:      1,
+			errMsg:       "Query(Until=1h ago) len = %v, want 1",
+		},
 	}
 
-	ctx := context.Background()
-	now := time.Now()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := NewInMemoryInvestigationStore()
+			if store == nil {
+				t.Skip("NewInMemoryInvestigationStore() returned nil")
+			}
 
-	invs := []*InvestigationRecord{
-		{id: "inv-old", alertID: "a1", sessionID: "s1", status: "started", startedAt: now.Add(-2 * time.Hour)},
-		{id: "inv-recent", alertID: "a2", sessionID: "s2", status: "running", startedAt: now.Add(-30 * time.Minute)},
-	}
-	for _, inv := range invs {
-		if err := store.Store(ctx, inv); err != nil {
-			t.Fatalf("Store() error = %v", err)
-		}
-	}
+			ctx := context.Background()
+			now := time.Now()
 
-	results, err := store.Query(ctx, InvestigationQuery{Since: now.Add(-1 * time.Hour)})
-	if err != nil {
-		t.Errorf("Query() error = %v", err)
-	}
-	if len(results) != 1 {
-		t.Errorf("Query(Since=1h ago) len = %v, want 1", len(results))
-	}
-}
+			invs := []*InvestigationRecord{
+				{id: "inv-old", alertID: "a1", sessionID: "s1", status: tt.oldStatus, startedAt: now.Add(-2 * time.Hour)},
+				{id: "inv-recent", alertID: "a2", sessionID: "s2", status: tt.recentStatus, startedAt: now.Add(-30 * time.Minute)},
+			}
+			for _, inv := range invs {
+				if err := store.Store(ctx, inv); err != nil {
+					t.Fatalf("Store() error = %v", err)
+				}
+			}
 
-func TestInMemoryInvestigationStore_Query_ByUntil(t *testing.T) {
-	store := NewInMemoryInvestigationStore()
-	if store == nil {
-		t.Skip("NewInMemoryInvestigationStore() returned nil")
-	}
-
-	ctx := context.Background()
-	now := time.Now()
-
-	invs := []*InvestigationRecord{
-		{id: "inv-old", alertID: "a1", sessionID: "s1", status: "completed", startedAt: now.Add(-2 * time.Hour)},
-		{id: "inv-recent", alertID: "a2", sessionID: "s2", status: "running", startedAt: now.Add(-30 * time.Minute)},
-	}
-	for _, inv := range invs {
-		if err := store.Store(ctx, inv); err != nil {
-			t.Fatalf("Store() error = %v", err)
-		}
-	}
-
-	results, err := store.Query(ctx, InvestigationQuery{Until: now.Add(-1 * time.Hour)})
-	if err != nil {
-		t.Errorf("Query() error = %v", err)
-	}
-	if len(results) != 1 {
-		t.Errorf("Query(Until=1h ago) len = %v, want 1", len(results))
+			results, err := store.Query(ctx, tt.buildQuery(now))
+			if err != nil {
+				t.Errorf("Query() error = %v", err)
+			}
+			if len(results) != tt.wantLen {
+				t.Errorf(tt.errMsg, len(results))
+			}
+		})
 	}
 }
 
