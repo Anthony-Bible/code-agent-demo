@@ -137,3 +137,209 @@ func TestConfig_HistoryFieldsExist(t *testing.T) {
 		require.NotNil(t, cfg)
 	})
 }
+
+// TestConfig_ExtendedThinkingDefaults verifies that Defaults() includes proper extended thinking configuration.
+func TestConfig_ExtendedThinkingDefaults(t *testing.T) {
+	t.Run("ExtendedThinking defaults to false", func(t *testing.T) {
+		cfg := Defaults()
+
+		assert.False(t, cfg.ExtendedThinking,
+			"ExtendedThinking should default to false")
+	})
+
+	t.Run("ThinkingBudget defaults to 10000", func(t *testing.T) {
+		cfg := Defaults()
+
+		assert.Equal(t, int64(10000), cfg.ThinkingBudget,
+			"ThinkingBudget should default to 10000")
+	})
+
+	t.Run("ShowThinking defaults to false", func(t *testing.T) {
+		cfg := Defaults()
+
+		assert.False(t, cfg.ShowThinking,
+			"ShowThinking should default to false")
+	})
+
+	t.Run("MaxTokens defaults to 20000", func(t *testing.T) {
+		cfg := Defaults()
+
+		assert.Equal(t, int64(20000), cfg.MaxTokens,
+			"MaxTokens should default to 20000 (not hardcoded 4096)")
+	})
+}
+
+// TestConfig_ExtendedThinkingEnvironmentVariables verifies environment variable overrides for extended thinking.
+func TestConfig_ExtendedThinkingEnvironmentVariables(t *testing.T) {
+	resetViper := func() {
+		viper.Reset()
+	}
+
+	t.Run("AGENT_THINKING_ENABLED overrides default", func(t *testing.T) {
+		resetViper()
+		defer resetViper()
+
+		t.Setenv("AGENT_THINKING_ENABLED", "true")
+
+		cfg := LoadConfig()
+
+		assert.True(t, cfg.ExtendedThinking,
+			"AGENT_THINKING_ENABLED should override the default extended thinking setting")
+	})
+
+	t.Run("AGENT_THINKING_BUDGET overrides default", func(t *testing.T) {
+		resetViper()
+		defer resetViper()
+
+		t.Setenv("AGENT_THINKING_BUDGET", "15000")
+
+		cfg := LoadConfig()
+
+		assert.Equal(t, int64(15000), cfg.ThinkingBudget,
+			"AGENT_THINKING_BUDGET should override the default thinking budget")
+	})
+
+	t.Run("AGENT_SHOW_THINKING overrides default", func(t *testing.T) {
+		resetViper()
+		defer resetViper()
+
+		t.Setenv("AGENT_SHOW_THINKING", "true")
+
+		cfg := LoadConfig()
+
+		assert.True(t, cfg.ShowThinking,
+			"AGENT_SHOW_THINKING should override the default show thinking setting")
+	})
+
+	t.Run("AGENT_MAX_TOKENS overrides default", func(t *testing.T) {
+		resetViper()
+		defer resetViper()
+
+		t.Setenv("AGENT_MAX_TOKENS", "30000")
+
+		cfg := LoadConfig()
+
+		assert.Equal(t, int64(30000), cfg.MaxTokens,
+			"AGENT_MAX_TOKENS should override the default max tokens")
+	})
+
+	t.Run("all extended thinking environment variables can be set together", func(t *testing.T) {
+		resetViper()
+		defer resetViper()
+
+		t.Setenv("AGENT_THINKING_ENABLED", "true")
+		t.Setenv("AGENT_THINKING_BUDGET", "25000")
+		t.Setenv("AGENT_SHOW_THINKING", "true")
+		t.Setenv("AGENT_MAX_TOKENS", "50000")
+
+		cfg := LoadConfig()
+
+		assert.True(t, cfg.ExtendedThinking,
+			"ExtendedThinking should be set from environment variable")
+		assert.Equal(t, int64(25000), cfg.ThinkingBudget,
+			"ThinkingBudget should be set from environment variable")
+		assert.True(t, cfg.ShowThinking,
+			"ShowThinking should be set from environment variable")
+		assert.Equal(t, int64(50000), cfg.MaxTokens,
+			"MaxTokens should be set from environment variable")
+	})
+}
+
+// TestConfig_ThinkingBudgetValidation verifies validation of thinking budget values.
+func TestConfig_ThinkingBudgetValidation(t *testing.T) {
+	resetViper := func() {
+		viper.Reset()
+	}
+
+	tests := []struct {
+		name           string
+		budgetValue    string
+		expectedBudget int64
+		description    string
+	}{
+		{
+			name:           "budget below 1024 is capped at 1024",
+			budgetValue:    "512",
+			expectedBudget: 1024,
+			description:    "thinking budget below 1024 should be capped at minimum 1024",
+		},
+		{
+			name:           "budget of 500 is capped at 1024",
+			budgetValue:    "500",
+			expectedBudget: 1024,
+			description:    "thinking budget of 500 should be capped at minimum 1024",
+		},
+		{
+			name:           "budget of exactly 1024 is preserved",
+			budgetValue:    "1024",
+			expectedBudget: 1024,
+			description:    "thinking budget of exactly 1024 should be preserved",
+		},
+		{
+			name:           "budget above 1024 is preserved",
+			budgetValue:    "5000",
+			expectedBudget: 5000,
+			description:    "thinking budget above 1024 should be preserved",
+		},
+		{
+			name:           "zero budget uses default of 10000",
+			budgetValue:    "0",
+			expectedBudget: 10000,
+			description:    "zero thinking budget should fall back to default of 10000",
+		},
+		{
+			name:           "negative budget uses default of 10000",
+			budgetValue:    "-100",
+			expectedBudget: 10000,
+			description:    "negative thinking budget should fall back to default of 10000",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetViper()
+			defer resetViper()
+
+			t.Setenv("AGENT_THINKING_BUDGET", tt.budgetValue)
+
+			cfg := LoadConfig()
+
+			assert.Equal(t, tt.expectedBudget, cfg.ThinkingBudget, tt.description)
+		})
+	}
+}
+
+// TestConfig_ExtendedThinkingFieldsExist verifies that Config struct has required extended thinking fields.
+func TestConfig_ExtendedThinkingFieldsExist(t *testing.T) {
+	t.Run("Config has ExtendedThinking field", func(t *testing.T) {
+		cfg := &Config{}
+
+		// This will fail to compile if ExtendedThinking field doesn't exist
+		cfg.ExtendedThinking = true
+		require.NotNil(t, cfg)
+	})
+
+	t.Run("Config has ThinkingBudget field", func(t *testing.T) {
+		cfg := &Config{}
+
+		// This will fail to compile if ThinkingBudget field doesn't exist
+		cfg.ThinkingBudget = int64(5000)
+		require.NotNil(t, cfg)
+	})
+
+	t.Run("Config has ShowThinking field", func(t *testing.T) {
+		cfg := &Config{}
+
+		// This will fail to compile if ShowThinking field doesn't exist
+		cfg.ShowThinking = true
+		require.NotNil(t, cfg)
+	})
+
+	t.Run("Config has MaxTokens as int64", func(t *testing.T) {
+		cfg := &Config{}
+
+		// This will fail to compile if MaxTokens field doesn't exist or isn't int64
+		cfg.MaxTokens = int64(20000)
+		require.NotNil(t, cfg)
+	})
+}

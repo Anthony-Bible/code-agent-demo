@@ -5,12 +5,22 @@ import (
 	"context"
 )
 
+// ThinkingBlockParam represents a thinking block parameter for AI providers.
+// It contains the thinking process and an optional signature for verification.
+// This type is used in the port layer to transfer thinking block data
+// between the domain and infrastructure layers.
+type ThinkingBlockParam struct {
+	Thinking  string `json:"thinking"`  // The thinking process or reasoning content
+	Signature string `json:"signature"` // Optional signature for verification
+}
+
 // MessageParam represents a parameter for sending messages to AI providers.
 type MessageParam struct {
-	Role        string            `json:"role"`
-	Content     string            `json:"content"`
-	ToolCalls   []ToolCallParam   `json:"tool_calls,omitempty"`
-	ToolResults []ToolResultParam `json:"tool_results,omitempty"`
+	Role           string               `json:"role"`
+	Content        string               `json:"content"`
+	ToolCalls      []ToolCallParam      `json:"tool_calls,omitempty"`
+	ToolResults    []ToolResultParam    `json:"tool_results,omitempty"`
+	ThinkingBlocks []ThinkingBlockParam `json:"thinking_blocks,omitempty"`
 }
 
 // ToolCallParam represents a tool use block in a message parameter.
@@ -67,4 +77,80 @@ type AIProvider interface {
 
 	// GetModel returns the currently configured AI model.
 	GetModel() string
+}
+
+// ConvertEntityThinkingBlockToParam converts an entity.ThinkingBlock to ThinkingBlockParam.
+// This function is used when transferring thinking blocks from the domain layer
+// to the infrastructure layer (e.g., sending to AI providers).
+//
+// Parameters:
+//   - block: The entity.ThinkingBlock to convert
+//
+// Returns:
+//   - ThinkingBlockParam: The converted parameter representation
+func ConvertEntityThinkingBlockToParam(block entity.ThinkingBlock) ThinkingBlockParam {
+	return ThinkingBlockParam{
+		Thinking:  block.Thinking,
+		Signature: block.Signature,
+	}
+}
+
+// ConvertParamThinkingBlockToEntity converts a ThinkingBlockParam to entity.ThinkingBlock.
+// This function is used when transferring thinking blocks from the infrastructure layer
+// to the domain layer (e.g., receiving from AI providers).
+//
+// Parameters:
+//   - param: The ThinkingBlockParam to convert
+//
+// Returns:
+//   - entity.ThinkingBlock: The converted entity representation
+func ConvertParamThinkingBlockToEntity(param ThinkingBlockParam) entity.ThinkingBlock {
+	return entity.ThinkingBlock{
+		Thinking:  param.Thinking,
+		Signature: param.Signature,
+	}
+}
+
+// ConvertEntityThinkingBlocksToParams converts a slice of entity.ThinkingBlock to []ThinkingBlockParam.
+// This function performs batch conversion of thinking blocks from the domain layer
+// to the infrastructure layer. It preserves nil slices (returns nil for nil input)
+// to maintain semantic meaning in JSON serialization.
+//
+// Parameters:
+//   - blocks: The slice of entity.ThinkingBlock to convert (can be nil)
+//
+// Returns:
+//   - []ThinkingBlockParam: The converted slice, or nil if input was nil
+func ConvertEntityThinkingBlocksToParams(blocks []entity.ThinkingBlock) []ThinkingBlockParam {
+	if blocks == nil {
+		return nil
+	}
+
+	params := make([]ThinkingBlockParam, len(blocks))
+	for i, block := range blocks {
+		params[i] = ConvertEntityThinkingBlockToParam(block)
+	}
+	return params
+}
+
+// ConvertParamThinkingBlocksToEntities converts a slice of ThinkingBlockParam to []entity.ThinkingBlock.
+// This function performs batch conversion of thinking blocks from the infrastructure layer
+// to the domain layer. It preserves nil slices (returns nil for nil input)
+// to maintain semantic meaning when processing API responses.
+//
+// Parameters:
+//   - params: The slice of ThinkingBlockParam to convert (can be nil)
+//
+// Returns:
+//   - []entity.ThinkingBlock: The converted slice, or nil if input was nil
+func ConvertParamThinkingBlocksToEntities(params []ThinkingBlockParam) []entity.ThinkingBlock {
+	if params == nil {
+		return nil
+	}
+
+	blocks := make([]entity.ThinkingBlock, len(params))
+	for i, param := range params {
+		blocks[i] = ConvertParamThinkingBlockToEntity(param)
+	}
+	return blocks
 }

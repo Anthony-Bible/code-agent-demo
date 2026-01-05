@@ -28,6 +28,8 @@ type ConversationService struct {
 	processing             map[string]bool
 	sessionModes           map[string]bool
 	sessionModesMu         sync.RWMutex // Protects sessionModes map for concurrent access
+	sessionThinkingModes   map[string]port.ThinkingModeInfo
+	sessionThinkingModesMu sync.RWMutex // Protects sessionThinkingModes map for concurrent access
 	sessionSystemPrompts   map[string]string
 	sessionSystemPromptsMu sync.RWMutex // Protects sessionSystemPrompts map for concurrent access
 }
@@ -48,6 +50,7 @@ func NewConversationService(aiProvider port.AIProvider, toolExecutor port.ToolEx
 		conversations:        make(map[string]*entity.Conversation),
 		processing:           make(map[string]bool),
 		sessionModes:         make(map[string]bool),
+		sessionThinkingModes: make(map[string]port.ThinkingModeInfo),
 		sessionSystemPrompts: make(map[string]string),
 	}, nil
 }
@@ -170,11 +173,15 @@ func (cs *ConversationService) ProcessAssistantResponse(
 			}
 		}
 
+		// Convert ThinkingBlocks from entity to port
+		thinkingBlockParams := port.ConvertEntityThinkingBlocksToParams(msg.ThinkingBlocks)
+
 		messageParams[i] = port.MessageParam{
-			Role:        msg.Role,
-			Content:     msg.Content,
-			ToolCalls:   toolCallParams,
-			ToolResults: toolResultParams,
+			Role:           msg.Role,
+			Content:        msg.Content,
+			ToolCalls:      toolCallParams,
+			ToolResults:    toolResultParams,
+			ThinkingBlocks: thinkingBlockParams,
 		}
 	}
 
@@ -318,6 +325,11 @@ func (cs *ConversationService) EndConversation(ctx context.Context, sessionID st
 	delete(cs.sessionModes, sessionID)
 	cs.sessionModesMu.Unlock()
 
+	// Remove thinking mode state
+	cs.sessionThinkingModesMu.Lock()
+	delete(cs.sessionThinkingModes, sessionID)
+	cs.sessionThinkingModesMu.Unlock()
+
 	// Remove custom system prompt
 	cs.sessionSystemPromptsMu.Lock()
 	delete(cs.sessionSystemPrompts, sessionID)
@@ -406,6 +418,33 @@ func (cs *ConversationService) IsPlanMode(sessionID string) (bool, error) {
 	cs.sessionModesMu.RLock()
 	defer cs.sessionModesMu.RUnlock()
 	return cs.sessionModes[sessionID], nil
+}
+
+// SetThinkingMode sets the extended thinking mode configuration for a session.
+// The configuration includes whether thinking is enabled, the token budget, and display settings.
+// The operation is thread-safe.
+func (cs *ConversationService) SetThinkingMode(sessionID string, info port.ThinkingModeInfo) error {
+	_, exists := cs.conversations[sessionID]
+	if !exists {
+		return ErrConversationNotFound
+	}
+	cs.sessionThinkingModesMu.Lock()
+	cs.sessionThinkingModes[sessionID] = info
+	cs.sessionThinkingModesMu.Unlock()
+	return nil
+}
+
+// GetThinkingMode returns the extended thinking mode configuration for a session.
+// Returns zero-value ThinkingModeInfo for non-existent sessions or if not set.
+// The operation is thread-safe for concurrent reads.
+func (cs *ConversationService) GetThinkingMode(sessionID string) (port.ThinkingModeInfo, error) {
+	_, exists := cs.conversations[sessionID]
+	if !exists {
+		return port.ThinkingModeInfo{}, ErrConversationNotFound
+	}
+	cs.sessionThinkingModesMu.RLock()
+	defer cs.sessionThinkingModesMu.RUnlock()
+	return cs.sessionThinkingModes[sessionID], nil
 }
 
 // SetCustomSystemPrompt sets a custom system prompt for a session.

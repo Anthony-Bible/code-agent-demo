@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"code-editing-agent/internal/domain/port"
 	"code-editing-agent/internal/infrastructure/config"
 	"context"
 	"errors"
@@ -54,6 +55,17 @@ func runChat(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to start chat session: %w", err)
 	}
 	sessionID := startResp.SessionID
+
+	// Initialize thinking mode from config if enabled
+	if cfg.ExtendedThinking {
+		convSvc := container.ConversationService()
+		thinkingInfo := port.ThinkingModeInfo{
+			Enabled:      true,
+			BudgetTokens: cfg.ThinkingBudget,
+			ShowThinking: cfg.ShowThinking,
+		}
+		_ = convSvc.SetThinkingMode(sessionID, thinkingInfo)
+	}
 
 	// Discover and display available subagents
 	if subagentManager != nil {
@@ -145,6 +157,30 @@ func runChat(cmd *cobra.Command, args []string) error {
 					_ = uiAdapter.DisplaySystemMessage("Plan mode enabled: Tools will write plans to files instead of executing.")
 				} else {
 					_ = uiAdapter.DisplaySystemMessage("Plan mode disabled: Tools will execute normally.")
+				}
+			}
+			// Continue to next iteration (don't send to AI)
+			continue
+		}
+
+		// Check for :thinking command to toggle extended thinking mode
+		if strings.HasPrefix(result.text, ":thinking") {
+			parts := strings.Fields(result.text)
+			var mode string
+			if len(parts) > 1 {
+				mode = parts[1]
+			} else {
+				mode = "toggle"
+			}
+			if err := chatService.HandleThinkingCommand(ctx, sessionID, mode); err != nil {
+				_ = uiAdapter.DisplayError(err)
+			} else {
+				// Display current thinking mode status
+				convSvc := container.ConversationService()
+				if thinkingInfo, _ := convSvc.GetThinkingMode(sessionID); thinkingInfo.Enabled {
+					_ = uiAdapter.DisplaySystemMessage(fmt.Sprintf("Extended thinking enabled: Budget %d tokens", thinkingInfo.BudgetTokens))
+				} else {
+					_ = uiAdapter.DisplaySystemMessage("Extended thinking disabled")
 				}
 			}
 			// Continue to next iteration (don't send to AI)

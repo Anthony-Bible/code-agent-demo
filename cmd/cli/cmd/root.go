@@ -108,7 +108,10 @@ func init() {
 	// Define flags
 	rootCmd.PersistentFlags().String("model", "hf:zai-org/GLM-4.6", "AI model to use for requests")
 	rootCmd.PersistentFlags().StringP("dir", "d", ".", "Working directory for file operations")
-	rootCmd.PersistentFlags().Int("max-tokens", 1024, "Maximum tokens to generate in AI responses")
+	rootCmd.PersistentFlags().Int("max-tokens", 20000, "Maximum tokens to generate in AI responses")
+	rootCmd.PersistentFlags().Bool("thinking", false, "Enable extended thinking")
+	rootCmd.PersistentFlags().Int("thinking-budget", 10000, "Token budget for thinking (min 1024)")
+	rootCmd.PersistentFlags().Bool("show-thinking", false, "Display thinking content")
 
 	// Bind flags to viper
 	if err := viper.BindPFlag("model", rootCmd.PersistentFlags().Lookup("model")); err != nil {
@@ -117,7 +120,16 @@ func init() {
 	if err := viper.BindPFlag("workingDir", rootCmd.PersistentFlags().Lookup("dir")); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to bind dir flag: %v\n", err)
 	}
-	if err := viper.BindPFlag("maxTokens", rootCmd.PersistentFlags().Lookup("max-tokens")); err != nil {
+	if err := viper.BindPFlag("max_tokens", rootCmd.PersistentFlags().Lookup("max-tokens")); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to bind max-tokens flag: %v\n", err)
+	}
+	if err := viper.BindPFlag("thinking.enabled", rootCmd.PersistentFlags().Lookup("thinking")); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to bind thinking flag: %v\n", err)
+	}
+	if err := viper.BindPFlag("thinking.budget", rootCmd.PersistentFlags().Lookup("thinking-budget")); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to bind thinking-budget flag: %v\n", err)
+	}
+	if err := viper.BindPFlag("thinking.show", rootCmd.PersistentFlags().Lookup("show-thinking")); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to bind show-thinking flag: %v\n", err)
 	}
 }

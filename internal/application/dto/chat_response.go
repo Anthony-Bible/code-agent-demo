@@ -19,10 +19,17 @@ type SendMessageResponse struct {
 
 // AssistantMessage contains details about the AI's response.
 type AssistantMessage struct {
-	ID        string    `json:"id"`        // Unique message identifier
-	Content   string    `json:"content"`   // The message content (text and/or tool info)
-	Role      string    `json:"role"`      // The message role (always "assistant")
-	Timestamp time.Time `json:"timestamp"` // When the message was created
+	ID             string          `json:"id"`                        // Unique message identifier
+	Content        string          `json:"content"`                   // The message content (text and/or tool info)
+	Role           string          `json:"role"`                      // The message role (always "assistant")
+	Timestamp      time.Time       `json:"timestamp"`                 // When the message was created
+	ThinkingBlocks []ThinkingBlock `json:"thinking_blocks,omitempty"` // Extended thinking blocks from AI
+}
+
+// ThinkingBlock represents a thinking content block from extended thinking responses.
+type ThinkingBlock struct {
+	Thinking  string `json:"thinking"`  // The thinking/reasoning content
+	Signature string `json:"signature"` // Cryptographic signature (must be preserved)
 }
 
 // ToolCallInfo contains information about a tool that was requested by the AI.
@@ -104,11 +111,25 @@ func NewAssistantMessageFromEntity(msg *entity.Message) *AssistantMessage {
 	if msg == nil {
 		return nil
 	}
+
+	// Convert thinking blocks from entity to DTO
+	var thinkingBlocks []ThinkingBlock
+	if len(msg.ThinkingBlocks) > 0 {
+		thinkingBlocks = make([]ThinkingBlock, len(msg.ThinkingBlocks))
+		for i, block := range msg.ThinkingBlocks {
+			thinkingBlocks[i] = ThinkingBlock{
+				Thinking:  block.Thinking,
+				Signature: block.Signature,
+			}
+		}
+	}
+
 	return &AssistantMessage{
-		ID:        generateMessageID(),
-		Content:   msg.Content,
-		Role:      msg.Role,
-		Timestamp: msg.Timestamp,
+		ID:             generateMessageID(),
+		Content:        msg.Content,
+		Role:           msg.Role,
+		Timestamp:      msg.Timestamp,
+		ThinkingBlocks: thinkingBlocks,
 	}
 }
 

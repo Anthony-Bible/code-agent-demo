@@ -49,6 +49,7 @@ var (
 type AnthropicAdapter struct {
 	client             anthropic.Client
 	model              string
+	maxTokens          int64
 	skillManager       port.SkillManager
 	subagentManager    port.SubagentManager
 	cachedSystemPrompt string // Cached system prompt to avoid repeated skill discovery
@@ -60,6 +61,7 @@ type AnthropicAdapter struct {
 //
 // Parameters:
 //   - model: The AI model to use (e.g., "hf:zai-org/GLM-4.6", "claude-3-5-sonnet-20241022")
+//   - maxTokens: Maximum tokens for AI response
 //   - skillManager: Optional skill manager for providing skill metadata to the system prompt
 //   - subagentManager: Optional subagent manager for providing subagent metadata to the system prompt
 //
@@ -67,12 +69,14 @@ type AnthropicAdapter struct {
 //   - port.AIProvider: An implementation of the AIProvider interface
 func NewAnthropicAdapter(
 	model string,
+	maxTokens int64,
 	skillManager port.SkillManager,
 	subagentManager port.SubagentManager,
 ) port.AIProvider {
 	return &AnthropicAdapter{
 		client:          anthropic.NewClient(),
 		model:           model,
+		maxTokens:       maxTokens,
 		skillManager:    skillManager,
 		subagentManager: subagentManager,
 	}
@@ -116,13 +120,19 @@ func (a *AnthropicAdapter) SendMessage(
 	// Get system prompt (may be modified if plan mode is active, includes skill metadata)
 	systemPrompt := a.getSystemPrompt(ctx)
 
+	// Build thinking config from context
+	thinkingConfig := anthropic.ThinkingConfigParamUnion{OfDisabled: &anthropic.ThinkingConfigDisabledParam{}}
+	if thinkingInfo, ok := port.ThinkingModeFromContext(ctx); ok && thinkingInfo.Enabled {
+		thinkingConfig = anthropic.ThinkingConfigParamOfEnabled(thinkingInfo.BudgetTokens)
+	}
+
 	// Call Anthropic API
 	response, err := a.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.Model(a.model),
-		MaxTokens: int64(4096),
+		MaxTokens: a.maxTokens,
 		Messages:  anthropicMessages,
 		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
-		Thinking:  anthropic.ThinkingConfigParamUnion{OfDisabled: &anthropic.ThinkingConfigDisabledParam{}},
+		Thinking:  thinkingConfig,
 		Tools:     anthropicTools,
 	})
 	if err != nil {
@@ -335,35 +345,58 @@ func (a *AnthropicAdapter) GetModel() string {
 func (a *AnthropicAdapter) convertMessages(messages []port.MessageParam) []anthropic.MessageParam {
 	result := make([]anthropic.MessageParam, len(messages))
 	for i, msg := range messages {
-		switch {
-		case msg.Role == entity.RoleUser && len(msg.ToolResults) > 0:
-			// Build tool result blocks for user messages
-			resultBlocks := make([]anthropic.ContentBlockParamUnion, len(msg.ToolResults))
-			for j, tr := range msg.ToolResults {
-				resultBlocks[j] = anthropic.NewToolResultBlock(tr.ToolID, tr.Result, tr.IsError)
-			}
-			result[i] = anthropic.NewUserMessage(resultBlocks...)
-		case msg.Role == entity.RoleAssistant && len(msg.ToolCalls) > 0:
-			// Build assistant message with tool use blocks
-			blocks := []anthropic.ContentBlockParamUnion{}
-			if msg.Content != "" {
-				blocks = append(blocks, anthropic.NewTextBlock(msg.Content))
-			}
-			for _, tc := range msg.ToolCalls {
-				blocks = append(blocks, anthropic.NewToolUseBlock(tc.ToolID, tc.Input, tc.ToolName))
-			}
-			result[i] = anthropic.NewAssistantMessage(blocks...)
-		default:
-			// Simple text message (backward compatible)
-			if msg.Role == entity.RoleAssistant {
-				result[i] = anthropic.NewAssistantMessage(anthropic.NewTextBlock(msg.Content))
-			} else {
-				// Default to user message for roles like "user" and "system"
-				result[i] = anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content))
-			}
-		}
+		result[i] = a.convertMessage(msg)
 	}
 	return result
+}
+
+// convertMessage converts a single port MessageParam to Anthropic SDK MessageParam.
+func (a *AnthropicAdapter) convertMessage(msg port.MessageParam) anthropic.MessageParam {
+	if msg.Role == entity.RoleUser && len(msg.ToolResults) > 0 {
+		return a.convertUserToolResultMessage(msg)
+	}
+	if msg.Role == entity.RoleAssistant && (len(msg.ToolCalls) > 0 || len(msg.ThinkingBlocks) > 0) {
+		return a.convertAssistantToolMessage(msg)
+	}
+	return a.convertSimpleMessage(msg)
+}
+
+// convertUserToolResultMessage converts a user message with tool results.
+func (a *AnthropicAdapter) convertUserToolResultMessage(msg port.MessageParam) anthropic.MessageParam {
+	resultBlocks := make([]anthropic.ContentBlockParamUnion, len(msg.ToolResults))
+	for j, tr := range msg.ToolResults {
+		resultBlocks[j] = anthropic.NewToolResultBlock(tr.ToolID, tr.Result, tr.IsError)
+	}
+	return anthropic.NewUserMessage(resultBlocks...)
+}
+
+// convertAssistantToolMessage converts an assistant message with thinking blocks, text, and tool calls.
+// CRITICAL: Thinking blocks MUST come first in the content array.
+func (a *AnthropicAdapter) convertAssistantToolMessage(msg port.MessageParam) anthropic.MessageParam {
+	blocks := []anthropic.ContentBlockParamUnion{}
+
+	// CRITICAL: Thinking blocks MUST come first
+	for _, tb := range msg.ThinkingBlocks {
+		blocks = append(blocks, anthropic.NewThinkingBlock(tb.Signature, tb.Thinking))
+	}
+
+	if msg.Content != "" {
+		blocks = append(blocks, anthropic.NewTextBlock(msg.Content))
+	}
+
+	for _, tc := range msg.ToolCalls {
+		blocks = append(blocks, anthropic.NewToolUseBlock(tc.ToolID, tc.Input, tc.ToolName))
+	}
+
+	return anthropic.NewAssistantMessage(blocks...)
+}
+
+// convertSimpleMessage converts a simple text message.
+func (a *AnthropicAdapter) convertSimpleMessage(msg port.MessageParam) anthropic.MessageParam {
+	if msg.Role == entity.RoleAssistant {
+		return anthropic.NewAssistantMessage(anthropic.NewTextBlock(msg.Content))
+	}
+	return anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content))
 }
 
 // convertTools converts port ToolParam slice to Anthropic SDK ToolUnionParam slice.
@@ -432,6 +465,7 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 	var contentBuilder strings.Builder
 	toolCalls := []port.ToolCallInfo{}
 	entityToolCalls := []entity.ToolCall{}
+	thinkingBlocks := []entity.ThinkingBlock{}
 
 	for _, content := range response.Content {
 		switch content.Type {
@@ -481,7 +515,11 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 				fmt.Fprintf(os.Stderr, "[AnthropicAdapter] tool_use has empty Input - skipping\n")
 			}
 		case "thinking":
-			// Thinking blocks are optional
+			// Extract thinking blocks with signatures (CRITICAL: preserve signature exactly)
+			thinkingBlocks = append(thinkingBlocks, entity.ThinkingBlock{
+				Thinking:  content.Thinking,
+				Signature: content.Signature,
+			})
 		}
 	}
 
@@ -513,6 +551,11 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 	// Store tool calls in the message entity so they persist in conversation history
 	if len(entityToolCalls) > 0 {
 		msg.ToolCalls = entityToolCalls
+	}
+
+	// Store thinking blocks in the message entity (CRITICAL: signatures preserved exactly)
+	if len(thinkingBlocks) > 0 {
+		msg.ThinkingBlocks = thinkingBlocks
 	}
 
 	return msg, toolCalls, nil
