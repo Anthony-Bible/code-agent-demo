@@ -146,6 +146,14 @@ func (m *subagentRunnerConvServiceMock) SetCustomSystemPrompt(
 	return m.setCustomSystemPromptError
 }
 
+func (m *subagentRunnerConvServiceMock) SetThinkingMode(_ string, _ port.ThinkingModeInfo) error {
+	return nil
+}
+
+func (m *subagentRunnerConvServiceMock) GetThinkingMode(_ string) (port.ThinkingModeInfo, error) {
+	return port.ThinkingModeInfo{}, nil
+}
+
 // subagentRunnerToolExecutorMock implements port.ToolExecutor for testing.
 type subagentRunnerToolExecutorMock struct {
 	mu sync.Mutex
