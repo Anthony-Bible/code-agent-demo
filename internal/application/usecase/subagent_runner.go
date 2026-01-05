@@ -10,6 +10,29 @@ import (
 	"time"
 )
 
+// resolveModelShorthand converts shorthand model names to actual Anthropic model IDs.
+// It supports:
+//   - "haiku" -> "claude-3-5-haiku-20241022"
+//   - "sonnet" -> "claude-sonnet-4-5-20250929"
+//   - "opus" -> "claude-opus-4-5-20250514"
+//   - "inherit" or "" -> "" (empty string signals to not change model)
+//   - Any other value is returned as-is (assumed to be a full model ID)
+func resolveModelShorthand(model string) string {
+	switch model {
+	case string(entity.ModelHaiku):
+		return "claude-3-5-haiku-20241022"
+	case string(entity.ModelSonnet):
+		return "claude-sonnet-4-5-20250929"
+	case string(entity.ModelOpus):
+		return "claude-opus-4-5-20250514"
+	case string(entity.ModelInherit), "":
+		return "" // Empty means don't change model
+	default:
+		// Assume it's already a full model ID (e.g., "claude-sonnet-4-5")
+		return model
+	}
+}
+
 // SubagentConfig holds configuration for subagent execution.
 type SubagentConfig struct {
 	MaxActions      int
@@ -148,10 +171,11 @@ func (r *SubagentRunner) Run(
 		return r.validationFailedResult(subagentID, agent, err), err
 	}
 
-	// Model switching: Set agent model if specified and restore afterward
-	if agent.Model != "" && agent.Model != "inherit" {
+	// Model switching: Resolve shorthand and set agent model if specified
+	resolvedModel := resolveModelShorthand(agent.Model)
+	if resolvedModel != "" {
 		originalModel := r.aiProvider.GetModel()
-		if err := r.aiProvider.SetModel(agent.Model); err != nil {
+		if err := r.aiProvider.SetModel(resolvedModel); err != nil {
 			return r.validationFailedResult(subagentID, agent, err), err
 		}
 		defer func() { _ = r.aiProvider.SetModel(originalModel) }()

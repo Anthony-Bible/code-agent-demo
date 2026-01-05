@@ -7,7 +7,7 @@ allowed_tools:
   - grep
   - write_file
   - edit_file
-model: claude-sonnet-4-5
+model: sonnet
 max_actions: 20
 ---
 

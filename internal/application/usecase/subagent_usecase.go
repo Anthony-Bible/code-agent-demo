@@ -103,6 +103,99 @@ func generateSubagentID() string {
 	return fmt.Sprintf("subagent-%d", time.Now().UnixNano())
 }
 
+// DynamicSubagentConfig holds the configuration for creating a dynamic subagent.
+//
+// Dynamic subagents are created at runtime with custom system prompts, without requiring
+// a pre-defined AGENT.md file. This is useful for delegating complex tasks that benefit
+// from isolated context.
+type DynamicSubagentConfig struct {
+	Name         string   // Required: Short identifier for the agent (for logging/tracking)
+	Description  string   // Optional: What this agent is for (for logging)
+	SystemPrompt string   // Required: Instructions defining the agent's role, approach, and output format
+	Model        string   // Optional: AI model to use (haiku, sonnet, opus, inherit). Default: "inherit"
+	MaxActions   int      // Optional: Maximum tool calls before stopping. Default: 30
+	AllowedTools []string // Optional: Tools this agent can use. nil = all tools (default)
+}
+
+// SpawnDynamicSubagent creates and spawns a dynamic subagent with custom configuration.
+//
+// Unlike SpawnSubagent which requires a pre-registered agent in AGENT.md files,
+// this method creates an agent on-the-fly with inline configuration. The agent
+// runs in an isolated conversation context with the provided system prompt.
+//
+// Configuration validation:
+//   - Name must be non-empty
+//   - SystemPrompt must be non-empty
+//   - taskPrompt must be non-empty
+//
+// Default values applied:
+//   - Model: "inherit" (use same model as parent agent)
+//   - MaxActions: 30 (maximum tool calls before stopping)
+//   - AllowedTools: nil (all tools available)
+//
+// The dynamic agent is created with SourceType = SubagentSourceProgrammatic.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout
+//   - config: Dynamic agent configuration (name, system_prompt required)
+//   - taskPrompt: The specific task for the agent to complete (required)
+//
+// Returns:
+//   - *SubagentResult: Result of the subagent execution (status, output, etc.)
+//   - error: Validation errors or execution errors
+func (uc *SubagentUseCase) SpawnDynamicSubagent(
+	ctx context.Context,
+	config DynamicSubagentConfig,
+	taskPrompt string,
+) (*SubagentResult, error) {
+	// 1. Validate required fields
+	if err := validateDynamicConfig(config, taskPrompt); err != nil {
+		return nil, err
+	}
+
+	// 2. Apply defaults
+	model := config.Model
+	if model == "" {
+		model = "inherit"
+	}
+
+	maxActions := config.MaxActions
+	if maxActions == 0 {
+		maxActions = 30
+	}
+
+	// 3. Create entity.Subagent with programmatic source
+	agent := &entity.Subagent{
+		Name:         config.Name,
+		Description:  config.Description,
+		RawContent:   config.SystemPrompt, // System prompt goes into RawContent
+		Model:        model,
+		MaxActions:   maxActions,
+		AllowedTools: config.AllowedTools, // nil means all tools
+		SourceType:   entity.SubagentSourceProgrammatic,
+	}
+
+	// 4. Generate unique ID for this subagent execution
+	subagentID := generateSubagentID()
+
+	// 5. Execute the subagent task
+	return uc.subagentRunner.Run(ctx, agent, taskPrompt, subagentID)
+}
+
+// validateDynamicConfig validates the configuration for dynamic subagent spawn.
+func validateDynamicConfig(config DynamicSubagentConfig, taskPrompt string) error {
+	if config.Name == "" {
+		return errors.New("name cannot be empty")
+	}
+	if config.SystemPrompt == "" {
+		return errors.New("system_prompt cannot be empty")
+	}
+	if taskPrompt == "" {
+		return errors.New("task prompt cannot be empty")
+	}
+	return nil
+}
+
 // SubagentRequest represents a single subagent spawn request for batch operations.
 //
 // Used by SpawnMultiple to execute multiple subagent tasks in parallel.

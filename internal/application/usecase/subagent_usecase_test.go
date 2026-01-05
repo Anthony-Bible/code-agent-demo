@@ -2145,3 +2145,191 @@ func TestSpawnMultiple_RaceFlagPasses(t *testing.T) {
 
 	// If there are race conditions, the -race flag will detect them
 }
+
+// ==================== Dynamic Subagent Tests ====================
+
+func TestSpawnDynamicSubagent_Success(t *testing.T) {
+	var capturedAgent *entity.Subagent
+	var capturedPrompt string
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			capturedAgent = agent
+			capturedPrompt = taskPrompt
+			return &SubagentResult{
+				Status:    "completed",
+				AgentName: agent.Name,
+				Output:    "Task completed successfully",
+			}, nil
+		},
+	}
+
+	// Manager should NOT be called for dynamic agents
+	manager := &MockSubagentManager{
+		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
+			t.Error("LoadAgentMetadata should not be called for dynamic subagents")
+			return nil, errors.New("should not be called")
+		},
+	}
+
+	uc := NewSubagentUseCase(manager, runner)
+	ctx := context.Background()
+
+	config := DynamicSubagentConfig{
+		Name:         "test-analyzer",
+		Description:  "A test analyzer agent",
+		SystemPrompt: "You are a test analyzer. Analyze the code.",
+		Model:        "haiku",
+		MaxActions:   15,
+		AllowedTools: []string{"read_file", "list_files"},
+	}
+
+	result, err := uc.SpawnDynamicSubagent(ctx, config, "analyze the auth module")
+	if err != nil {
+		t.Fatalf("SpawnDynamicSubagent() returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("SpawnDynamicSubagent() returned nil result")
+	}
+	if result.Status != "completed" {
+		t.Errorf("Expected status 'completed', got '%s'", result.Status)
+	}
+
+	// Verify the agent was created correctly
+	if capturedAgent == nil {
+		t.Fatal("Runner was not called with agent")
+	}
+	if capturedAgent.Name != "test-analyzer" {
+		t.Errorf("Expected agent name 'test-analyzer', got '%s'", capturedAgent.Name)
+	}
+	if capturedAgent.RawContent != "You are a test analyzer. Analyze the code." {
+		t.Errorf("Expected RawContent to be system prompt, got '%s'", capturedAgent.RawContent)
+	}
+	if capturedAgent.Model != "haiku" {
+		t.Errorf("Expected model 'haiku', got '%s'", capturedAgent.Model)
+	}
+	if capturedAgent.MaxActions != 15 {
+		t.Errorf("Expected max_actions 15, got %d", capturedAgent.MaxActions)
+	}
+	if len(capturedAgent.AllowedTools) != 2 {
+		t.Errorf("Expected 2 allowed tools, got %d", len(capturedAgent.AllowedTools))
+	}
+	if capturedAgent.SourceType != entity.SubagentSourceProgrammatic {
+		t.Errorf("Expected SourceType 'programmatic', got '%s'", capturedAgent.SourceType)
+	}
+
+	// Verify task prompt was passed correctly
+	if capturedPrompt != "analyze the auth module" {
+		t.Errorf("Expected prompt 'analyze the auth module', got '%s'", capturedPrompt)
+	}
+}
+
+func TestSpawnDynamicSubagent_MissingName(t *testing.T) {
+	manager := &MockSubagentManager{}
+	runner := &MockSubagentRunner{}
+	uc := NewSubagentUseCase(manager, runner)
+
+	ctx := context.Background()
+	config := DynamicSubagentConfig{
+		Name:         "", // Missing
+		SystemPrompt: "You are an agent",
+	}
+
+	result, err := uc.SpawnDynamicSubagent(ctx, config, "do something")
+	if err == nil {
+		t.Error("SpawnDynamicSubagent() did not return error for missing name")
+	}
+	if result != nil {
+		t.Error("SpawnDynamicSubagent() should return nil result for missing name")
+	}
+	if err != nil && !strings.Contains(err.Error(), "name") {
+		t.Errorf("Expected error message to mention 'name', got: %v", err)
+	}
+}
+
+func TestSpawnDynamicSubagent_MissingSystemPrompt(t *testing.T) {
+	manager := &MockSubagentManager{}
+	runner := &MockSubagentRunner{}
+	uc := NewSubagentUseCase(manager, runner)
+
+	ctx := context.Background()
+	config := DynamicSubagentConfig{
+		Name:         "test-agent",
+		SystemPrompt: "", // Missing
+	}
+
+	result, err := uc.SpawnDynamicSubagent(ctx, config, "do something")
+	if err == nil {
+		t.Error("SpawnDynamicSubagent() did not return error for missing system_prompt")
+	}
+	if result != nil {
+		t.Error("SpawnDynamicSubagent() should return nil result for missing system_prompt")
+	}
+	if err != nil && !strings.Contains(err.Error(), "system_prompt") && !strings.Contains(err.Error(), "SystemPrompt") {
+		t.Errorf("Expected error message to mention 'system_prompt', got: %v", err)
+	}
+}
+
+func TestSpawnDynamicSubagent_MissingTask(t *testing.T) {
+	manager := &MockSubagentManager{}
+	runner := &MockSubagentRunner{}
+	uc := NewSubagentUseCase(manager, runner)
+
+	ctx := context.Background()
+	config := DynamicSubagentConfig{
+		Name:         "test-agent",
+		SystemPrompt: "You are an agent",
+	}
+
+	result, err := uc.SpawnDynamicSubagent(ctx, config, "") // Missing task
+	if err == nil {
+		t.Error("SpawnDynamicSubagent() did not return error for empty task")
+	}
+	if result != nil {
+		t.Error("SpawnDynamicSubagent() should return nil result for empty task")
+	}
+	if err != nil && !strings.Contains(err.Error(), "task") {
+		t.Errorf("Expected error message to mention 'task', got: %v", err)
+	}
+}
+
+func TestSpawnDynamicSubagent_AppliesDefaults(t *testing.T) {
+	var capturedAgent *entity.Subagent
+
+	runner := &MockSubagentRunner{
+		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
+			capturedAgent = agent
+			return &SubagentResult{Status: "completed"}, nil
+		},
+	}
+
+	manager := &MockSubagentManager{}
+	uc := NewSubagentUseCase(manager, runner)
+
+	ctx := context.Background()
+	config := DynamicSubagentConfig{
+		Name:         "test-agent",
+		SystemPrompt: "You are an agent",
+		// Model and MaxActions omitted - should use defaults
+	}
+
+	_, err := uc.SpawnDynamicSubagent(ctx, config, "do something")
+	if err != nil {
+		t.Fatalf("SpawnDynamicSubagent() returned error: %v", err)
+	}
+
+	if capturedAgent == nil {
+		t.Fatal("Runner was not called")
+	}
+
+	// Verify defaults
+	if capturedAgent.Model != "inherit" {
+		t.Errorf("Expected default model 'inherit', got '%s'", capturedAgent.Model)
+	}
+	if capturedAgent.MaxActions != 30 {
+		t.Errorf("Expected default max_actions 30, got %d", capturedAgent.MaxActions)
+	}
+	if capturedAgent.AllowedTools != nil {
+		t.Errorf("Expected default allowed_tools to be nil (all tools), got %v", capturedAgent.AllowedTools)
+	}
+}

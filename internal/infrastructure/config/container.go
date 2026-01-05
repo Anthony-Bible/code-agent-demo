@@ -100,11 +100,19 @@ func NewContainer(cfg *Config) (*Container, error) {
 	}
 
 	// Step 1: Create infrastructure adapters
-	// Note: order matters - skillManager must be created before aiAdapter
+	// Note: order matters - skillManager and subagentManager must be created before aiAdapter
 	fileManager := file.NewLocalFileManager(cfg.WorkingDir)
 	uiAdapter := ui.NewCLIAdapterWithHistory(cfg.HistoryFile, cfg.HistoryMaxEntries)
 	skillManager := skill.NewLocalSkillManager()
-	aiAdapter := ai.NewAnthropicAdapter(cfg.AIModel, skillManager)
+
+	// Create subagentManager early (before aiAdapter) so it can be included in system prompt
+	subagentManager := subagent.NewLocalSubagentManagerWithDirs([]subagent.DirConfig{
+		{Path: filepath.Join(cfg.WorkingDir, "agents"), SourceType: entity.SubagentSourceProject},
+		{Path: filepath.Join(cfg.WorkingDir, ".claude", "agents"), SourceType: entity.SubagentSourceProjectClaude},
+		{Path: filepath.Join(getUserHome(), ".claude", "agents"), SourceType: entity.SubagentSourceUser},
+	})
+
+	aiAdapter := ai.NewAnthropicAdapter(cfg.AIModel, skillManager, subagentManager)
 
 	// Create base executor and wrap with planning decorator
 	baseExecutor := tool.NewExecutorAdapter(fileManager)
@@ -177,9 +185,9 @@ func NewContainer(cfg *Config) (*Container, error) {
 		return nil, err
 	}
 
-	// Step 5: Create subagent components
-	subagentManager, subagentUseCase := createSubagentComponents(
-		cfg, convService, toolExecutor, aiAdapter, baseExecutor, uiAdapter,
+	// Step 5: Create subagent components (pass the already-created subagentManager)
+	subagentUseCase := createSubagentComponents(
+		cfg, convService, toolExecutor, aiAdapter, baseExecutor, uiAdapter, subagentManager,
 	)
 
 	return &Container{
@@ -259,28 +267,19 @@ func createInvestigationComponents(
 	return investigationUseCase, alertSourceManager, webhookAdapter, nil
 }
 
-// createSubagentComponents sets up the subagent system including the manager,
-// runner, and use case. Subagents are specialized AI agents that can be spawned
-// to handle delegated tasks in isolated conversation sessions.
+// createSubagentComponents sets up the subagent runner and use case.
+// Accepts an already-created subagentManager (which is needed earlier for the AIAdapter).
+// Subagents are specialized AI agents that can be spawned to handle delegated tasks
+// in isolated conversation sessions.
 func createSubagentComponents(
-	cfg *Config,
+	_ *Config,
 	convService *service.ConversationService,
 	toolExecutor port.ToolExecutor,
 	aiAdapter port.AIProvider,
 	baseExecutor *tool.ExecutorAdapter,
 	uiAdapter port.UserInterface,
-) (port.SubagentManager, *usecase.SubagentUseCase) {
-	// Create LocalSubagentManager with discovery directories (priority order: highest to lowest)
-	// Discovery order follows agentskills.io spec:
-	// 1. ./agents (project root) - highest priority, project-specific agents
-	// 2. ./.claude/agents (project .claude) - middle priority, project-level shared agents
-	// 3. ~/.claude/agents (user global) - lowest priority, user-level reusable agents
-	subagentManager := subagent.NewLocalSubagentManagerWithDirs([]subagent.DirConfig{
-		{Path: filepath.Join(cfg.WorkingDir, "agents"), SourceType: entity.SubagentSourceProject},
-		{Path: filepath.Join(cfg.WorkingDir, ".claude", "agents"), SourceType: entity.SubagentSourceProjectClaude},
-		{Path: filepath.Join(getUserHome(), ".claude", "agents"), SourceType: entity.SubagentSourceUser},
-	})
-
+	subagentManager port.SubagentManager,
+) *usecase.SubagentUseCase {
 	// Create SubagentRunner with dependencies and safety configuration
 	// SubagentRunner executes subagent tasks with resource limits to prevent runaway execution.
 	// Config values:
@@ -312,7 +311,7 @@ func createSubagentComponents(
 	// This enables the 'task' tool, allowing the main AI to delegate work to subagents
 	baseExecutor.SetSubagentUseCase(subagentUseCase)
 
-	return subagentManager, subagentUseCase
+	return subagentUseCase
 }
 
 // ChatService returns the application chat service.

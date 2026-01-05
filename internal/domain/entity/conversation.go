@@ -16,22 +16,21 @@
 //
 // Basic usage:
 //
-//     conv, err := entity.NewConversation()
-//     if err != nil {
-//         return fmt.Errorf("failed to create conversation: %w", err)
-//     }
+//	conv, err := entity.NewConversation()
+//	if err != nil {
+//	    return fmt.Errorf("failed to create conversation: %w", err)
+//	}
 //
-//     msg, err := entity.NewMessage("user", "Hello, world!")
-//     if err != nil {
-//         return fmt.Errorf("failed to create message: %w", err)
-//     }
+//	msg, err := entity.NewMessage("user", "Hello, world!")
+//	if err != nil {
+//	    return fmt.Errorf("failed to create message: %w", err)
+//	}
 //
-//     if err := conv.AddMessage(*msg); err != nil {
-//         return fmt.Errorf("failed to add message: %w", err)
-//     }
+//	if err := conv.AddMessage(*msg); err != nil {
+//	    return fmt.Errorf("failed to add message: %w", err)
+//	}
 //
-//     fmt.Printf("Conversation has %d messages\n", conv.MessageCount())
-//
+//	fmt.Printf("Conversation has %d messages\n", conv.MessageCount())
 package entity
 
 import (
@@ -62,32 +61,31 @@ import (
 //
 // Example usage:
 //
-//     // Create a new conversation
-//     conv, err := NewConversation()
-//     if err != nil {
-//         return fmt.Errorf("failed to create conversation: %w", err)
-//     }
+//	// Create a new conversation
+//	conv, err := NewConversation()
+//	if err != nil {
+//	    return fmt.Errorf("failed to create conversation: %w", err)
+//	}
 //
-//     // Create and add messages
-//     userMsg, _ := NewMessage("user", "Hello!")
-//     conv.AddMessage(*userMsg)
+//	// Create and add messages
+//	userMsg, _ := NewMessage("user", "Hello!")
+//	conv.AddMessage(*userMsg)
 //
-//     assistantMsg, _ := NewMessage("assistant", "Hi there! How can I help?")
-//     conv.AddMessage(*assistantMsg)
+//	assistantMsg, _ := NewMessage("assistant", "Hi there! How can I help?")
+//	conv.AddMessage(*assistantMsg)
 //
-//     // Query conversation state
-//     if conv.HasMessages() {
-//         fmt.Printf("Conversation started at: %v\n", conv.StartedAt)
-//         fmt.Printf("Total messages: %d\n", conv.MessageCount())
-//         fmt.Printf("Duration: %v\n", conv.GetDuration())
-//     }
-//
+//	// Query conversation state
+//	if conv.HasMessages() {
+//	    fmt.Printf("Conversation started at: %v\n", conv.StartedAt)
+//	    fmt.Printf("Total messages: %d\n", conv.MessageCount())
+//	    fmt.Printf("Duration: %v\n", conv.GetDuration())
+//	}
 type Conversation struct {
 	// Messages is the chronological collection of all messages in this conversation.
 	// Messages are stored in the order they were added and maintain their original
 	// Message objects with all metadata intact.
 	Messages []Message `json:"messages"`
-	
+
 	// StartedAt marks when this conversation was first created.
 	// It is automatically set during conversation creation and provides
 	// a reference point for calculating conversation duration.
@@ -110,12 +108,11 @@ type Conversation struct {
 //
 // Example:
 //
-//     conv, err := NewConversation()
-//     if err != nil {
-//         return fmt.Errorf("failed to create conversation: %w", err)
-//     }
-//     fmt.Printf("New conversation started at: %v\n", conv.StartedAt)
-//
+//	conv, err := NewConversation()
+//	if err != nil {
+//	    return fmt.Errorf("failed to create conversation: %w", err)
+//	}
+//	fmt.Printf("New conversation started at: %v\n", conv.StartedAt)
 func NewConversation() (*Conversation, error) {
 	return &Conversation{
 		Messages:  []Message{},
@@ -147,16 +144,15 @@ func NewConversation() (*Conversation, error) {
 //
 // Example:
 //
-//     msg, err := NewMessage("user", "Hello, world!")
-//     if err != nil {
-//         return fmt.Errorf("failed to create message: %w", err)
-//     }
+//	msg, err := NewMessage("user", "Hello, world!")
+//	if err != nil {
+//	    return fmt.Errorf("failed to create message: %w", err)
+//	}
 //
-//     if err := conv.AddMessage(*msg); err != nil {
-//         return fmt.Errorf("failed to add message: %w", err)
-//     }
-//     fmt.Printf("Added message. Total: %d\n", conv.MessageCount())
-//
+//	if err := conv.AddMessage(*msg); err != nil {
+//	    return fmt.Errorf("failed to add message: %w", err)
+//	}
+//	fmt.Printf("Added message. Total: %d\n", conv.MessageCount())
 func (c *Conversation) AddMessage(message Message) error {
 	// Set timestamp if zero for struct-created messages
 	if message.Timestamp.IsZero() {
@@ -189,13 +185,12 @@ func (c *Conversation) AddMessage(message Message) error {
 //
 // Example:
 //
-//     messages := conv.GetMessages()
-//     for i, msg := range messages {
-//         fmt.Printf("%d: [%s] %s\n", i, msg.Role, msg.Content)
-//     }
-//     // Safe: modifying messages slice doesn't affect conversation
-//     messages = append(messages, Message{Role: "user", Content: "temp"})
-//
+//	messages := conv.GetMessages()
+//	for i, msg := range messages {
+//	    fmt.Printf("%d: [%s] %s\n", i, msg.Role, msg.Content)
+//	}
+//	// Safe: modifying messages slice doesn't affect conversation
+//	messages = append(messages, Message{Role: "user", Content: "temp"})
 func (c *Conversation) GetMessages() []Message {
 	result := make([]Message, len(c.Messages))
 	copy(result, c.Messages)
@@ -222,18 +217,17 @@ func (c *Conversation) GetMessages() []Message {
 //
 // Example:
 //
-//     if lastMsg, ok := conv.GetLastMessage(); ok {
-//         fmt.Printf("Last message from %s: %s\n", lastMsg.Role, lastMsg.Content)
-//         fmt.Printf("Sent at: %v\n", lastMsg.Timestamp)
-//     } else {
-//         fmt.Println("No messages in conversation yet")
-//     }
+//	if lastMsg, ok := conv.GetLastMessage(); ok {
+//	    fmt.Printf("Last message from %s: %s\n", lastMsg.Role, lastMsg.Content)
+//	    fmt.Printf("Sent at: %v\n", lastMsg.Timestamp)
+//	} else {
+//	    fmt.Println("No messages in conversation yet")
+//	}
 //
-//     // Common pattern: checking for assistant response
-//     if lastMsg, ok := conv.GetLastMessage(); ok && lastMsg.Role == RoleAssistant {
-//         fmt.Println("Assistant has already responded")
-//     }
-//
+//	// Common pattern: checking for assistant response
+//	if lastMsg, ok := conv.GetLastMessage(); ok && lastMsg.Role == RoleAssistant {
+//	    fmt.Println("Assistant has already responded")
+//	}
 func (c *Conversation) GetLastMessage() (*Message, bool) {
 	if len(c.Messages) == 0 {
 		return nil, false
@@ -257,17 +251,16 @@ func (c *Conversation) GetLastMessage() (*Message, bool) {
 //
 // Example:
 //
-//     fmt.Printf("Before clear: %d messages\n", conv.MessageCount())
-//     conv.Clear()
-//     fmt.Printf("After clear: %d messages\n", conv.MessageCount())
-//     fmt.Printf("Conversation originally started at: %v\n", conv.StartedAt)
+//	fmt.Printf("Before clear: %d messages\n", conv.MessageCount())
+//	conv.Clear()
+//	fmt.Printf("After clear: %d messages\n", conv.MessageCount())
+//	fmt.Printf("Conversation originally started at: %v\n", conv.StartedAt)
 //
-//     // Common pattern: clearing conversation while preserving start time
-//     if conv.MessageCount() > 100 {
-//         fmt.Println("Conversation getting too long, clearing...")
-//         conv.Clear()
-//     }
-//
+//	// Common pattern: clearing conversation while preserving start time
+//	if conv.MessageCount() > 100 {
+//	    fmt.Println("Conversation getting too long, clearing...")
+//	    conv.Clear()
+//	}
 func (c *Conversation) Clear() {
 	c.Messages = []Message{}
 }
@@ -283,19 +276,18 @@ func (c *Conversation) Clear() {
 //
 // Example:
 //
-//     count := conv.MessageCount()
-//     fmt.Printf("Conversation has %d messages\n", count)
+//	count := conv.MessageCount()
+//	fmt.Printf("Conversation has %d messages\n", count)
 //
-//     // Common pattern: checking conversation length
-//     if conv.MessageCount() > 10 {
-//         fmt.Println("Long conversation detected")
-//     }
+//	// Common pattern: checking conversation length
+//	if conv.MessageCount() > 10 {
+//	    fmt.Println("Long conversation detected")
+//	}
 //
-//     // Pagination example
-//     pageSize := 10
-//     totalPages := (conv.MessageCount() + pageSize - 1) / pageSize
-//     fmt.Printf("Total pages: %d\n", totalPages)
-//
+//	// Pagination example
+//	pageSize := 10
+//	totalPages := (conv.MessageCount() + pageSize - 1) / pageSize
+//	fmt.Printf("Total pages: %d\n", totalPages)
 func (c *Conversation) MessageCount() int {
 	return len(c.Messages)
 }
@@ -311,14 +303,13 @@ func (c *Conversation) MessageCount() int {
 //
 // Example:
 //
-//     if conv.IsEmpty() {
-//         fmt.Println("Starting a new conversation")
-//         // Add welcome message
-//     }
+//	if conv.IsEmpty() {
+//	    fmt.Println("Starting a new conversation")
+//	    // Add welcome message
+//	}
 //
-//     // More readable than:
-//     // if conv.MessageCount() == 0 { ... }
-//
+//	// More readable than:
+//	// if conv.MessageCount() == 0 { ... }
 func (c *Conversation) IsEmpty() bool {
 	return len(c.Messages) == 0
 }
@@ -334,17 +325,16 @@ func (c *Conversation) IsEmpty() bool {
 //
 // Example:
 //
-//     if conv.HasMessages() {
-//         fmt.Printf("Conversation started %v ago\n", conv.GetDuration())
-//         lastMsg, _ := conv.GetLastMessage()
-//         fmt.Printf("Last message: %s\n", lastMsg.Content)
-//     }
+//	if conv.HasMessages() {
+//	    fmt.Printf("Conversation started %v ago\n", conv.GetDuration())
+//	    lastMsg, _ := conv.GetLastMessage()
+//	    fmt.Printf("Last message: %s\n", lastMsg.Content)
+//	}
 //
-//     // Common pattern: conditional processing
-//     if !conv.HasMessages() {
-//         return errors.New("cannot process empty conversation")
-//     }
-//
+//	// Common pattern: conditional processing
+//	if !conv.HasMessages() {
+//	    return errors.New("cannot process empty conversation")
+//	}
 func (c *Conversation) HasMessages() bool {
 	return len(c.Messages) > 0
 }
@@ -382,4 +372,3 @@ func (c *Conversation) HasMessages() bool {
 //         return errors.New("session expired")
 //     }
 //
-

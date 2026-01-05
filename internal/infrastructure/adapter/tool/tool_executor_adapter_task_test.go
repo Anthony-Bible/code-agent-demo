@@ -28,7 +28,8 @@ import (
 
 // MockSubagentUseCase is a mock implementation of SubagentUseCaseInterface for testing.
 type MockSubagentUseCase struct {
-	SpawnSubagentFunc func(ctx context.Context, agentName string, prompt string) (*usecase.SubagentResult, error)
+	SpawnSubagentFunc        func(ctx context.Context, agentName string, prompt string) (*usecase.SubagentResult, error)
+	SpawnDynamicSubagentFunc func(ctx context.Context, config usecase.DynamicSubagentConfig, taskPrompt string) (*usecase.SubagentResult, error)
 }
 
 func (m *MockSubagentUseCase) SpawnSubagent(
@@ -39,7 +40,18 @@ func (m *MockSubagentUseCase) SpawnSubagent(
 	if m.SpawnSubagentFunc != nil {
 		return m.SpawnSubagentFunc(ctx, agentName, prompt)
 	}
-	return nil, nil
+	return &usecase.SubagentResult{Status: "completed"}, nil
+}
+
+func (m *MockSubagentUseCase) SpawnDynamicSubagent(
+	ctx context.Context,
+	config usecase.DynamicSubagentConfig,
+	taskPrompt string,
+) (*usecase.SubagentResult, error) {
+	if m.SpawnDynamicSubagentFunc != nil {
+		return m.SpawnDynamicSubagentFunc(ctx, config, taskPrompt)
+	}
+	return &usecase.SubagentResult{Status: "completed"}, nil
 }
 
 // =============================================================================
@@ -183,14 +195,14 @@ func TestExecutorAdapter_SetSubagentUseCase_MultipleCallsUpdate(t *testing.T) {
 
 	callCount := 0
 	firstUseCase := &MockSubagentUseCase{
-		SpawnSubagentFunc: func(ctx context.Context, agentName string, prompt string) (*usecase.SubagentResult, error) {
+		SpawnSubagentFunc: func(_ context.Context, _ string, _ string) (*usecase.SubagentResult, error) {
 			callCount++
 			return &usecase.SubagentResult{Status: "first"}, nil
 		},
 	}
 
 	secondUseCase := &MockSubagentUseCase{
-		SpawnSubagentFunc: func(ctx context.Context, agentName string, prompt string) (*usecase.SubagentResult, error) {
+		SpawnSubagentFunc: func(_ context.Context, _ string, _ string) (*usecase.SubagentResult, error) {
 			callCount++
 			return &usecase.SubagentResult{Status: "second"}, nil
 		},
@@ -233,7 +245,7 @@ func TestExecutorAdapter_ExecuteTool_TaskSuccess(t *testing.T) {
 	adapter := NewExecutorAdapter(fileManager)
 
 	mockUseCase := &MockSubagentUseCase{
-		SpawnSubagentFunc: func(ctx context.Context, agentName string, prompt string) (*usecase.SubagentResult, error) {
+		SpawnSubagentFunc: func(_ context.Context, agentName string, _ string) (*usecase.SubagentResult, error) {
 			return &usecase.SubagentResult{
 				SubagentID:   "test-id-123",
 				AgentName:    agentName,
@@ -281,9 +293,9 @@ func TestExecutorAdapter_ExecuteTool_TaskEmptyAgentName(t *testing.T) {
 	adapter := NewExecutorAdapter(fileManager)
 
 	mockUseCase := &MockSubagentUseCase{
-		SpawnSubagentFunc: func(ctx context.Context, agentName string, prompt string) (*usecase.SubagentResult, error) {
+		SpawnSubagentFunc: func(_ context.Context, _ string, _ string) (*usecase.SubagentResult, error) {
 			t.Error("SpawnSubagent should not be called with empty agent_name")
-			return nil, nil
+			return nil, errors.New("should not be called")
 		},
 	}
 	adapter.SetSubagentUseCase(mockUseCase)
@@ -313,9 +325,9 @@ func TestExecutorAdapter_ExecuteTool_TaskEmptyPrompt(t *testing.T) {
 	adapter := NewExecutorAdapter(fileManager)
 
 	mockUseCase := &MockSubagentUseCase{
-		SpawnSubagentFunc: func(ctx context.Context, agentName string, prompt string) (*usecase.SubagentResult, error) {
+		SpawnSubagentFunc: func(_ context.Context, _ string, _ string) (*usecase.SubagentResult, error) {
 			t.Error("SpawnSubagent should not be called with empty prompt")
-			return nil, nil
+			return nil, errors.New("should not be called")
 		},
 	}
 	adapter.SetSubagentUseCase(mockUseCase)
@@ -346,7 +358,7 @@ func TestExecutorAdapter_ExecuteTool_TaskSubagentUseCaseError(t *testing.T) {
 
 	expectedError := errors.New("subagent execution failed")
 	mockUseCase := &MockSubagentUseCase{
-		SpawnSubagentFunc: func(ctx context.Context, agentName string, prompt string) (*usecase.SubagentResult, error) {
+		SpawnSubagentFunc: func(_ context.Context, _ string, _ string) (*usecase.SubagentResult, error) {
 			return nil, expectedError
 		},
 	}
@@ -377,7 +389,7 @@ func TestExecutorAdapter_ExecuteTool_TaskResultFormattedAsJSON(t *testing.T) {
 	adapter := NewExecutorAdapter(fileManager)
 
 	mockUseCase := &MockSubagentUseCase{
-		SpawnSubagentFunc: func(ctx context.Context, agentName string, prompt string) (*usecase.SubagentResult, error) {
+		SpawnSubagentFunc: func(_ context.Context, _ string, _ string) (*usecase.SubagentResult, error) {
 			return &usecase.SubagentResult{
 				SubagentID:   "test-123",
 				AgentName:    "test-agent",
@@ -424,9 +436,9 @@ func TestExecutorAdapter_ExecuteTool_TaskRecursionBlockedInSubagentContext(t *te
 	adapter := NewExecutorAdapter(fileManager)
 
 	mockUseCase := &MockSubagentUseCase{
-		SpawnSubagentFunc: func(ctx context.Context, agentName string, prompt string) (*usecase.SubagentResult, error) {
+		SpawnSubagentFunc: func(_ context.Context, _ string, _ string) (*usecase.SubagentResult, error) {
 			t.Error("SpawnSubagent should not be called in subagent context (recursion prevention)")
-			return nil, nil
+			return nil, errors.New("should not be called")
 		},
 	}
 	adapter.SetSubagentUseCase(mockUseCase)
@@ -468,7 +480,7 @@ func TestExecutorAdapter_TaskTool_EndToEnd(t *testing.T) {
 	// Track calls to verify execution flow
 	var capturedAgentName, capturedPrompt string
 	mockUseCase := &MockSubagentUseCase{
-		SpawnSubagentFunc: func(ctx context.Context, agentName string, prompt string) (*usecase.SubagentResult, error) {
+		SpawnSubagentFunc: func(_ context.Context, agentName string, prompt string) (*usecase.SubagentResult, error) {
 			capturedAgentName = agentName
 			capturedPrompt = prompt
 			return &usecase.SubagentResult{
@@ -522,7 +534,7 @@ func TestExecutorAdapter_TaskTool_MultipleSequentialExecutions(t *testing.T) {
 
 	executionCount := 0
 	mockUseCase := &MockSubagentUseCase{
-		SpawnSubagentFunc: func(ctx context.Context, agentName string, prompt string) (*usecase.SubagentResult, error) {
+		SpawnSubagentFunc: func(_ context.Context, agentName string, _ string) (*usecase.SubagentResult, error) {
 			executionCount++
 			return &usecase.SubagentResult{
 				SubagentID:   "exec-" + string(rune(executionCount)),

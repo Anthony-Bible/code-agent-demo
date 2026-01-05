@@ -5,7 +5,6 @@ allowed_tools:
   - read_file
   - list_files
   - grep
-model: sonnet
 max_actions: 15
 ---
 

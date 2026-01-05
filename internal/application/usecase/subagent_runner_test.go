@@ -1562,12 +1562,13 @@ func TestSubagentRunner_ModelSwitch_SetsModelHaiku(t *testing.T) {
 	if result == nil {
 		t.Fatal("Run() returned nil result")
 	}
-	// AIProvider.SetModel("haiku") should have been called
+	// AIProvider.SetModel("claude-3-5-haiku-20241022") should have been called (resolved from "haiku")
 	if aiProvider.setModelCalls == 0 {
-		t.Error("SetModel() was not called, want it to be called with 'haiku'")
+		t.Error("SetModel() was not called, want it to be called with resolved haiku model ID")
 	}
-	if len(aiProvider.setModelValues) > 0 && aiProvider.setModelValues[0] != "haiku" {
-		t.Errorf("SetModel() called with %q, want %q", aiProvider.setModelValues[0], "haiku")
+	expectedModel := "claude-3-5-haiku-20241022"
+	if len(aiProvider.setModelValues) > 0 && aiProvider.setModelValues[0] != expectedModel {
+		t.Errorf("SetModel() called with %q, want %q", aiProvider.setModelValues[0], expectedModel)
 	}
 }
 
@@ -1597,12 +1598,13 @@ func TestSubagentRunner_ModelSwitch_SetsModelSonnet(t *testing.T) {
 	if result == nil {
 		t.Fatal("Run() returned nil result")
 	}
-	// AIProvider.SetModel("sonnet") should have been called
+	// AIProvider.SetModel("claude-sonnet-4-5-20250929") should have been called (resolved from "sonnet")
 	if aiProvider.setModelCalls == 0 {
-		t.Error("SetModel() was not called, want it to be called with 'sonnet'")
+		t.Error("SetModel() was not called, want it to be called with resolved sonnet model ID")
 	}
-	if len(aiProvider.setModelValues) > 0 && aiProvider.setModelValues[0] != "sonnet" {
-		t.Errorf("SetModel() called with %q, want %q", aiProvider.setModelValues[0], "sonnet")
+	expectedModel := "claude-sonnet-4-5-20250929"
+	if len(aiProvider.setModelValues) > 0 && aiProvider.setModelValues[0] != expectedModel {
+		t.Errorf("SetModel() called with %q, want %q", aiProvider.setModelValues[0], expectedModel)
 	}
 }
 
@@ -1632,12 +1634,13 @@ func TestSubagentRunner_ModelSwitch_SetsModelOpus(t *testing.T) {
 	if result == nil {
 		t.Fatal("Run() returned nil result")
 	}
-	// AIProvider.SetModel("opus") should have been called
+	// AIProvider.SetModel("claude-opus-4-5-20250514") should have been called (resolved from "opus")
 	if aiProvider.setModelCalls == 0 {
-		t.Error("SetModel() was not called, want it to be called with 'opus'")
+		t.Error("SetModel() was not called, want it to be called with resolved opus model ID")
 	}
-	if len(aiProvider.setModelValues) > 0 && aiProvider.setModelValues[0] != "opus" {
-		t.Errorf("SetModel() called with %q, want %q", aiProvider.setModelValues[0], "opus")
+	expectedModel := "claude-opus-4-5-20250514"
+	if len(aiProvider.setModelValues) > 0 && aiProvider.setModelValues[0] != expectedModel {
+		t.Errorf("SetModel() called with %q, want %q", aiProvider.setModelValues[0], expectedModel)
 	}
 }
 

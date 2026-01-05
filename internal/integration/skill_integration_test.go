@@ -355,7 +355,7 @@ This skill should appear in the system prompt.
 	}
 
 	// Create AI adapter with skill manager
-	_ = ai.NewAnthropicAdapter("test-model", skillManager)
+	_ = ai.NewAnthropicAdapter("test-model", skillManager, nil)
 
 	// The system prompt should include skill metadata
 	// We can verify this by checking that the skill name appears in messages
@@ -365,7 +365,7 @@ This skill should appear in the system prompt.
 	// Test that the adapter can be created with skill manager
 	// We can't test the actual system prompt content directly since it's internal,
 	// but we verify that the adapter is properly constructed with skill manager integration
-	adapter := ai.NewAnthropicAdapter("test-model", skillManager)
+	adapter := ai.NewAnthropicAdapter("test-model", skillManager, nil)
 
 	// Verify the adapter was created (non-nil)
 	if adapter == nil {

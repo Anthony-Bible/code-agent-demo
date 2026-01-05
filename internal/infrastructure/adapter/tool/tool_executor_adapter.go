@@ -42,6 +42,11 @@ import (
 //	fmt.Println(result.Output) // Subagent's analysis
 type SubagentUseCaseInterface interface {
 	SpawnSubagent(ctx context.Context, agentName string, prompt string) (*usecase.SubagentResult, error)
+	SpawnDynamicSubagent(
+		ctx context.Context,
+		config usecase.DynamicSubagentConfig,
+		taskPrompt string,
+	) (*usecase.SubagentResult, error)
 }
 
 // DangerousCommandCallback is called when a dangerous command is detected.
@@ -516,6 +521,77 @@ The tool returns aggregated results showing success/failure counts and individua
 	}
 	a.tools[taskTool.Name] = taskTool
 
+	// Register delegate tool
+	delegateTool := entity.Tool{
+		ID:   "delegate",
+		Name: "delegate",
+		Description: `Launch a dynamic agent to handle complex, multi-step tasks autonomously.
+
+The delegate tool spawns a specialized agent (subprocess) that autonomously handles complex tasks in an isolated conversation context. You define the agent's role and behavior through a custom system prompt.
+
+When to use the delegate tool:
+- Complex multi-step tasks that would fill the context window
+- Tasks requiring specialized focus or expertise you define
+- Work that benefits from isolated context (e.g., analyzing large codebases)
+- Breaking down larger problems into delegated subtasks
+
+When NOT to use the delegate tool:
+- Simple single-step operations (use tools directly)
+- Tasks where you need to maintain conversation context
+- Quick lookups or simple file reads
+
+Usage notes:
+- Provide a clear, detailed system_prompt defining the agent's role, approach, and expected output format
+- The agent runs in its own conversation session - results are returned when done
+- The agent's output is not visible to the user; summarize results in your response
+- Use allowed_tools to restrict what the agent can do for safety
+- Use max_actions to prevent runaway execution (default: 30)
+- Model selection: haiku (fast), sonnet (balanced), opus (complex reasoning), inherit (same as parent)
+
+Example system_prompt structure:
+"You are a [role]. Your task is to:
+1. [First step]
+2. [Second step]
+3. [Third step]
+
+Focus on: [key areas]
+Output format: [expected structure]"`,
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"name": map[string]interface{}{
+					"type":        "string",
+					"description": "Short identifier for the agent (3-5 words, for logging/tracking)",
+				},
+				"system_prompt": map[string]interface{}{
+					"type":        "string",
+					"description": "Instructions defining the agent's role, responsibilities, approach, and expected output format. Be detailed - this is the agent's only context about its purpose.",
+				},
+				"task": map[string]interface{}{
+					"type":        "string",
+					"description": "The specific task for the agent to complete. Provide all necessary context since the agent has no prior conversation history.",
+				},
+				"model": map[string]interface{}{
+					"type":        "string",
+					"enum":        []string{"haiku", "sonnet", "opus", "inherit"},
+					"description": "AI model to use. haiku=fast/cheap, sonnet=balanced, opus=complex reasoning, inherit=same as parent (default: inherit)",
+				},
+				"max_actions": map[string]interface{}{
+					"type":        "integer",
+					"description": "Maximum tool calls before stopping. Prevents runaway execution (default: 30)",
+				},
+				"allowed_tools": map[string]interface{}{
+					"type":        "array",
+					"items":       map[string]interface{}{"type": "string"},
+					"description": "Tools this agent can use. Omit for all tools, or specify a list to restrict capabilities for safety.",
+				},
+			},
+			"required": []string{"name", "system_prompt", "task"},
+		},
+		RequiredFields: []string{"name", "system_prompt", "task"},
+	}
+	a.tools[delegateTool.Name] = delegateTool
+
 	// Register investigation tools
 	a.registerInvestigationTools()
 }
@@ -539,6 +615,8 @@ func (a *ExecutorAdapter) executeByName(ctx context.Context, name string, input 
 		return a.executeBatchTool(ctx, input)
 	case "task":
 		return a.executeTask(ctx, input)
+	case "delegate":
+		return a.executeDelegate(ctx, input)
 	case "complete_investigation":
 		return a.executeCompleteInvestigation(ctx, input)
 	case "escalate_investigation":
@@ -767,6 +845,16 @@ type batchInvocation struct {
 type taskInput struct {
 	AgentName string `json:"agent_name"`
 	Prompt    string `json:"prompt"`
+}
+
+// delegateInput represents the input for the delegate tool.
+type delegateInput struct {
+	Name         string   `json:"name"`
+	SystemPrompt string   `json:"system_prompt"`
+	Task         string   `json:"task"`
+	Model        string   `json:"model"`
+	MaxActions   int      `json:"max_actions"`
+	AllowedTools []string `json:"allowed_tools"`
 }
 
 // batchToolOutput represents the output from the batch_tool tool.
@@ -1733,6 +1821,80 @@ func (a *ExecutorAdapter) executeTask(ctx context.Context, input json.RawMessage
 
 	if result == nil {
 		return "", errors.New("subagent execution returned nil result")
+	}
+
+	// Format result as JSON
+	resultJSON := map[string]interface{}{
+		"subagent_id":   result.SubagentID,
+		"agent_name":    result.AgentName,
+		"status":        result.Status,
+		"output":        result.Output,
+		"actions_taken": result.ActionsTaken,
+		"duration_ms":   result.Duration.Milliseconds(),
+	}
+
+	if result.Error != nil {
+		resultJSON["error"] = result.Error.Error()
+	}
+
+	resultBytes, err := json.MarshalIndent(resultJSON, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to format result: %w", err)
+	}
+
+	return string(resultBytes), nil
+}
+
+// executeDelegate executes the delegate tool to spawn a dynamic subagent.
+func (a *ExecutorAdapter) executeDelegate(ctx context.Context, input json.RawMessage) (string, error) {
+	// Check for recursion (subagents cannot spawn subagents)
+	if port.IsSubagentContext(ctx) {
+		return "", errors.New("delegate tool cannot be called from within a subagent (prevents infinite recursion)")
+	}
+
+	// Check if use case is set
+	a.mu.RLock()
+	useCase := a.subagentUseCase
+	a.mu.RUnlock()
+
+	if useCase == nil {
+		return "", errors.New("subagent use case not available")
+	}
+
+	// Parse input
+	var params delegateInput
+	if err := json.Unmarshal(input, &params); err != nil {
+		return "", fmt.Errorf("failed to parse delegate input: %w", err)
+	}
+
+	// Validate required inputs
+	if params.Name == "" {
+		return "", errors.New("name is required")
+	}
+	if params.SystemPrompt == "" {
+		return "", errors.New("system_prompt is required")
+	}
+	if params.Task == "" {
+		return "", errors.New("task is required")
+	}
+
+	// Build DynamicSubagentConfig
+	config := usecase.DynamicSubagentConfig{
+		Name:         params.Name,
+		SystemPrompt: params.SystemPrompt,
+		Model:        params.Model,        // Empty string means default (inherit)
+		MaxActions:   params.MaxActions,   // 0 means default (30)
+		AllowedTools: params.AllowedTools, // nil means all tools
+	}
+
+	// Spawn dynamic subagent
+	result, err := useCase.SpawnDynamicSubagent(ctx, config, params.Task)
+	if err != nil {
+		return "", fmt.Errorf("dynamic subagent execution failed: %w", err)
+	}
+
+	if result == nil {
+		return "", errors.New("dynamic subagent execution returned nil result")
 	}
 
 	// Format result as JSON
