@@ -3813,7 +3813,7 @@ func TestInvestigationRunner_buildTurnWarningMessage(t *testing.T) {
 		{
 			name:      "remaining is 5 - returns batch_tool warning",
 			remaining: 5,
-			want: `TURN LIMIT WARNING: You have 5 turns remaining before the investigation reaches its turn limit.
+			want: `TURN LIMIT WARNING: You have 5 turns remaining before reaching the turn limit.
 
 Please prioritize your remaining actions carefully. Consider using the batch_tool to execute multiple operations efficiently in a single turn.`,
 		},

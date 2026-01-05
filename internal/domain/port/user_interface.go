@@ -40,6 +40,14 @@ type UserInterface interface {
 	// DisplaySystemMessage displays a system message.
 	DisplaySystemMessage(message string) error
 
+	// DisplaySubagentStatus displays a status message for subagent execution.
+	// Used to show when subagents start, complete, or execute tools during delegated tasks.
+	// Parameters:
+	//   - agentName: The name of the subagent (e.g., "test-writer")
+	//   - status: Current status (e.g., "Starting", "Completed", "Executing read_file")
+	//   - details: Additional details (e.g., "5 actions, 2.3s" or "")
+	DisplaySubagentStatus(agentName string, status string, details string) error
+
 	// SetPrompt sets the user input prompt.
 	SetPrompt(prompt string) error
 

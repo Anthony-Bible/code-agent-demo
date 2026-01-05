@@ -50,6 +50,7 @@ type AnthropicAdapter struct {
 	client             anthropic.Client
 	model              string
 	skillManager       port.SkillManager
+	subagentManager    port.SubagentManager
 	cachedSystemPrompt string // Cached system prompt to avoid repeated skill discovery
 	skillsDiscovered   bool   // Whether skills have been discovered at least once
 }
@@ -60,14 +61,20 @@ type AnthropicAdapter struct {
 // Parameters:
 //   - model: The AI model to use (e.g., "hf:zai-org/GLM-4.6", "claude-3-5-sonnet-20241022")
 //   - skillManager: Optional skill manager for providing skill metadata to the system prompt
+//   - subagentManager: Optional subagent manager for providing subagent metadata to the system prompt
 //
 // Returns:
 //   - port.AIProvider: An implementation of the AIProvider interface
-func NewAnthropicAdapter(model string, skillManager port.SkillManager) port.AIProvider {
+func NewAnthropicAdapter(
+	model string,
+	skillManager port.SkillManager,
+	subagentManager port.SubagentManager,
+) port.AIProvider {
 	return &AnthropicAdapter{
-		client:       anthropic.NewClient(),
-		model:        model,
-		skillManager: skillManager,
+		client:          anthropic.NewClient(),
+		model:           model,
+		skillManager:    skillManager,
+		subagentManager: subagentManager,
 	}
 }
 
@@ -250,6 +257,22 @@ func (a *AnthropicAdapter) buildBasePromptWithSkills() string {
 	sb.WriteString(
 		"Use the `activate_skill` tool to load the full content of a skill when its capabilities are needed for the task at hand.",
 	)
+
+	// Add subagents section if subagent manager is available
+	if a.subagentManager != nil {
+		agents, err := a.subagentManager.DiscoverAgents(context.Background())
+		if err == nil && agents.TotalCount > 0 {
+			sb.WriteString("\n\n<available_subagents>\n")
+			sb.WriteString("Use the 'task' tool to delegate work to these specialized agents:\n")
+			for _, agent := range agents.Subagents {
+				sb.WriteString("  <agent>\n")
+				sb.WriteString(fmt.Sprintf("    <name>%s</name>\n", agent.Name))
+				sb.WriteString(fmt.Sprintf("    <description>%s</description>\n", agent.Description))
+				sb.WriteString("  </agent>\n")
+			}
+			sb.WriteString("</available_subagents>\n")
+		}
+	}
 
 	a.cachedSystemPrompt = sb.String()
 	return a.cachedSystemPrompt

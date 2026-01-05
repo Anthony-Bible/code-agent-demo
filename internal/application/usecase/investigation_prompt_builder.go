@@ -62,6 +62,8 @@ func getToolExample(toolName string) string {
 		"activate_skill":         `{"name": "cloud-metrics"}`,
 		"complete_investigation": `{"findings": ["Root cause identified"], "confidence": 0.85}`,
 		"escalate_investigation": `{"reason": "Unable to determine root cause", "partial_findings": ["Observed high CPU"]}`,
+		"task":                   `{"agent_name": "code-reviewer", "prompt": "Analyze the authentication module for security issues"}`,
+		"delegate":               `{"name": "log-analyzer", "system_prompt": "You are a log analysis specialist", "task": "Analyze error patterns in /var/log/app.log"}`,
 	}
 	return examples[toolName]
 }

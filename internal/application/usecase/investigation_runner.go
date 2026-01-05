@@ -191,8 +191,17 @@ func extractCommandFromInput(input map[string]interface{}) string {
 func (r *InvestigationRunner) processToolCalls(rc *runContext, toolCalls []port.ToolCallInfo) error {
 	var toolResults []entity.ToolResult
 	for _, tc := range toolCalls {
+		if !r.isToolCallAllowed(tc) {
+			// Blocked tools return error but DON'T count toward action limit
+			toolResults = append(toolResults, entity.ToolResult{
+				ToolID:  tc.ToolID,
+				Result:  fmt.Sprintf("tool '%s' is not allowed for this investigation", tc.ToolName),
+				IsError: true,
+			})
+			continue
+		}
 		toolResults = append(toolResults, r.executeToolCall(rc.ctx, tc))
-		rc.actionsTaken++
+		rc.actionsTaken++ // Only executed tools count
 	}
 	if len(toolResults) > 0 {
 		return r.convService.AddToolResultMessage(rc.ctx, rc.sessionID, toolResults)
@@ -726,9 +735,7 @@ func (rc *runContext) completedResult() *InvestigationResult {
 }
 
 func (r *InvestigationRunner) limitToolCalls(rc *runContext, toolCalls []port.ToolCallInfo) []port.ToolCallInfo {
-	// First filter by allowed tools
-	toolCalls = r.filterToolsByAllowedList(toolCalls)
-
+	// Don't filter by allowed tools here - processToolCalls handles it with error results
 	remaining := rc.maxActions - rc.actionsTaken
 	if remaining <= 0 {
 		return nil
@@ -739,44 +746,29 @@ func (r *InvestigationRunner) limitToolCalls(rc *runContext, toolCalls []port.To
 	return toolCalls
 }
 
-// filterToolsByAllowedList filters tool calls to only include tools in the allowed list.
-// If AllowedTools is nil, all tools are allowed; if empty slice, no tools are allowed.
-func (r *InvestigationRunner) filterToolsByAllowedList(toolCalls []port.ToolCallInfo) []port.ToolCallInfo {
-	// nil means no restriction, empty slice means block all
+// isToolCallAllowed checks if a tool call is allowed based on config's AllowedTools.
+func (r *InvestigationRunner) isToolCallAllowed(tc port.ToolCallInfo) bool {
 	if r.config.AllowedTools == nil {
-		return toolCalls
+		return true // nil = allow all
 	}
 	if len(r.config.AllowedTools) == 0 {
-		return nil
+		return false // empty slice = block all
 	}
 
-	allowedSet := make(map[string]bool, len(r.config.AllowedTools))
-	for _, t := range r.config.AllowedTools {
-		allowedSet[t] = true
-	}
-
-	filtered := make([]port.ToolCallInfo, 0, len(toolCalls))
-	for _, tc := range toolCalls {
-		if allowedSet[tc.ToolName] {
-			filtered = append(filtered, tc)
+	for _, allowed := range r.config.AllowedTools {
+		if allowed == tc.ToolName {
+			return true
 		}
 	}
-	return filtered
+	return false
 }
 
 // buildTurnWarningMessage generates a warning message based on remaining actions.
 // Returns empty string if no warning should be displayed.
 func (r *InvestigationRunner) buildTurnWarningMessage(remaining int) string {
-	if remaining == 5 {
-		return `TURN LIMIT WARNING: You have 5 turns remaining before the investigation reaches its turn limit.
-
-Please prioritize your remaining actions carefully. Consider using the batch_tool to execute multiple operations efficiently in a single turn.`
+	cfg := TurnWarningConfig{
+		WarningThreshold: 5,
+		BatchToolHint:    "batch_tool",
 	}
-	if remaining == 1 {
-		return "TURN LIMIT WARNING: You have 1 turn remaining."
-	}
-	if remaining >= 2 && remaining <= 4 {
-		return fmt.Sprintf("TURN LIMIT WARNING: You have %d turns remaining.", remaining)
-	}
-	return ""
+	return BuildTurnWarningMessage(remaining, cfg)
 }

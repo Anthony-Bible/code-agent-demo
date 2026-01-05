@@ -64,3 +64,31 @@ func CustomSystemPromptFromContext(ctx context.Context) (CustomSystemPromptInfo,
 	info, ok := ctx.Value(customSystemPromptKey{}).(CustomSystemPromptInfo)
 	return info, ok
 }
+
+// subagentContextKey is the key for storing subagent context info.
+type subagentContextKey struct{}
+
+// SubagentContextInfo holds information about subagent execution context.
+type SubagentContextInfo struct {
+	SubagentID      string
+	ParentSessionID string
+	IsSubagent      bool
+	Depth           int
+}
+
+// WithSubagentContext adds subagent context info to a context.
+func WithSubagentContext(ctx context.Context, info SubagentContextInfo) context.Context {
+	return context.WithValue(ctx, subagentContextKey{}, info)
+}
+
+// SubagentContextFromContext retrieves subagent context info from a context.
+func SubagentContextFromContext(ctx context.Context) (SubagentContextInfo, bool) {
+	info, ok := ctx.Value(subagentContextKey{}).(SubagentContextInfo)
+	return info, ok
+}
+
+// IsSubagentContext checks if a context has subagent context info.
+func IsSubagentContext(ctx context.Context) bool {
+	_, ok := SubagentContextFromContext(ctx)
+	return ok
+}

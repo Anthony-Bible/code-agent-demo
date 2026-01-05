@@ -46,6 +46,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 
 	chatService := container.ChatService()
 	uiAdapter := container.UIAdapter()
+	subagentManager := container.SubagentManager()
 
 	// Create a new session
 	startResp, err := chatService.StartSession(ctx, "")
@@ -53,6 +54,20 @@ func runChat(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to start chat session: %w", err)
 	}
 	sessionID := startResp.SessionID
+
+	// Discover and display available subagents
+	if subagentManager != nil {
+		result, err := subagentManager.DiscoverAgents(ctx)
+		if err == nil && result.TotalCount > 0 {
+			_ = uiAdapter.DisplaySystemMessage("")
+			_ = uiAdapter.DisplaySystemMessage(fmt.Sprintf("Discovered %d subagent(s):", result.TotalCount))
+			for _, agent := range result.Subagents {
+				_ = uiAdapter.DisplaySystemMessage(fmt.Sprintf("  - %s: %s (%s)",
+					agent.Name, agent.Description, agent.SourceType))
+			}
+			_ = uiAdapter.DisplaySystemMessage("")
+		}
+	}
 
 	// Get interrupt handler from context for graceful shutdown support
 	handler := InterruptHandlerFromContext(ctx)

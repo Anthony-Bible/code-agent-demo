@@ -6,7 +6,7 @@ import (
 )
 
 // TestUserInterfaceInterface_Contract validates that UserInterface interface exists with expected methods.
-func TestUserInterfaceInterface_Contract(t *testing.T) {
+func TestUserInterfaceInterface_Contract(_ *testing.T) {
 	// Verify that UserInterface interface exists
 	var _ UserInterface = (*mockUserInterface)(nil)
 }
@@ -14,27 +14,31 @@ func TestUserInterfaceInterface_Contract(t *testing.T) {
 // mockUserInterface is a minimal implementation to validate interface contract.
 type mockUserInterface struct{}
 
-func (m *mockUserInterface) GetUserInput(ctx context.Context) (string, bool) {
+func (m *mockUserInterface) GetUserInput(_ context.Context) (string, bool) {
 	return "", false
 }
 
-func (m *mockUserInterface) DisplayMessage(message string, messageRole string) error {
+func (m *mockUserInterface) DisplayMessage(_ string, _ string) error {
 	return nil
 }
 
-func (m *mockUserInterface) DisplayError(err error) error {
+func (m *mockUserInterface) DisplayError(_ error) error {
 	return nil
 }
 
-func (m *mockUserInterface) DisplayToolResult(toolName string, input string, result string) error {
+func (m *mockUserInterface) DisplayToolResult(_, _, _ string) error {
 	return nil
 }
 
-func (m *mockUserInterface) DisplaySystemMessage(message string) error {
+func (m *mockUserInterface) DisplaySystemMessage(_ string) error {
 	return nil
 }
 
-func (m *mockUserInterface) SetPrompt(prompt string) error {
+func (m *mockUserInterface) DisplaySubagentStatus(_, _, _ string) error {
+	return nil
+}
+
+func (m *mockUserInterface) SetPrompt(_ string) error {
 	return nil
 }
 
@@ -42,21 +46,21 @@ func (m *mockUserInterface) ClearScreen() error {
 	return nil
 }
 
-func (m *mockUserInterface) SetColorScheme(scheme ColorScheme) error {
+func (m *mockUserInterface) SetColorScheme(_ ColorScheme) error {
 	return nil
 }
 
 func (m *mockUserInterface) ConfirmBashCommand(
-	command string,
-	isDangerous bool,
-	reason string,
-	description string,
+	_ string,
+	_ bool,
+	_ string,
+	_ string,
 ) bool {
 	return false
 }
 
 // TestUserInterfaceGetUserInput_Exists validates GetUserInput method exists.
-func TestUserInterfaceGetUserInput_Exists(t *testing.T) {
+func TestUserInterfaceGetUserInput_Exists(_ *testing.T) {
 	var ui UserInterface = (*mockUserInterface)(nil)
 
 	// This will fail to compile if GetUserInput method doesn't exist with correct signature
@@ -64,7 +68,7 @@ func TestUserInterfaceGetUserInput_Exists(t *testing.T) {
 }
 
 // TestUserInterfaceDisplayMessage_Exists validates DisplayMessage method exists.
-func TestUserInterfaceDisplayMessage_Exists(t *testing.T) {
+func TestUserInterfaceDisplayMessage_Exists(_ *testing.T) {
 	var ui UserInterface = (*mockUserInterface)(nil)
 
 	// This will fail to compile if DisplayMessage method doesn't exist with correct signature
@@ -72,7 +76,7 @@ func TestUserInterfaceDisplayMessage_Exists(t *testing.T) {
 }
 
 // TestUserInterfaceDisplayError_Exists validates DisplayError method exists.
-func TestUserInterfaceDisplayError_Exists(t *testing.T) {
+func TestUserInterfaceDisplayError_Exists(_ *testing.T) {
 	var ui UserInterface = (*mockUserInterface)(nil)
 
 	// This will fail to compile if DisplayError method doesn't exist with correct signature
@@ -80,7 +84,7 @@ func TestUserInterfaceDisplayError_Exists(t *testing.T) {
 }
 
 // TestUserInterfaceDisplayToolResult_Exists validates DisplayToolResult method exists.
-func TestUserInterfaceDisplayToolResult_Exists(t *testing.T) {
+func TestUserInterfaceDisplayToolResult_Exists(_ *testing.T) {
 	var ui UserInterface = (*mockUserInterface)(nil)
 
 	// This will fail to compile if DisplayToolResult method doesn't exist with correct signature
@@ -88,7 +92,7 @@ func TestUserInterfaceDisplayToolResult_Exists(t *testing.T) {
 }
 
 // TestUserInterfaceDisplaySystemMessage_Exists validates DisplaySystemMessage method exists.
-func TestUserInterfaceDisplaySystemMessage_Exists(t *testing.T) {
+func TestUserInterfaceDisplaySystemMessage_Exists(_ *testing.T) {
 	var ui UserInterface = (*mockUserInterface)(nil)
 
 	// This will fail to compile if DisplaySystemMessage method doesn't exist with correct signature
@@ -96,7 +100,7 @@ func TestUserInterfaceDisplaySystemMessage_Exists(t *testing.T) {
 }
 
 // TestUserInterfaceSetPrompt_Exists validates SetPrompt method exists.
-func TestUserInterfaceSetPrompt_Exists(t *testing.T) {
+func TestUserInterfaceSetPrompt_Exists(_ *testing.T) {
 	var ui UserInterface = (*mockUserInterface)(nil)
 
 	// This will fail to compile if SetPrompt method doesn't exist with correct signature
@@ -104,7 +108,7 @@ func TestUserInterfaceSetPrompt_Exists(t *testing.T) {
 }
 
 // TestUserInterfaceClearScreen_Exists validates ClearScreen method exists.
-func TestUserInterfaceClearScreen_Exists(t *testing.T) {
+func TestUserInterfaceClearScreen_Exists(_ *testing.T) {
 	var ui UserInterface = (*mockUserInterface)(nil)
 
 	// This will fail to compile if ClearScreen method doesn't exist with correct signature
@@ -112,7 +116,7 @@ func TestUserInterfaceClearScreen_Exists(t *testing.T) {
 }
 
 // TestUserInterfaceSetColorScheme_Exists validates SetColorScheme method exists.
-func TestUserInterfaceSetColorScheme_Exists(t *testing.T) {
+func TestUserInterfaceSetColorScheme_Exists(_ *testing.T) {
 	var ui UserInterface = (*mockUserInterface)(nil)
 
 	// This will fail to compile if SetColorScheme method doesn't exist with correct signature
