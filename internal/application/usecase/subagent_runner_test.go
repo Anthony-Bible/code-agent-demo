@@ -1355,6 +1355,158 @@ func TestSubagentRunner_AllowedTools_EmptySliceBlocksAll(t *testing.T) {
 	}
 }
 
+func TestSubagentRunner_BlockedTools_ReturnsErrorResults(t *testing.T) {
+	// Arrange
+	convService := newSubagentRunnerConvServiceMock()
+	convService.startConversationSession = "subagent-session-error-results-001"
+	convService.processResponseMessages = []*entity.Message{
+		createSubagentAssistantMessage("Trying blocked and allowed tools"),
+		createSubagentAssistantMessage("Done"),
+	}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{
+		{
+			{ToolID: "t1", ToolName: "bash", Input: map[string]interface{}{"command": "ls"}},          // allowed
+			{ToolID: "t2", ToolName: "list_files", Input: map[string]interface{}{"directory": "/"}},   // blocked
+			{ToolID: "t3", ToolName: "read_file", Input: map[string]interface{}{"path": "/tmp/test"}}, // allowed
+		},
+		nil,
+	}
+
+	toolExecutor := newSubagentRunnerToolExecutorMock()
+	aiProvider := newSubagentRunnerAIProviderMock()
+	config := SubagentConfig{
+		MaxActions:   10,
+		AllowedTools: []string{"bash", "read_file"}, // list_files is NOT allowed
+	}
+
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+	agent := createTestAgent("agent-error-results", "Error Results Agent")
+
+	// Act
+	result, err := runner.Run(context.Background(), agent, "Execute tools", "subagent-error-results-001")
+	// Assert
+	if err != nil {
+		t.Errorf("Run() error = %v, want nil", err)
+	}
+	if result == nil {
+		t.Fatal("Run() returned nil result")
+	}
+
+	// Only bash and read_file should have been executed (2 calls), not list_files
+	if toolExecutor.executeToolCalls != 2 {
+		t.Errorf("ExecuteTool() called %d times, want 2 (only allowed tools)", toolExecutor.executeToolCalls)
+	}
+
+	// Verify tool results were added for ALL tools (including blocked one)
+	if convService.addToolResultCalls != 1 {
+		t.Errorf("AddToolResultMessage() called %d times, want 1", convService.addToolResultCalls)
+	}
+
+	// Check that 3 tool results were added (2 successful + 1 error for blocked tool)
+	if len(convService.addToolResultResults) == 0 {
+		t.Fatal("AddToolResultMessage() was not called with any results")
+	}
+
+	results := convService.addToolResultResults[0]
+	if len(results) != 3 {
+		t.Fatalf("AddToolResultMessage() called with %d results, want 3", len(results))
+	}
+
+	// Verify blocked tool result has error
+	var blockedResult *entity.ToolResult
+	for i := range results {
+		if results[i].ToolID == "t2" { // list_files was t2
+			blockedResult = &results[i]
+			break
+		}
+	}
+
+	if blockedResult == nil {
+		t.Fatal("Blocked tool result not found in results")
+	}
+
+	if !blockedResult.IsError {
+		t.Error("Blocked tool result should be marked as error")
+	}
+
+	expectedMsg := "tool 'list_files' is not allowed for this subagent"
+	if blockedResult.Result != expectedMsg {
+		t.Errorf("Blocked tool result message = %q, want %q", blockedResult.Result, expectedMsg)
+	}
+
+	// Verify blocked tools don't count toward actions taken
+	// Only 2 tools executed (bash and read_file), not 3
+	if result.ActionsTaken != 2 {
+		t.Errorf("ActionsTaken = %d, want 2 (blocked tools should not count)", result.ActionsTaken)
+	}
+}
+
+func TestSubagentRunner_AllBlockedTools_ReturnsAllErrorResults(t *testing.T) {
+	// Arrange
+	convService := newSubagentRunnerConvServiceMock()
+	convService.startConversationSession = "subagent-session-all-blocked-001"
+	convService.processResponseMessages = []*entity.Message{
+		createSubagentAssistantMessage("Trying tools"),
+		createSubagentAssistantMessage("Done"),
+	}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{
+		{
+			{ToolID: "t1", ToolName: "bash", Input: map[string]interface{}{"command": "ls"}},
+			{ToolID: "t2", ToolName: "read_file", Input: map[string]interface{}{"path": "/tmp/test"}},
+		},
+		nil,
+	}
+
+	toolExecutor := newSubagentRunnerToolExecutorMock()
+	aiProvider := newSubagentRunnerAIProviderMock()
+	config := SubagentConfig{
+		MaxActions:   10,
+		AllowedTools: []string{}, // Empty slice = block ALL tools
+	}
+
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+	agent := createTestAgent("agent-all-blocked", "All Blocked Agent")
+
+	// Act
+	result, err := runner.Run(context.Background(), agent, "Execute tools", "subagent-all-blocked-001")
+	// Assert
+	if err != nil {
+		t.Errorf("Run() error = %v, want nil", err)
+	}
+	if result == nil {
+		t.Fatal("Run() returned nil result")
+	}
+
+	// No tools should have been executed
+	if toolExecutor.executeToolCalls != 0 {
+		t.Errorf("ExecuteTool() called %d times, want 0 (all tools blocked)", toolExecutor.executeToolCalls)
+	}
+
+	// Tool results should still be added for both blocked tools
+	if convService.addToolResultCalls != 1 {
+		t.Errorf("AddToolResultMessage() called %d times, want 1", convService.addToolResultCalls)
+	}
+
+	if len(convService.addToolResultResults) > 0 {
+		results := convService.addToolResultResults[0]
+		if len(results) != 2 {
+			t.Fatalf("AddToolResultMessage() called with %d results, want 2", len(results))
+		}
+
+		// Both should be errors
+		for i := range results {
+			if !results[i].IsError {
+				t.Errorf("Tool result %d should be marked as error", i)
+			}
+		}
+	}
+
+	// No actions should be taken (all blocked)
+	if result.ActionsTaken != 0 {
+		t.Errorf("ActionsTaken = %d, want 0 (all tools blocked)", result.ActionsTaken)
+	}
+}
+
 // =============================================================================
 // Recursion Prevention Tests
 // =============================================================================

@@ -339,22 +339,25 @@ func (r *SubagentRunner) runExecutionLoop(rc *subagentRunContext) (*SubagentResu
 
 // processToolCalls executes tool calls and feeds results back to the conversation.
 func (r *SubagentRunner) processToolCalls(rc *subagentRunContext, toolCalls []port.ToolCallInfo) error {
-	// Filter tools based on AllowedTools
-	filteredCalls := r.filterToolCalls(toolCalls)
-
 	var toolResults []entity.ToolResult
-	for _, tc := range filteredCalls {
-		// Display tool execution start
-		r.displayToolExecution(rc.agent.Name, tc.ToolName)
+	for _, tc := range toolCalls {
+		if !r.isToolCallAllowed(tc) {
+			// Blocked tools return error but DON'T count toward action limit
+			toolResults = append(toolResults, entity.ToolResult{
+				ToolID:  tc.ToolID,
+				Result:  fmt.Sprintf("tool '%s' is not allowed for this subagent", tc.ToolName),
+				IsError: true,
+			})
+			continue
+		}
 
-		// Execute the tool
+		// Execute allowed tool
+		r.displayToolExecution(rc.agent.Name, tc.ToolName)
 		result := r.executeToolCall(rc.ctx, tc)
 		toolResults = append(toolResults, result)
-
-		// Display tool execution result
 		r.displayToolResult(rc.agent.Name, tc.ToolName, result.IsError)
 
-		rc.actionsTaken++
+		rc.actionsTaken++ // Only executed tools count
 	}
 
 	if len(toolResults) > 0 {
@@ -363,26 +366,15 @@ func (r *SubagentRunner) processToolCalls(rc *subagentRunContext, toolCalls []po
 	return nil
 }
 
-// filterToolCalls filters tool calls based on config's AllowedTools.
-func (r *SubagentRunner) filterToolCalls(toolCalls []port.ToolCallInfo) []port.ToolCallInfo {
-	// If AllowedTools is nil, allow all tools
+// isToolCallAllowed checks if a tool call is allowed based on config's AllowedTools.
+func (r *SubagentRunner) isToolCallAllowed(tc port.ToolCallInfo) bool {
 	if r.config.AllowedTools == nil {
-		return toolCalls
+		return true // nil = allow all
 	}
-
-	// If AllowedTools is empty slice, block all tools
 	if len(r.config.AllowedTools) == 0 {
-		return nil
+		return false // empty slice = block all
 	}
-
-	// Filter to only allowed tools
-	var filtered []port.ToolCallInfo
-	for _, tc := range toolCalls {
-		if r.isToolAllowed(r.config.AllowedTools, tc.ToolName) {
-			filtered = append(filtered, tc)
-		}
-	}
-	return filtered
+	return r.isToolAllowed(r.config.AllowedTools, tc.ToolName)
 }
 
 // isToolAllowed checks if a tool is in the allowed list.
