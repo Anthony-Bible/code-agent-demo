@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 )
 
@@ -324,6 +325,9 @@ func (r *SubagentRunner) runExecutionLoop(rc *subagentRunContext) (*SubagentResu
 			return rc.failedResult(err), err
 		}
 
+		// Inject turn warning if approaching limit
+		r.injectTurnWarningIfNeeded(rc)
+
 		// Stop at MaxActions
 		if rc.actionsTaken >= rc.maxActions {
 			break
@@ -439,5 +443,19 @@ func (r *SubagentRunner) displayToolResult(agentName string, toolName string, is
 			status = "Tool failed"
 		}
 		_ = r.userInterface.DisplaySubagentStatus(agentName, status, toolName)
+	}
+}
+
+// injectTurnWarningIfNeeded injects a warning message if the subagent is approaching the turn limit.
+func (r *SubagentRunner) injectTurnWarningIfNeeded(rc *subagentRunContext) {
+	remaining := rc.maxActions - rc.actionsTaken
+	cfg := DefaultTurnWarningConfig()
+	// Subagents don't use batch_tool, so no hint
+	warningMsg := BuildTurnWarningMessage(remaining, cfg)
+	if warningMsg != "" {
+		if _, err := r.convService.AddUserMessage(rc.ctx, rc.sessionID, warningMsg); err != nil {
+			// Log error but don't fail execution - warnings are non-critical
+			fmt.Fprintf(os.Stderr, "[SubagentRunner] Failed to inject turn warning: %v\n", err)
+		}
 	}
 }

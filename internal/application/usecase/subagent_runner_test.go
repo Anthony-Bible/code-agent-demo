@@ -5,6 +5,7 @@ import (
 	"code-editing-agent/internal/domain/port"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -1776,5 +1777,227 @@ func TestSubagentRunner_ModelSwitch_RestoresOriginalModelAfterError(t *testing.T
 	currentModel := aiProvider.GetModel()
 	if currentModel != originalModel {
 		t.Errorf("Model after error = %q, want %q (should restore original on error)", currentModel, originalModel)
+	}
+}
+
+// =============================================================================
+// Turn Warning Tests
+// =============================================================================
+
+func TestSubagentRunner_InjectsTurnWarnings(t *testing.T) {
+	tests := []struct {
+		name                  string
+		maxActions            int
+		numToolCalls          int
+		expectedWarningCounts map[int]int // remaining -> count of warnings
+	}{
+		{
+			name:         "warns at 5 turns remaining",
+			maxActions:   10,
+			numToolCalls: 5, // After 5 tool calls, 5 remaining
+			expectedWarningCounts: map[int]int{
+				5: 1, // Should warn once at 5 remaining
+			},
+		},
+		{
+			name:         "warns at 4, 3, 2, 1 turns remaining",
+			maxActions:   10,
+			numToolCalls: 9, // Goes through 6, 5, 4, 3, 2, 1 remaining
+			expectedWarningCounts: map[int]int{
+				5: 1,
+				4: 1,
+				3: 1,
+				2: 1,
+				1: 1,
+			},
+		},
+		{
+			name:                  "no warnings when plenty of turns remain",
+			maxActions:            20,
+			numToolCalls:          5, // 15 remaining - no warnings
+			expectedWarningCounts: map[int]int{},
+		},
+		{
+			name:         "warns progressively as limit approaches",
+			maxActions:   7,
+			numToolCalls: 6, // Goes through 6, 5, 4, 3, 2, 1 remaining
+			expectedWarningCounts: map[int]int{
+				5: 1,
+				4: 1,
+				3: 1,
+				2: 1,
+				1: 1,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			convService := newSubagentRunnerConvServiceMock()
+			convService.startConversationSession = "subagent-session-warnings"
+
+			// Setup responses with tool calls followed by completion
+			messages := make([]*entity.Message, tt.numToolCalls+1)
+			toolCalls := make([][]port.ToolCallInfo, tt.numToolCalls+1)
+			for i := range tt.numToolCalls {
+				messages[i] = createSubagentAssistantMessage("Executing step")
+				toolCalls[i] = []port.ToolCallInfo{
+					{ToolID: "t" + string(rune(i)), ToolName: "bash", Input: map[string]interface{}{"command": "echo"}},
+				}
+			}
+			messages[tt.numToolCalls] = createSubagentAssistantMessage("Done")
+			toolCalls[tt.numToolCalls] = nil // Completion
+
+			convService.processResponseMessages = messages
+			convService.processResponseToolCalls = toolCalls
+
+			toolExecutor := newSubagentRunnerToolExecutorMock()
+			aiProvider := newSubagentRunnerAIProviderMock()
+			config := SubagentConfig{
+				MaxActions:   tt.maxActions,
+				AllowedTools: []string{"bash"},
+			}
+
+			runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+			agent := createTestAgent("agent-warnings", "Warning Test Agent")
+
+			// Act
+			_, _ = runner.Run(context.Background(), agent, "Execute task", "subagent-warnings-001")
+
+			// Assert - check that warnings were injected at expected times
+			warningMessages := convService.addUserMessageContent
+
+			// Count warnings for each remaining value
+			warningCounts := make(map[int]int)
+			for _, msg := range warningMessages {
+				if strings.Contains(msg, "TURN LIMIT WARNING") {
+					// Extract remaining count from message
+					for remaining := 1; remaining <= 5; remaining++ {
+						expectedText := fmt.Sprintf("%d turn", remaining)
+						if strings.Contains(msg, expectedText) {
+							warningCounts[remaining]++
+							break
+						}
+					}
+				}
+			}
+
+			// Verify expected warnings
+			for remaining, expectedCount := range tt.expectedWarningCounts {
+				actualCount := warningCounts[remaining]
+				if actualCount != expectedCount {
+					t.Errorf("Expected %d warning(s) at %d remaining, got %d", expectedCount, remaining, actualCount)
+				}
+			}
+
+			// Verify no unexpected warnings
+			for remaining, actualCount := range warningCounts {
+				if expectedCount, ok := tt.expectedWarningCounts[remaining]; !ok || expectedCount == 0 {
+					if actualCount > 0 {
+						t.Errorf("Unexpected warning at %d remaining (count: %d)", remaining, actualCount)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestSubagentRunner_WarningMessageContent(t *testing.T) {
+	// Arrange
+	convService := newSubagentRunnerConvServiceMock()
+	convService.startConversationSession = "subagent-session-warning-content"
+
+	// Configure to trigger warning at 5 remaining
+	convService.processResponseMessages = []*entity.Message{
+		createSubagentAssistantMessage("Step 1"),
+		createSubagentAssistantMessage("Step 2"),
+		createSubagentAssistantMessage("Step 3"),
+		createSubagentAssistantMessage("Step 4"),
+		createSubagentAssistantMessage("Step 5"),
+		createSubagentAssistantMessage("Done"),
+	}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{
+		{{ToolID: "t1", ToolName: "bash", Input: map[string]interface{}{"command": "echo 1"}}},
+		{{ToolID: "t2", ToolName: "bash", Input: map[string]interface{}{"command": "echo 2"}}},
+		{{ToolID: "t3", ToolName: "bash", Input: map[string]interface{}{"command": "echo 3"}}},
+		{{ToolID: "t4", ToolName: "bash", Input: map[string]interface{}{"command": "echo 4"}}},
+		{{ToolID: "t5", ToolName: "bash", Input: map[string]interface{}{"command": "echo 5"}}},
+		nil, // Completion
+	}
+
+	toolExecutor := newSubagentRunnerToolExecutorMock()
+	aiProvider := newSubagentRunnerAIProviderMock()
+	config := SubagentConfig{
+		MaxActions:   10, // After 5 tool calls, 5 remaining
+		AllowedTools: []string{"bash"},
+	}
+
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+	agent := createTestAgent("agent-warning-content", "Content Test Agent")
+
+	// Act
+	_, _ = runner.Run(context.Background(), agent, "Execute steps", "subagent-warning-content-001")
+
+	// Assert - check warning message content
+	warningMessages := convService.addUserMessageContent
+
+	foundFiveRemainingWarning := false
+	for _, msg := range warningMessages {
+		if strings.Contains(msg, "TURN LIMIT WARNING") && strings.Contains(msg, "5 turns remaining") {
+			foundFiveRemainingWarning = true
+			// Verify it contains prioritization advice
+			if !strings.Contains(msg, "Please prioritize your remaining actions carefully") {
+				t.Error("Warning at 5 remaining should contain prioritization advice")
+			}
+			// Subagents should NOT mention batch_tool (only investigation runner does)
+			if strings.Contains(msg, "batch_tool") {
+				t.Error("Subagent warnings should not mention batch_tool")
+			}
+		}
+	}
+
+	if !foundFiveRemainingWarning {
+		t.Error("Expected to find warning at 5 turns remaining")
+	}
+}
+
+func TestSubagentRunner_NoWarningAtZeroRemaining(t *testing.T) {
+	// Arrange
+	convService := newSubagentRunnerConvServiceMock()
+	convService.startConversationSession = "subagent-session-zero"
+
+	// Configure to hit max actions exactly
+	convService.processResponseMessages = []*entity.Message{
+		createSubagentAssistantMessage("Step 1"),
+		createSubagentAssistantMessage("Step 2"),
+		createSubagentAssistantMessage("Done"),
+	}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{
+		{{ToolID: "t1", ToolName: "bash", Input: map[string]interface{}{"command": "echo 1"}}},
+		{{ToolID: "t2", ToolName: "bash", Input: map[string]interface{}{"command": "echo 2"}}},
+		nil,
+	}
+
+	toolExecutor := newSubagentRunnerToolExecutorMock()
+	aiProvider := newSubagentRunnerAIProviderMock()
+	config := SubagentConfig{
+		MaxActions:   2, // Hit limit at 2 actions
+		AllowedTools: []string{"bash"},
+	}
+
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+	agent := createTestAgent("agent-zero", "Zero Test Agent")
+
+	// Act
+	_, _ = runner.Run(context.Background(), agent, "Execute steps", "subagent-zero-001")
+
+	// Assert - verify no warning at 0 remaining
+	warningMessages := convService.addUserMessageContent
+
+	for _, msg := range warningMessages {
+		if strings.Contains(msg, "0 turn") {
+			t.Error("Should not warn at 0 turns remaining")
+		}
 	}
 }

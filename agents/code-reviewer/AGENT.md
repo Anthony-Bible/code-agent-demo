@@ -5,6 +5,7 @@ allowed_tools:
   - read_file
   - list_files
   - grep
+  - batch_tool
 max_actions: 15
 ---
 

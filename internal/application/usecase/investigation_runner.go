@@ -767,16 +767,9 @@ func (r *InvestigationRunner) filterToolsByAllowedList(toolCalls []port.ToolCall
 // buildTurnWarningMessage generates a warning message based on remaining actions.
 // Returns empty string if no warning should be displayed.
 func (r *InvestigationRunner) buildTurnWarningMessage(remaining int) string {
-	if remaining == 5 {
-		return `TURN LIMIT WARNING: You have 5 turns remaining before the investigation reaches its turn limit.
-
-Please prioritize your remaining actions carefully. Consider using the batch_tool to execute multiple operations efficiently in a single turn.`
+	cfg := TurnWarningConfig{
+		WarningThreshold: 5,
+		BatchToolHint:    "batch_tool",
 	}
-	if remaining == 1 {
-		return "TURN LIMIT WARNING: You have 1 turn remaining."
-	}
-	if remaining >= 2 && remaining <= 4 {
-		return fmt.Sprintf("TURN LIMIT WARNING: You have %d turns remaining.", remaining)
-	}
-	return ""
+	return BuildTurnWarningMessage(remaining, cfg)
 }
