@@ -2161,3 +2161,344 @@ func TestSubagentRunner_NoWarningAtZeroRemaining(t *testing.T) {
 		}
 	}
 }
+
+// =============================================================================
+// SubagentConfig Thinking Mode Fields Tests
+// =============================================================================
+
+func TestSubagentConfig_HasThinkingEnabledField(t *testing.T) {
+	// Arrange & Act
+	config := SubagentConfig{
+		MaxActions:      10,
+		MaxDuration:     5 * time.Minute,
+		MaxConcurrent:   3,
+		AllowedTools:    []string{"bash"},
+		BlockedCommands: []string{"rm -rf"},
+		ThinkingEnabled: true, // This should compile when field exists
+	}
+
+	// Assert
+	if !config.ThinkingEnabled {
+		t.Error("SubagentConfig.ThinkingEnabled should be true when set to true")
+	}
+
+	// Test false value
+	config.ThinkingEnabled = false
+	if config.ThinkingEnabled {
+		t.Error("SubagentConfig.ThinkingEnabled should be false when set to false")
+	}
+}
+
+func TestSubagentConfig_HasThinkingBudgetField(t *testing.T) {
+	// Arrange & Act
+	config := SubagentConfig{
+		MaxActions:      10,
+		MaxDuration:     5 * time.Minute,
+		MaxConcurrent:   3,
+		AllowedTools:    []string{"bash"},
+		BlockedCommands: []string{"rm -rf"},
+		ThinkingBudget:  10000, // This should compile when field exists
+	}
+
+	// Assert
+	expectedBudget := int64(10000)
+	if config.ThinkingBudget != expectedBudget {
+		t.Errorf("SubagentConfig.ThinkingBudget = %d, want %d", config.ThinkingBudget, expectedBudget)
+	}
+
+	// Test zero value
+	config.ThinkingBudget = 0
+	if config.ThinkingBudget != 0 {
+		t.Errorf("SubagentConfig.ThinkingBudget = %d, want 0", config.ThinkingBudget)
+	}
+
+	// Test negative value (should be allowed as int64)
+	config.ThinkingBudget = -1
+	if config.ThinkingBudget != -1 {
+		t.Errorf("SubagentConfig.ThinkingBudget = %d, want -1", config.ThinkingBudget)
+	}
+}
+
+func TestSubagentConfig_HasShowThinkingField(t *testing.T) {
+	// Arrange & Act
+	config := SubagentConfig{
+		MaxActions:      10,
+		MaxDuration:     5 * time.Minute,
+		MaxConcurrent:   3,
+		AllowedTools:    []string{"bash"},
+		BlockedCommands: []string{"rm -rf"},
+		ShowThinking:    true, // This should compile when field exists
+	}
+
+	// Assert
+	if !config.ShowThinking {
+		t.Error("SubagentConfig.ShowThinking should be true when set to true")
+	}
+
+	// Test false value
+	config.ShowThinking = false
+	if config.ShowThinking {
+		t.Error("SubagentConfig.ShowThinking should be false when set to false")
+	}
+}
+
+func TestSubagentConfig_AllThinkingFieldsTogether(t *testing.T) {
+	// Arrange & Act - Test all thinking fields can be set together
+	config := SubagentConfig{
+		MaxActions:      15,
+		MaxDuration:     10 * time.Minute,
+		MaxConcurrent:   5,
+		AllowedTools:    []string{"bash", "read_file"},
+		BlockedCommands: []string{"rm -rf", "dd"},
+		ThinkingEnabled: true,
+		ThinkingBudget:  20000,
+		ShowThinking:    false,
+	}
+
+	// Assert all thinking fields
+	if !config.ThinkingEnabled {
+		t.Error("SubagentConfig.ThinkingEnabled should be true")
+	}
+	if config.ThinkingBudget != 20000 {
+		t.Errorf("SubagentConfig.ThinkingBudget = %d, want 20000", config.ThinkingBudget)
+	}
+	if config.ShowThinking {
+		t.Error("SubagentConfig.ShowThinking should be false")
+	}
+
+	// Verify original fields still work
+	if config.MaxActions != 15 {
+		t.Errorf("SubagentConfig.MaxActions = %d, want 15", config.MaxActions)
+	}
+	if len(config.AllowedTools) != 2 {
+		t.Errorf("SubagentConfig.AllowedTools length = %d, want 2", len(config.AllowedTools))
+	}
+}
+
+func TestSubagentConfig_ThinkingFieldsDefaultValues(t *testing.T) {
+	// Arrange & Act - Create config without setting thinking fields
+	config := SubagentConfig{
+		MaxActions:   10,
+		MaxDuration:  5 * time.Minute,
+		AllowedTools: []string{"bash"},
+	}
+
+	// Assert zero values for thinking fields
+	if config.ThinkingEnabled != false {
+		t.Errorf("SubagentConfig.ThinkingEnabled default = %v, want false", config.ThinkingEnabled)
+	}
+	if config.ThinkingBudget != 0 {
+		t.Errorf("SubagentConfig.ThinkingBudget default = %d, want 0", config.ThinkingBudget)
+	}
+	if config.ShowThinking != false {
+		t.Errorf("SubagentConfig.ShowThinking default = %v, want false", config.ShowThinking)
+	}
+}
+
+func TestSubagentRunner_AcceptsConfigWithThinkingFields(t *testing.T) {
+	// Arrange
+	convService := newSubagentRunnerConvServiceMock()
+	toolExecutor := newSubagentRunnerToolExecutorMock()
+	aiProvider := newSubagentRunnerAIProviderMock()
+
+	config := SubagentConfig{
+		MaxActions:      10,
+		MaxDuration:     5 * time.Minute,
+		MaxConcurrent:   3,
+		AllowedTools:    []string{"bash"},
+		BlockedCommands: []string{"rm -rf"},
+		ThinkingEnabled: true,
+		ThinkingBudget:  15000,
+		ShowThinking:    true,
+	}
+
+	// Act
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+
+	// Assert - runner should be created successfully
+	if runner == nil {
+		t.Fatal("NewSubagentRunner() returned nil with thinking config")
+	}
+}
+
+func TestSubagentRunner_ConfigAccessibleAfterInit(t *testing.T) {
+	// Arrange
+	convService := newSubagentRunnerConvServiceMock()
+	toolExecutor := newSubagentRunnerToolExecutorMock()
+	aiProvider := newSubagentRunnerAIProviderMock()
+
+	expectedConfig := SubagentConfig{
+		MaxActions:      20,
+		MaxDuration:     10 * time.Minute,
+		MaxConcurrent:   4,
+		AllowedTools:    []string{"bash", "read_file", "list_files"},
+		BlockedCommands: []string{"rm -rf"},
+		ThinkingEnabled: true,
+		ThinkingBudget:  25000,
+		ShowThinking:    false,
+	}
+
+	// Act
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, expectedConfig)
+
+	// Assert - verify config is stored correctly
+	if runner == nil {
+		t.Fatal("NewSubagentRunner() returned nil")
+	}
+
+	// Access the config field (this will fail if not accessible)
+	actualConfig := runner.config
+
+	// Verify all fields including thinking fields
+	if actualConfig.MaxActions != expectedConfig.MaxActions {
+		t.Errorf("config.MaxActions = %d, want %d", actualConfig.MaxActions, expectedConfig.MaxActions)
+	}
+	if actualConfig.ThinkingEnabled != expectedConfig.ThinkingEnabled {
+		t.Errorf("config.ThinkingEnabled = %v, want %v", actualConfig.ThinkingEnabled, expectedConfig.ThinkingEnabled)
+	}
+	if actualConfig.ThinkingBudget != expectedConfig.ThinkingBudget {
+		t.Errorf("config.ThinkingBudget = %d, want %d", actualConfig.ThinkingBudget, expectedConfig.ThinkingBudget)
+	}
+	if actualConfig.ShowThinking != expectedConfig.ShowThinking {
+		t.Errorf("config.ShowThinking = %v, want %v", actualConfig.ShowThinking, expectedConfig.ShowThinking)
+	}
+}
+
+func TestSubagentConfig_ThinkingBudgetDataType(t *testing.T) {
+	// Arrange & Act
+	tests := []struct {
+		name   string
+		budget int64
+	}{
+		{
+			name:   "zero value",
+			budget: 0,
+		},
+		{
+			name:   "small positive value",
+			budget: 1000,
+		},
+		{
+			name:   "large positive value",
+			budget: 1000000,
+		},
+		{
+			name:   "max int64",
+			budget: 9223372036854775807, // math.MaxInt64
+		},
+		{
+			name:   "negative value",
+			budget: -1000,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			config := SubagentConfig{
+				MaxActions:     10,
+				ThinkingBudget: tt.budget,
+			}
+
+			// Assert - verify budget is stored as int64
+			if config.ThinkingBudget != tt.budget {
+				t.Errorf("SubagentConfig.ThinkingBudget = %d, want %d", config.ThinkingBudget, tt.budget)
+			}
+
+			// Verify type is int64
+			var _ int64 = config.ThinkingBudget
+		})
+	}
+}
+
+func TestSubagentConfig_ThinkingEnabledBooleanSemantics(t *testing.T) {
+	// Arrange & Act
+	tests := []struct {
+		name    string
+		enabled bool
+		want    bool
+	}{
+		{
+			name:    "enabled is true",
+			enabled: true,
+			want:    true,
+		},
+		{
+			name:    "enabled is false",
+			enabled: false,
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			config := SubagentConfig{
+				MaxActions:      10,
+				ThinkingEnabled: tt.enabled,
+			}
+
+			// Assert - verify boolean semantics
+			if config.ThinkingEnabled != tt.want {
+				t.Errorf("SubagentConfig.ThinkingEnabled = %v, want %v", config.ThinkingEnabled, tt.want)
+			}
+
+			// Test in conditional
+			if tt.want {
+				if !config.ThinkingEnabled {
+					t.Error("ThinkingEnabled should evaluate to true in conditional")
+				}
+			} else {
+				if config.ThinkingEnabled {
+					t.Error("ThinkingEnabled should evaluate to false in conditional")
+				}
+			}
+		})
+	}
+}
+
+func TestSubagentConfig_ShowThinkingBooleanSemantics(t *testing.T) {
+	// Arrange & Act
+	tests := []struct {
+		name string
+		show bool
+		want bool
+	}{
+		{
+			name: "show is true",
+			show: true,
+			want: true,
+		},
+		{
+			name: "show is false",
+			show: false,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			config := SubagentConfig{
+				MaxActions:   10,
+				ShowThinking: tt.show,
+			}
+
+			// Assert - verify boolean semantics
+			if config.ShowThinking != tt.want {
+				t.Errorf("SubagentConfig.ShowThinking = %v, want %v", config.ShowThinking, tt.want)
+			}
+
+			// Test in conditional
+			if tt.want {
+				if !config.ShowThinking {
+					t.Error("ShowThinking should evaluate to true in conditional")
+				}
+			} else {
+				if config.ShowThinking {
+					t.Error("ShowThinking should evaluate to false in conditional")
+				}
+			}
+		})
+	}
+}
