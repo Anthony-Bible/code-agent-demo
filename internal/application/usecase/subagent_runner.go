@@ -329,6 +329,8 @@ func (r *SubagentRunner) runExecutionLoop(rc *subagentRunContext) (*SubagentResu
 		thinkingInfo, _ := r.convService.GetThinkingMode(rc.sessionID)
 		if thinkingInfo.Enabled {
 			ctx = port.WithThinkingMode(ctx, thinkingInfo)
+			// Display thinking status indicator (content is never shown for subagents)
+			r.displayStatus(rc.agent.Name, "Thinking", "")
 		}
 
 		// Process assistant response
