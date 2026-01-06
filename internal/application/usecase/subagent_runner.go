@@ -230,6 +230,15 @@ func (r *SubagentRunner) Run(
 			ShowThinking: r.config.ShowThinking,
 		}
 	}
+
+	// Agent-specific override: if agent specifies thinking config in AGENT.md, use it
+	if agent.ThinkingEnabled != nil {
+		thinkingInfo.Enabled = *agent.ThinkingEnabled
+	}
+	if agent.ThinkingBudget > 0 {
+		thinkingInfo.BudgetTokens = agent.ThinkingBudget
+	}
+
 	if thinkingInfo.Enabled {
 		_ = r.convService.SetThinkingMode(sessionID, thinkingInfo)
 		// Ignore error - thinking mode is optional, continue execution
