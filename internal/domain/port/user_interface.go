@@ -31,6 +31,10 @@ type UserInterface interface {
 	// DisplayMessage displays a message with the specified role.
 	DisplayMessage(message string, messageRole string) error
 
+	// DisplayStreamingText displays a chunk of streaming text without a newline.
+	// This is used to show text as it arrives in real-time from the AI provider.
+	DisplayStreamingText(text string) error
+
 	// DisplayError displays an error message.
 	DisplayError(err error) error
 

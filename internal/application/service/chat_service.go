@@ -214,31 +214,58 @@ func (cs *ChatService) SendMessage(
 		ctx = port.WithThinkingMode(ctx, thinkingInfo)
 	}
 
-	// Process the user message
-	resp, err := cs.messageProcessUseCase.ProcessUserMessage(ctx, req)
+	// Add user message to conversation
+	_, err := cs.conversationService.AddUserMessage(ctx, req.SessionID, req.Message)
 	if err != nil {
-		return nil, fmt.Errorf("failed to process message: %w", err)
+		return nil, fmt.Errorf("failed to add user message: %w", err)
+	}
+
+	// Get conversation for state info
+	conv, err := cs.conversationService.GetConversation(req.SessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get conversation: %w", err)
+	}
+
+	// Create streaming callback that displays text as it arrives
+	// Add [PLAN MODE] prefix if in plan mode
+	isPlanMode, _ := cs.conversationService.IsPlanMode(sessionID)
+	prefixAdded := false
+	callback := func(text string) error {
+		if !prefixAdded && isPlanMode && text != "" {
+			prefixAdded = true
+			return cs.userInterface.DisplayStreamingText("[PLAN MODE] " + text)
+		}
+		return cs.userInterface.DisplayStreamingText(text)
+	}
+
+	// Process the assistant message with streaming
+	assistantMsg, toolCalls, err := cs.messageProcessUseCase.ProcessAssistantMessageStreaming(ctx, sessionID, callback)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process assistant message: %w", err)
 	}
 
 	// Display thinking blocks if ShowThinking is enabled
-	if resp.AssistantMsg != nil && len(resp.AssistantMsg.ThinkingBlocks) > 0 {
-		thinkingInfo, _ := cs.conversationService.GetThinkingMode(sessionID)
+	if assistantMsg != nil && len(assistantMsg.ThinkingBlocks) > 0 {
 		if thinkingInfo.ShowThinking {
-			for _, block := range resp.AssistantMsg.ThinkingBlocks {
+			for _, block := range assistantMsg.ThinkingBlocks {
 				_ = cs.userInterface.DisplayThinking(block.Thinking)
 			}
 		}
 	}
 
-	// Display the assistant message if there is text content
-	if resp.AssistantMsg != nil && resp.AssistantMsg.Content != "" {
-		displayContent := resp.AssistantMsg.Content
-		// Add [PLAN MODE] prefix if in plan mode
-		isPlanMode, _ := cs.conversationService.IsPlanMode(sessionID)
-		if isPlanMode {
-			displayContent = "[PLAN MODE] " + displayContent
-		}
-		_ = cs.userInterface.DisplayMessage(displayContent, entity.RoleAssistant)
+	// Print newline after streaming completes
+	_ = cs.userInterface.DisplayStreamingText("\n")
+
+	// Check if processing (has tools)
+	isProcessing, _ := cs.conversationService.IsProcessing(req.SessionID)
+
+	resp := &dto.SendMessageResponse{
+		SessionID:    req.SessionID,
+		AssistantMsg: assistantMsg,
+		HasTools:     isProcessing,
+		ToolCalls:    toolCalls,
+		IsFinished:   !isProcessing,
+		MessageCount: conv.MessageCount(),
 	}
 
 	// Handle tool requests if present
@@ -397,7 +424,7 @@ func (cs *ChatService) addToolResultsToConversation(
 	return cs.conversationService.AddToolResultMessage(ctx, sessionID, entityToolResults)
 }
 
-// continueAfterToolExecution continues the chat after tool execution.
+// continueAfterToolExecution continues the chat after tool execution with streaming support.
 func (cs *ChatService) continueAfterToolExecution(
 	ctx context.Context,
 	sessionID string,
@@ -408,38 +435,45 @@ func (cs *ChatService) continueAfterToolExecution(
 		ctx = port.WithThinkingMode(ctx, thinkingInfo)
 	}
 
-	contResp, err := cs.messageProcessUseCase.ContinueChat(ctx, sessionID)
+	// Create streaming callback that displays text as it arrives
+	// Add [PLAN MODE] prefix if in plan mode
+	isPlanMode, _ := cs.conversationService.IsPlanMode(sessionID)
+	prefixAdded := false
+	callback := func(text string) error {
+		if !prefixAdded && isPlanMode && text != "" {
+			prefixAdded = true
+			return cs.userInterface.DisplayStreamingText("[PLAN MODE] " + text)
+		}
+		return cs.userInterface.DisplayStreamingText(text)
+	}
+
+	// Process the assistant message with streaming
+	assistantMsg, toolCalls, err := cs.messageProcessUseCase.ProcessAssistantMessageStreaming(ctx, sessionID, callback)
 	if err != nil {
 		return nil, fmt.Errorf("failed to continue chat after tool execution: %w", err)
 	}
 
 	// Display thinking blocks if ShowThinking is enabled
-	if contResp.AssistantMsg != nil && len(contResp.AssistantMsg.ThinkingBlocks) > 0 {
-		thinkingInfo, _ := cs.conversationService.GetThinkingMode(sessionID)
+	if assistantMsg != nil && len(assistantMsg.ThinkingBlocks) > 0 {
 		if thinkingInfo.ShowThinking {
-			for _, block := range contResp.AssistantMsg.ThinkingBlocks {
+			for _, block := range assistantMsg.ThinkingBlocks {
 				_ = cs.userInterface.DisplayThinking(block.Thinking)
 			}
 		}
 	}
 
-	// Display the assistant message if there is text content
-	if contResp.AssistantMsg != nil && contResp.AssistantMsg.Content != "" {
-		displayContent := contResp.AssistantMsg.Content
-		// Add [PLAN MODE] prefix if in plan mode
-		isPlanMode, _ := cs.conversationService.IsPlanMode(sessionID)
-		if isPlanMode {
-			displayContent = "[PLAN MODE] " + displayContent
-		}
-		_ = cs.userInterface.DisplayMessage(displayContent, entity.RoleAssistant)
-	}
+	// Print newline after streaming completes
+	_ = cs.userInterface.DisplayStreamingText("\n")
+
+	// Check if processing (has tools)
+	isProcessing, _ := cs.conversationService.IsProcessing(sessionID)
 
 	return &dto.SendMessageResponse{
 		SessionID:    sessionID,
-		AssistantMsg: contResp.AssistantMsg,
-		HasTools:     contResp.HasTools,
-		IsFinished:   contResp.IsFinished,
-		ToolCalls:    contResp.ToolCalls,
+		AssistantMsg: assistantMsg,
+		HasTools:     isProcessing,
+		IsFinished:   !isProcessing,
+		ToolCalls:    toolCalls,
 	}, nil
 }
 

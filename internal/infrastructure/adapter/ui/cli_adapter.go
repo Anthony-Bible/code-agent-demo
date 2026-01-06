@@ -250,6 +250,14 @@ func (c *CLIAdapter) DisplayMessage(message string, messageRole string) error {
 	return err
 }
 
+// DisplayStreamingText displays a chunk of streaming text without a newline.
+// This is used to show text as it arrives in real-time from the AI provider.
+// The text is displayed in the assistant color.
+func (c *CLIAdapter) DisplayStreamingText(text string) error {
+	_, err := fmt.Fprintf(c.output, "%s%s\x1b[0m", c.colors.Assistant, text)
+	return err
+}
+
 // DisplayError displays an error message.
 func (c *CLIAdapter) DisplayError(err error) error {
 	if err == nil {

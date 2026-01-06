@@ -243,6 +243,118 @@ func (cs *ConversationService) ProcessAssistantResponse(
 	return response, toolCalls, nil
 }
 
+// ProcessAssistantResponseStreaming processes an AI assistant response with streaming support.
+// It calls the provided callback for each text chunk as it arrives from the AI provider.
+func (cs *ConversationService) ProcessAssistantResponseStreaming(
+	ctx context.Context,
+	sessionID string,
+	callback port.StreamCallback,
+) (*entity.Message, []port.ToolCallInfo, error) {
+	select {
+	case <-ctx.Done():
+		return nil, nil, fmt.Errorf("context cancelled before AI call: %w", ctx.Err())
+	default:
+	}
+
+	conversation, exists := cs.conversations[sessionID]
+	if !exists {
+		return nil, nil, ErrConversationNotFound
+	}
+
+	// Get conversation history for AI provider
+	messages := conversation.GetMessages()
+	messageParams := make([]port.MessageParam, len(messages))
+	for i, msg := range messages {
+		// Convert ToolCalls from entity to port
+		var toolCallParams []port.ToolCallParam
+		if len(msg.ToolCalls) > 0 {
+			toolCallParams = make([]port.ToolCallParam, len(msg.ToolCalls))
+			for j, tc := range msg.ToolCalls {
+				toolCallParams[j] = port.ToolCallParam{
+					ToolID:   tc.ToolID,
+					ToolName: tc.ToolName,
+					Input:    tc.Input,
+				}
+			}
+		}
+
+		// Convert ToolResults from entity to port
+		var toolResultParams []port.ToolResultParam
+		if len(msg.ToolResults) > 0 {
+			toolResultParams = make([]port.ToolResultParam, len(msg.ToolResults))
+			for j, tr := range msg.ToolResults {
+				toolResultParams[j] = port.ToolResultParam{
+					ToolID:  tr.ToolID,
+					Result:  tr.Result,
+					IsError: tr.IsError,
+				}
+			}
+		}
+
+		messageParams[i] = port.MessageParam{
+			Role:        msg.Role,
+			Content:     msg.Content,
+			ToolCalls:   toolCallParams,
+			ToolResults: toolResultParams,
+		}
+	}
+
+	// Get available tools
+	tools, err := cs.toolExecutor.ListTools()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	toolParams := make([]port.ToolParam, len(tools))
+	for i, tool := range tools {
+		toolParams[i] = port.ToolParam{
+			Name:        tool.Name,
+			Description: tool.Description,
+			InputSchema: tool.InputSchema,
+		}
+	}
+
+	// Add plan mode info to context if enabled
+	isPlanMode, _ := cs.IsPlanMode(sessionID)
+	if isPlanMode {
+		planInfo := port.PlanModeInfo{
+			Enabled:   true,
+			SessionID: sessionID,
+			PlanPath:  fmt.Sprintf(".agent/plans/%s.md", sessionID),
+		}
+		ctx = port.WithPlanMode(ctx, planInfo)
+	}
+
+	// Add custom system prompt to context if set
+	if customPrompt, ok := cs.GetCustomSystemPrompt(sessionID); ok {
+		ctx = port.WithCustomSystemPrompt(ctx, port.CustomSystemPromptInfo{
+			Prompt:    customPrompt,
+			SessionID: sessionID,
+		})
+	}
+
+	// Send to AI provider with streaming
+	response, toolCalls, err := cs.aiProvider.SendMessageStreaming(ctx, messageParams, toolParams, callback)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Add response to conversation
+	err = conversation.AddMessage(*response)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Check if response contains tool usage
+	if len(toolCalls) > 0 {
+		cs.processing[sessionID] = true
+	} else {
+		cs.processing[sessionID] = false
+	}
+
+	return response, toolCalls, nil
+}
+
 // ExecuteToolsInResponse executes all tools requested in an assistant response.
 func (cs *ConversationService) ExecuteToolsInResponse(
 	ctx context.Context,
