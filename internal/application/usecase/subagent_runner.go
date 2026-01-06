@@ -41,9 +41,9 @@ type SubagentConfig struct {
 	MaxConcurrent   int
 	AllowedTools    []string
 	BlockedCommands []string
-	ThinkingEnabled bool
-	ThinkingBudget  int64
-	ShowThinking    bool
+	ThinkingEnabled bool  // Enable extended thinking mode for subagent
+	ThinkingBudget  int64 // Thinking token budget (0 = unlimited)
+	ShowThinking    bool  // Display thinking output to user
 }
 
 // SubagentResult holds the result of a subagent execution.
