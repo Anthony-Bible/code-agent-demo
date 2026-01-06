@@ -34,11 +34,12 @@ type ThinkingBlock struct {
 
 // ToolCallInfo contains information about a tool that was requested by the AI.
 type ToolCallInfo struct {
-	ToolID       string      `json:"tool_id"`       // The tool identifier
-	ToolName     string      `json:"tool_name"`     // The human-readable tool name
-	Input        interface{} `json:"input"`         // The input parameters passed to the tool
-	InputJSON    string      `json:"input_json"`    // JSON representation of the input
-	CallPriority int         `json:"call_priority"` // Order of execution (0-indexed)
+	ToolID           string      `json:"tool_id"`                     // The tool identifier
+	ToolName         string      `json:"tool_name"`                   // The human-readable tool name
+	Input            interface{} `json:"input"`                       // The input parameters passed to the tool
+	InputJSON        string      `json:"input_json"`                  // JSON representation of the input
+	CallPriority     int         `json:"call_priority"`               // Order of execution (0-indexed)
+	ThoughtSignature string      `json:"thought_signature,omitempty"` // Gemini thought signature (via Bifrost)
 }
 
 // StartChatResponse represents the response when starting a new chat session.

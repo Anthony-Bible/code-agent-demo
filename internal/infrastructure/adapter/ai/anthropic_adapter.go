@@ -366,6 +366,19 @@ func (a *AnthropicAdapter) convertUserToolResultMessage(msg port.MessageParam) a
 	resultBlocks := make([]anthropic.ContentBlockParamUnion, len(msg.ToolResults))
 	for j, tr := range msg.ToolResults {
 		resultBlocks[j] = anthropic.NewToolResultBlock(tr.ToolID, tr.Result, tr.IsError)
+
+		// Log if we have a thought_signature (Gemini via Bifrost)
+		if tr.ThoughtSignature != "" {
+			fmt.Fprintf(
+				os.Stderr,
+				"[AnthropicAdapter] Tool result has thought_signature (need HTTP-level injection): ToolID=%s, Sig=%s\n",
+				tr.ToolID,
+				tr.ThoughtSignature,
+			)
+			// TODO: The SDK doesn't support adding signature to tool_result blocks
+			// We need to implement an HTTP interceptor to inject the signature field
+			// into the JSON payload before sending to Bifrost
+		}
 	}
 	return anthropic.NewUserMessage(resultBlocks...)
 }
@@ -385,7 +398,23 @@ func (a *AnthropicAdapter) convertAssistantToolMessage(msg port.MessageParam) an
 	}
 
 	for _, tc := range msg.ToolCalls {
+		// If thought_signature is present (Gemini via Bifrost), include it
+		// The SDK doesn't expose Signature field, so we use the standard method
+		// and rely on Bifrost to handle signature preservation at the HTTP level
 		blocks = append(blocks, anthropic.NewToolUseBlock(tc.ToolID, tc.Input, tc.ToolName))
+
+		// Log if we have a thought_signature (for debugging Bifrost integration)
+		if tc.ThoughtSignature != "" {
+			fmt.Fprintf(
+				os.Stderr,
+				"[AnthropicAdapter] Tool call has thought_signature (need HTTP-level injection): ID=%s, Sig=%s\n",
+				tc.ToolID,
+				tc.ThoughtSignature,
+			)
+			// TODO: Implement HTTP interceptor to inject signature field into JSON payload
+			// The SDK doesn't support adding custom fields to tool_use blocks
+			// For now, we'll need to intercept the HTTP request and inject the signature
+		}
 	}
 
 	return anthropic.NewAssistantMessage(blocks...)
@@ -477,47 +506,54 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 			toolName := content.Name
 			inputMap := make(map[string]interface{})
 
-			// Log tool_use block for debugging
-			fmt.Fprintf(
-				os.Stderr,
-				"[AnthropicAdapter] Found tool_use: ID=%s, Name=%s, InputLen=%d\n",
-				toolID,
-				toolName,
-				len(content.Input),
-			)
+			// Extract thought_signature from Signature field (Gemini via Bifrost)
+			var thoughtSignature string
+			if content.JSON.Signature.Valid() {
+				sigRaw := content.JSON.Signature.Raw()
+				if sigRaw != "" {
+					thoughtSignature = sigRaw
+				}
+			}
+
+			if content.JSON.Data.Valid() {
+				dataRaw := content.JSON.Data.Raw()
+				if dataRaw != "" && thoughtSignature == "" {
+					thoughtSignature = dataRaw
+				}
+			}
 
 			// Convert Input JSON to map
 			if len(content.Input) > 0 {
 				if err := json.Unmarshal(content.Input, &inputMap); err == nil {
 					inputJSON := string(content.Input)
 					toolCalls = append(toolCalls, port.ToolCallInfo{
-						ToolID:    toolID,
-						ToolName:  toolName,
-						Input:     inputMap,
-						InputJSON: inputJSON,
+						ToolID:           toolID,
+						ToolName:         toolName,
+						Input:            inputMap,
+						InputJSON:        inputJSON,
+						ThoughtSignature: thoughtSignature,
 					})
-					// Populate entity tool calls for storage in Message
 					entityToolCalls = append(entityToolCalls, entity.ToolCall{
-						ToolID:   toolID,
-						ToolName: toolName,
-						Input:    inputMap,
+						ToolID:           toolID,
+						ToolName:         toolName,
+						Input:            inputMap,
+						ThoughtSignature: thoughtSignature,
 					})
-					fmt.Fprintf(os.Stderr, "[AnthropicAdapter] Successfully parsed tool_use\n")
-				} else {
-					fmt.Fprintf(
-						os.Stderr,
-						"[AnthropicAdapter] Failed to unmarshal tool input: %v (raw: %s)\n",
-						err,
-						string(content.Input),
-					)
 				}
-			} else {
-				fmt.Fprintf(os.Stderr, "[AnthropicAdapter] tool_use has empty Input - skipping\n")
 			}
-		case "thinking":
-			// Extract thinking blocks with signatures (CRITICAL: preserve signature exactly)
+		case "thinking", "redacted_thinking":
+			// Extract thinking blocks with signatures (preserve signature exactly)
+			// Note: Gemini sends "redacted_thinking" with encrypted content in the "data" field
+			// that cannot be decrypted client-side. We show a placeholder instead.
+			thinkingContent := content.Thinking
+
+			// If thinking is empty but this is a redacted_thinking block, use a placeholder
+			if thinkingContent == "" && content.Type == "redacted_thinking" {
+				thinkingContent = "[Thinking content is encrypted and cannot be displayed - Gemini extended thinking mode]"
+			}
+
 			thinkingBlocks = append(thinkingBlocks, entity.ThinkingBlock{
-				Thinking:  content.Thinking,
+				Thinking:  thinkingContent,
 				Signature: content.Signature,
 			})
 		}
@@ -526,21 +562,7 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 	content := contentBuilder.String()
 	if content == "" {
 		content = string(response.StopReason)
-		fmt.Fprintf(
-			os.Stderr,
-			"[AnthropicAdapter] No text content, using StopReason: %s\n",
-			response.StopReason,
-		)
 	}
-
-	// Log final parsing result
-	fmt.Fprintf(
-		os.Stderr,
-		"[AnthropicAdapter] Response parsed: content_len=%d, tool_calls=%d, content_blocks=%d\n",
-		len(content),
-		len(toolCalls),
-		len(response.Content),
-	)
 
 	// Create the message
 	msg, err := entity.NewMessage(entity.RoleAssistant, content)

@@ -153,9 +153,10 @@ func (cs *ConversationService) ProcessAssistantResponse(
 			toolCallParams = make([]port.ToolCallParam, len(msg.ToolCalls))
 			for j, tc := range msg.ToolCalls {
 				toolCallParams[j] = port.ToolCallParam{
-					ToolID:   tc.ToolID,
-					ToolName: tc.ToolName,
-					Input:    tc.Input,
+					ToolID:           tc.ToolID,
+					ToolName:         tc.ToolName,
+					Input:            tc.Input,
+					ThoughtSignature: tc.ThoughtSignature, // Preserve Gemini thought signature
 				}
 			}
 		}
@@ -166,9 +167,10 @@ func (cs *ConversationService) ProcessAssistantResponse(
 			toolResultParams = make([]port.ToolResultParam, len(msg.ToolResults))
 			for j, tr := range msg.ToolResults {
 				toolResultParams[j] = port.ToolResultParam{
-					ToolID:  tr.ToolID,
-					Result:  tr.Result,
-					IsError: tr.IsError,
+					ToolID:           tr.ToolID,
+					Result:           tr.Result,
+					IsError:          tr.IsError,
+					ThoughtSignature: tr.ThoughtSignature, // Preserve Gemini thought signature
 				}
 			}
 		}

@@ -380,9 +380,10 @@ func (cs *ChatService) addToolResultsToConversation(
 			result = toolResults[i].Error
 		}
 		toolResult := entity.ToolResult{
-			ToolID:  toolCall.ToolID,
-			Result:  result,
-			IsError: toolResults[i].Error != "",
+			ToolID:           toolCall.ToolID,
+			Result:           result,
+			IsError:          toolResults[i].Error != "",
+			ThoughtSignature: toolCall.ThoughtSignature, // Copy Gemini thought_signature from original tool call
 		}
 
 		entityToolResults = append(entityToolResults, toolResult)

@@ -24,16 +24,18 @@ var (
 
 // ToolCall represents a tool use block in an assistant message.
 type ToolCall struct {
-	ToolID   string                 `json:"tool_id"`
-	ToolName string                 `json:"tool_name"`
-	Input    map[string]interface{} `json:"input"`
+	ToolID           string                 `json:"tool_id"`
+	ToolName         string                 `json:"tool_name"`
+	Input            map[string]interface{} `json:"input"`
+	ThoughtSignature string                 `json:"thought_signature,omitempty"` // Gemini thought signature via Bifrost
 }
 
 // ToolResult represents a tool result block in a user message.
 type ToolResult struct {
-	ToolID  string `json:"tool_id"`
-	Result  string `json:"result"`
-	IsError bool   `json:"is_error"`
+	ToolID           string `json:"tool_id"`
+	Result           string `json:"result"`
+	IsError          bool   `json:"is_error"`
+	ThoughtSignature string `json:"thought_signature,omitempty"` // Gemini thought signature (via Bifrost)
 }
 
 // ThinkingBlock represents a thinking block in a message.

@@ -25,16 +25,18 @@ type MessageParam struct {
 
 // ToolCallParam represents a tool use block in a message parameter.
 type ToolCallParam struct {
-	ToolID   string                 `json:"tool_id"`
-	ToolName string                 `json:"tool_name"`
-	Input    map[string]interface{} `json:"input"`
+	ToolID           string                 `json:"tool_id"`
+	ToolName         string                 `json:"tool_name"`
+	Input            map[string]interface{} `json:"input"`
+	ThoughtSignature string                 `json:"thought_signature,omitempty"` // Gemini thought signature via Bifrost
 }
 
 // ToolResultParam represents a tool result block in a message parameter.
 type ToolResultParam struct {
-	ToolID  string `json:"tool_id"`
-	Result  string `json:"result"`
-	IsError bool   `json:"is_error"`
+	ToolID           string `json:"tool_id"`
+	Result           string `json:"result"`
+	IsError          bool   `json:"is_error"`
+	ThoughtSignature string `json:"thought_signature,omitempty"` // Gemini thought signature (via Bifrost)
 }
 
 // ToolParam represents a tool parameter for AI providers.
@@ -49,10 +51,11 @@ type ToolInputSchemaParam map[string]interface{}
 
 // ToolCallInfo contains information about a tool that was requested by the AI.
 type ToolCallInfo struct {
-	ToolID    string                 `json:"tool_id"`    // The tool identifier from the AI response
-	ToolName  string                 `json:"tool_name"`  // The name of the tool
-	Input     map[string]interface{} `json:"input"`      // The input parameters passed to the tool
-	InputJSON string                 `json:"input_json"` // JSON representation of the input
+	ToolID           string                 `json:"tool_id"`                     // The tool identifier from the AI response
+	ToolName         string                 `json:"tool_name"`                   // The name of the tool
+	Input            map[string]interface{} `json:"input"`                       // The input parameters passed to the tool
+	InputJSON        string                 `json:"input_json"`                  // JSON representation of the input
+	ThoughtSignature string                 `json:"thought_signature,omitempty"` // Gemini thought signature via Bifrost
 }
 
 // AIProvider defines the interface for external AI service integration.
