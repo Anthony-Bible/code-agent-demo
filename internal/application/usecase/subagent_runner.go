@@ -324,6 +324,11 @@ func (r *SubagentRunner) setupAgentSession(rc *subagentRunContext) error {
 // runExecutionLoop runs the main tool execution loop until completion or limit.
 func (r *SubagentRunner) runExecutionLoop(rc *subagentRunContext) (*SubagentResult, error) {
 	for rc.actionsTaken < rc.maxActions {
+		// Add thinking mode to context if enabled for this session
+		thinkingInfo, _ := r.convService.GetThinkingMode(rc.sessionID)
+		if thinkingInfo.Enabled {
+			rc.ctx = port.WithThinkingMode(rc.ctx, thinkingInfo)
+		}
 		// Process assistant response
 		msg, toolCalls, err := r.convService.ProcessAssistantResponse(rc.ctx, rc.sessionID)
 		if err != nil {
