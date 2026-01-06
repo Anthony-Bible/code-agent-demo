@@ -11,6 +11,14 @@ import (
 	"time"
 )
 
+const (
+	// Subagent status constants for display messages.
+	statusStarting  = "Starting"
+	statusCompleted = "Completed"
+	statusFailed    = "Failed"
+	statusThinking  = "Thinking"
+)
+
 // resolveModelShorthand converts shorthand model names to actual Anthropic model IDs.
 // It supports:
 //   - "haiku" -> "claude-3-5-haiku-20241022"
@@ -232,7 +240,7 @@ func (r *SubagentRunner) Run(
 	}
 
 	// Display subagent starting
-	r.displayStatus(agent.Name, "Starting", "")
+	r.displayStatus(agent.Name, statusStarting, "")
 
 	return r.runExecutionLoop(rc)
 }
@@ -269,7 +277,7 @@ func (r *SubagentRunner) validationFailedResult(
 // failedResult creates a failed result from the run context.
 func (rc *subagentRunContext) failedResult(err error) *SubagentResult {
 	// Display failure status
-	rc.runner.displayStatus(rc.agent.Name, "Failed", err.Error())
+	rc.runner.displayStatus(rc.agent.Name, statusFailed, err.Error())
 
 	return &SubagentResult{
 		SubagentID:   rc.subagentID,
@@ -293,7 +301,7 @@ func (rc *subagentRunContext) completedResult() *SubagentResult {
 
 	// Display completion status with details
 	details := fmt.Sprintf("%d actions, %.1fs", rc.actionsTaken, duration.Seconds())
-	rc.runner.displayStatus(rc.agent.Name, "Completed", details)
+	rc.runner.displayStatus(rc.agent.Name, statusCompleted, details)
 
 	return &SubagentResult{
 		SubagentID:   rc.subagentID,
@@ -329,8 +337,10 @@ func (r *SubagentRunner) runExecutionLoop(rc *subagentRunContext) (*SubagentResu
 		thinkingInfo, _ := r.convService.GetThinkingMode(rc.sessionID)
 		if thinkingInfo.Enabled {
 			ctx = port.WithThinkingMode(ctx, thinkingInfo)
-			// Display thinking status indicator (content is never shown for subagents)
-			r.displayStatus(rc.agent.Name, "Thinking", "")
+			// Display thinking status indicator.
+			// Note: Thinking content itself is never displayed for subagents,
+			// only the status indicator to show the AI is processing.
+			r.displayStatus(rc.agent.Name, statusThinking, "")
 		}
 
 		// Process assistant response
