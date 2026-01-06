@@ -213,13 +213,16 @@ func (r *SubagentRunner) Run(
 	rc.sessionID = sessionID
 	defer func() { _ = r.convService.EndConversation(ctx, sessionID) }()
 
-	// Propagate thinking mode from config if enabled
-	if r.config.ThinkingEnabled {
-		thinkingInfo := port.ThinkingModeInfo{
-			Enabled:      true,
+	// Extract thinking mode from context (from parent) or fall back to static config
+	thinkingInfo, hasThinking := port.ThinkingModeFromContext(ctx)
+	if !hasThinking {
+		thinkingInfo = port.ThinkingModeInfo{
+			Enabled:      r.config.ThinkingEnabled,
 			BudgetTokens: r.config.ThinkingBudget,
 			ShowThinking: r.config.ShowThinking,
 		}
+	}
+	if thinkingInfo.Enabled {
 		_ = r.convService.SetThinkingMode(sessionID, thinkingInfo)
 		// Ignore error - thinking mode is optional, continue execution
 	}
