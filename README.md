@@ -256,11 +256,15 @@ Extended thinking disabled
 | `list_files` | List files in directory | Ask to "List all files in ./internal" |
 | `edit_file` | Edit files via string replacement | Ask to "Replace this text in file.go" |
 | `bash` | Execute shell commands | Ask to "Run command: go test ./..." |
+| `fetch` | Fetch web resources via HTTP/HTTPS | Ask to "Fetch the contents of https://example.com" |
 | `task` | Spawn a pre-defined subagent | Ask to "Delegate security review to code-reviewer" |
 | `delegate` | Spawn a dynamic subagent | Ask to "Create an agent to analyze this log file" |
 | `batch_tool` | Execute multiple tools in parallel/sequence | Ask to "Read all these 3 files at once" |
 | `activate_skill` | Load skill instructions | Ask to "Activate the code-review skill" |
 | `enter_plan_mode`| Propose changes before execution | Ask to "Enter plan mode to redesign this" |
+| `complete_investigation` | Complete an investigation with findings | Used to finalize investigation with confidence and findings |
+| `escalate_investigation` | Escalate investigation to higher priority | Used to escalate issues requiring human review |
+| `report_investigation` | Report progress during investigation | Used to provide status updates during investigation |
 
 **Built-in Safety Features:**
 - **Path Traversal Protection**: All file operations are sandboxed within the working directory
@@ -320,7 +324,21 @@ The subagent system allows the main agent to delegate tasks to specialized or dy
 
 #### Pre-defined Subagents
 
-Found in `./agents/`, these have specific roles like `code-reviewer`, `test-writer`, or `documentation-writer`. Each agent has its own `AGENT.md` file defining its system prompt and allowed tools.
+Subagents are discovered from three directories in **priority order**:
+1. `./agents` (project root, highest priority)
+2. `./.claude/agents` (project .claude directory)
+3. `~/.claude/agents` (user global, lowest priority)
+
+When the same agent name exists in multiple directories, the highest priority version is used. Common agents include `code-reviewer`, `test-writer`, and `documentation-writer`. Each agent has its own `AGENT.md` file defining its system prompt, allowed tools, model selection, and thinking configuration.
+
+**Agent Configuration Options:**
+- **allowed_tools**: Restrict which tools the agent can use for safety
+- **model**: Choose between `haiku` (fast), `sonnet` (balanced), `opus` (complex), or `inherit` (default)
+- **max_actions**: Limit tool calls to prevent runaway execution (default: 20)
+- **thinking_enabled**: Enable/disable extended thinking for this agent (default: inherit)
+- **thinking_budget**: Token budget for thinking process (default: inherit)
+
+See CLAUDE.md for detailed AGENT.md format and frontmatter options.
 
 **Usage:**
 ```
@@ -515,6 +533,8 @@ The project uses table-driven tests throughout. Look at existing tests for patte
 | `github.com/stretchr/testify` | v1.11.1 | Testing utilities |
 | `github.com/spf13/cobra` | v1.10.2 | CLI framework |
 | `github.com/spf13/viper` | v1.21.0 | Configuration management |
+| `github.com/chzyer/readline` | v1.5.1 | Interactive input with history |
+| `golang.org/x/net` | v0.48.0 | HTTP utilities |
 
 ## License
 
