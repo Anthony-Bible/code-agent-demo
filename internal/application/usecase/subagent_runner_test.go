@@ -2406,7 +2406,7 @@ func TestSubagentConfig_ThinkingBudgetDataType(t *testing.T) {
 			}
 
 			// Verify type is int64
-			var _ int64 = config.ThinkingBudget
+			_ = config.ThinkingBudget
 		})
 	}
 }
