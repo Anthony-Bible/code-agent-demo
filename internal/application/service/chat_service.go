@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 )
@@ -227,7 +228,10 @@ func (cs *ChatService) SendMessage(
 	}
 
 	// Begin streaming response with color setup
-	_ = cs.userInterface.BeginStreamingResponse()
+	if err := cs.userInterface.BeginStreamingResponse(); err != nil {
+		// Log error but continue - color setup is not critical
+		fmt.Fprintf(os.Stderr, "Warning: failed to begin streaming response: %v\n", err)
+	}
 
 	// Create streaming callback that displays text as it arrives
 	// Add [PLAN MODE] prefix if in plan mode
@@ -244,6 +248,8 @@ func (cs *ChatService) SendMessage(
 	// Process the assistant message with streaming
 	assistantMsg, toolCalls, err := cs.messageProcessUseCase.ProcessAssistantMessageStreaming(ctx, sessionID, callback)
 	if err != nil {
+		// Ensure we clean up terminal state even if processing fails
+		_ = cs.userInterface.EndStreamingResponse()
 		return nil, fmt.Errorf("failed to process assistant message: %w", err)
 	}
 
@@ -257,7 +263,10 @@ func (cs *ChatService) SendMessage(
 	}
 
 	// End streaming response with color teardown and newline
-	_ = cs.userInterface.EndStreamingResponse()
+	if err := cs.userInterface.EndStreamingResponse(); err != nil {
+		// Log error but continue - color teardown is not critical
+		fmt.Fprintf(os.Stderr, "Warning: failed to end streaming response: %v\n", err)
+	}
 
 	// Check if processing (has tools)
 	isProcessing, _ := cs.conversationService.IsProcessing(req.SessionID)
@@ -439,7 +448,10 @@ func (cs *ChatService) continueAfterToolExecution(
 	}
 
 	// Begin streaming response with color setup
-	_ = cs.userInterface.BeginStreamingResponse()
+	if err := cs.userInterface.BeginStreamingResponse(); err != nil {
+		// Log error but continue - color setup is not critical
+		fmt.Fprintf(os.Stderr, "Warning: failed to begin streaming response: %v\n", err)
+	}
 
 	// Create streaming callback that displays text as it arrives
 	// Add [PLAN MODE] prefix if in plan mode
@@ -456,6 +468,8 @@ func (cs *ChatService) continueAfterToolExecution(
 	// Process the assistant message with streaming
 	assistantMsg, toolCalls, err := cs.messageProcessUseCase.ProcessAssistantMessageStreaming(ctx, sessionID, callback)
 	if err != nil {
+		// Ensure we clean up terminal state even if processing fails
+		_ = cs.userInterface.EndStreamingResponse()
 		return nil, fmt.Errorf("failed to continue chat after tool execution: %w", err)
 	}
 
@@ -469,7 +483,10 @@ func (cs *ChatService) continueAfterToolExecution(
 	}
 
 	// End streaming response with color teardown and newline
-	_ = cs.userInterface.EndStreamingResponse()
+	if err := cs.userInterface.EndStreamingResponse(); err != nil {
+		// Log error but continue - color teardown is not critical
+		fmt.Fprintf(os.Stderr, "Warning: failed to end streaming response: %v\n", err)
+	}
 
 	// Check if processing (has tools)
 	isProcessing, _ := cs.conversationService.IsProcessing(sessionID)
