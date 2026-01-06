@@ -250,11 +250,23 @@ func (c *CLIAdapter) DisplayMessage(message string, messageRole string) error {
 	return err
 }
 
+// BeginStreamingResponse starts a streaming response with color setup.
+func (c *CLIAdapter) BeginStreamingResponse() error {
+	_, err := fmt.Fprint(c.output, c.colors.Assistant)
+	return err
+}
+
+// EndStreamingResponse ends a streaming response with color teardown and newline.
+func (c *CLIAdapter) EndStreamingResponse() error {
+	_, err := fmt.Fprint(c.output, "\x1b[0m\n")
+	return err
+}
+
 // DisplayStreamingText displays a chunk of streaming text without a newline.
 // This is used to show text as it arrives in real-time from the AI provider.
-// The text is displayed in the assistant color.
+// The text is displayed without color codes - the caller should handle color setup/teardown.
 func (c *CLIAdapter) DisplayStreamingText(text string) error {
-	_, err := fmt.Fprintf(c.output, "%s%s\x1b[0m", c.colors.Assistant, text)
+	_, err := fmt.Fprint(c.output, text)
 	return err
 }
 

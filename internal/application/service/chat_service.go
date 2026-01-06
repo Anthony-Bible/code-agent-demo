@@ -226,6 +226,9 @@ func (cs *ChatService) SendMessage(
 		return nil, fmt.Errorf("failed to get conversation: %w", err)
 	}
 
+	// Begin streaming response with color setup
+	_ = cs.userInterface.BeginStreamingResponse()
+
 	// Create streaming callback that displays text as it arrives
 	// Add [PLAN MODE] prefix if in plan mode
 	isPlanMode, _ := cs.conversationService.IsPlanMode(sessionID)
@@ -253,8 +256,8 @@ func (cs *ChatService) SendMessage(
 		}
 	}
 
-	// Print newline after streaming completes
-	_ = cs.userInterface.DisplayStreamingText("\n")
+	// End streaming response with color teardown and newline
+	_ = cs.userInterface.EndStreamingResponse()
 
 	// Check if processing (has tools)
 	isProcessing, _ := cs.conversationService.IsProcessing(req.SessionID)
@@ -435,6 +438,9 @@ func (cs *ChatService) continueAfterToolExecution(
 		ctx = port.WithThinkingMode(ctx, thinkingInfo)
 	}
 
+	// Begin streaming response with color setup
+	_ = cs.userInterface.BeginStreamingResponse()
+
 	// Create streaming callback that displays text as it arrives
 	// Add [PLAN MODE] prefix if in plan mode
 	isPlanMode, _ := cs.conversationService.IsPlanMode(sessionID)
@@ -462,8 +468,8 @@ func (cs *ChatService) continueAfterToolExecution(
 		}
 	}
 
-	// Print newline after streaming completes
-	_ = cs.userInterface.DisplayStreamingText("\n")
+	// End streaming response with color teardown and newline
+	_ = cs.userInterface.EndStreamingResponse()
 
 	// Check if processing (has tools)
 	isProcessing, _ := cs.conversationService.IsProcessing(sessionID)

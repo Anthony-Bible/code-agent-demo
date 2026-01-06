@@ -31,8 +31,17 @@ type UserInterface interface {
 	// DisplayMessage displays a message with the specified role.
 	DisplayMessage(message string, messageRole string) error
 
+	// BeginStreamingResponse starts a streaming response with appropriate color setup.
+	// Call this before streaming text chunks. Returns an error if setup fails.
+	BeginStreamingResponse() error
+
+	// EndStreamingResponse ends a streaming response with appropriate color teardown.
+	// Call this after all streaming text chunks have been displayed.
+	EndStreamingResponse() error
+
 	// DisplayStreamingText displays a chunk of streaming text without a newline.
 	// This is used to show text as it arrives in real-time from the AI provider.
+	// Call BeginStreamingResponse before the first chunk and EndStreamingResponse after the last.
 	DisplayStreamingText(text string) error
 
 	// DisplayError displays an error message.
