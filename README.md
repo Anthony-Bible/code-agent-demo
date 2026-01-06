@@ -11,11 +11,11 @@ Code Editing Agent is an intelligent CLI tool that combines conversational AI wi
 - **Interactive CLI Chat** - Terminal-based conversation with AI assistant
 - **Extended Thinking** - Claude's internal reasoning process with configurable token budgets
 - **File System Tools** - Read, list, and edit files directly from chat
+- **Subagent System** - Spawn specialized AI assistants for delegated tasks
+- **Plan Mode** - Propose changes for review before applying them
 - **Hexagonal Architecture** - Clean separation of concerns with ports and adapters
 - **Tool System** - Modular architecture for adding custom tools with JSON schema validation
-- **Session Management** - Multi-session support with unique session IDs
-- **Multiple AI Models** - Supports various AI models via Anthropic SDK
-- **Dependency Injection** - Clean DI container for managing application dependencies
+- **Skill System** - Project-specific and global AI capabilities following agentskills.io
 
 ## Architecture
 
@@ -256,6 +256,11 @@ Extended thinking disabled
 | `list_files` | List files in directory | Ask to "List all files in ./internal" |
 | `edit_file` | Edit files via string replacement | Ask to "Replace this text in file.go" |
 | `bash` | Execute shell commands | Ask to "Run command: go test ./..." |
+| `task` | Spawn a pre-defined subagent | Ask to "Delegate security review to code-reviewer" |
+| `delegate` | Spawn a dynamic subagent | Ask to "Create an agent to analyze this log file" |
+| `batch_tool` | Execute multiple tools in parallel/sequence | Ask to "Read all these 3 files at once" |
+| `activate_skill` | Load skill instructions | Ask to "Activate the code-review skill" |
+| `enter_plan_mode`| Propose changes before execution | Ask to "Enter plan mode to redesign this" |
 
 **Built-in Safety Features:**
 - **Path Traversal Protection**: All file operations are sandboxed within the working directory
@@ -308,6 +313,44 @@ Instructions for how the AI should perform code reviews...
 #### Using Skills
 
 Skills are automatically discovered at startup and listed in the AI's context. The AI can activate a skill when its capabilities are needed using the `activate_skill` tool.
+
+### Subagent System
+
+The subagent system allows the main agent to delegate tasks to specialized or dynamic AI assistants. This is useful for complex, multi-step tasks or when isolation is beneficial.
+
+#### Pre-defined Subagents
+
+Found in `./agents/`, these have specific roles like `code-reviewer`, `test-writer`, or `documentation-writer`. Each agent has its own `AGENT.md` file defining its system prompt and allowed tools.
+
+**Usage:**
+```
+> Delegate a security review of internal/infrastructure to the code-reviewer agent
+```
+
+#### Dynamic Subagents (Delegation)
+
+You can also create dynamic agents on-the-fly with custom system prompts using the `delegate` tool.
+
+**Usage:**
+```
+> Use the delegate tool to create a 'regex-specialist' to help fix these patterns
+```
+
+### Plan Mode
+
+Plan mode allows you to review and approve proposed changes before they are applied. When in plan mode, tools like `edit_file` or `bash` (if mutating) will write their intended actions to a plan file instead of executing them.
+
+#### Activating Plan Mode
+
+**Via runtime command:**
+```
+> :mode plan      # Enable plan mode
+> :mode normal    # Return to normal mode
+> :mode toggle    # Toggle between modes
+```
+
+**Via tool:**
+The AI can proactively enter plan mode using the `enter_plan_mode` tool when it detects a complex task.
 
 ### Configuration
 
