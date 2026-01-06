@@ -1424,7 +1424,10 @@ func (a *ExecutorAdapter) registerInvestigationTools() {
 					"description": "Confidence level from 0 to 1",
 				},
 				"findings": map[string]interface{}{
-					"type":        "array",
+					"type": "array",
+					"items": map[string]interface{}{
+						"type": "string",
+					},
 					"description": "List of findings from the investigation",
 				},
 				"root_cause": map[string]interface{}{
@@ -1432,7 +1435,10 @@ func (a *ExecutorAdapter) registerInvestigationTools() {
 					"description": "The identified root cause (optional)",
 				},
 				"recommended_actions": map[string]interface{}{
-					"type":        "array",
+					"type": "array",
+					"items": map[string]interface{}{
+						"type": "string",
+					},
 					"description": "List of recommended actions (optional)",
 				},
 				"severity": map[string]interface{}{
@@ -1473,7 +1479,10 @@ func (a *ExecutorAdapter) registerInvestigationTools() {
 					"description": "Priority level for escalation",
 				},
 				"partial_findings": map[string]interface{}{
-					"type":        "array",
+					"type": "array",
+					"items": map[string]interface{}{
+						"type": "string",
+					},
 					"description": "Partial findings gathered so far (optional)",
 				},
 				"blocking": map[string]interface{}{
