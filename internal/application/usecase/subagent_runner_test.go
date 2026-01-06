@@ -56,6 +56,12 @@ type subagentRunnerConvServiceMock struct {
 	setCustomSystemPromptCalls   int
 	setCustomSystemPromptError   error
 	setCustomSystemPromptContent []string
+
+	// SetThinkingMode tracking
+	setThinkingModeCalls     int
+	setThinkingModeError     error
+	setThinkingModeSessionID []string
+	setThinkingModeInfo      []port.ThinkingModeInfo
 }
 
 func newSubagentRunnerConvServiceMock() *subagentRunnerConvServiceMock {
@@ -146,7 +152,15 @@ func (m *subagentRunnerConvServiceMock) SetCustomSystemPrompt(
 	return m.setCustomSystemPromptError
 }
 
-func (m *subagentRunnerConvServiceMock) SetThinkingMode(_ string, _ port.ThinkingModeInfo) error {
+func (m *subagentRunnerConvServiceMock) SetThinkingMode(sessionID string, info port.ThinkingModeInfo) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.setThinkingModeCalls++
+	m.setThinkingModeSessionID = append(m.setThinkingModeSessionID, sessionID)
+	m.setThinkingModeInfo = append(m.setThinkingModeInfo, info)
+	if m.setThinkingModeError != nil {
+		return m.setThinkingModeError
+	}
 	return nil
 }
 
@@ -2159,6 +2173,309 @@ func TestSubagentRunner_NoWarningAtZeroRemaining(t *testing.T) {
 		if strings.Contains(msg, "0 turn") {
 			t.Error("Should not warn at 0 turns remaining")
 		}
+	}
+}
+
+// =============================================================================
+// SubagentRunner.Run() Thinking Mode Propagation Tests (RED PHASE)
+// =============================================================================
+
+// TestSubagentRunner_Run_CallsSetThinkingModeWhenEnabled verifies that
+// SubagentRunner.Run() calls SetThinkingMode() when ThinkingEnabled is true.
+// EXPECTED TO FAIL: Run() does not currently call SetThinkingMode().
+func TestSubagentRunner_Run_CallsSetThinkingModeWhenEnabled(t *testing.T) {
+	// Arrange
+	convService := newSubagentRunnerConvServiceMock()
+	convService.processResponseMessages = []*entity.Message{
+		{Role: entity.RoleAssistant, Content: "Task complete"},
+	}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
+
+	toolExecutor := newSubagentRunnerToolExecutorMock()
+	aiProvider := newSubagentRunnerAIProviderMock()
+
+	config := SubagentConfig{
+		MaxActions:      20,
+		ThinkingEnabled: true,
+		ThinkingBudget:  4096,
+		ShowThinking:    true,
+	}
+
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+	agent := createTestAgent("thinking-agent", "Thinking Agent System Prompt")
+
+	// Act
+	_, err := runner.Run(context.Background(), agent, "Do a task", "subagent-thinking-001")
+	// Assert
+	if err != nil {
+		t.Fatalf("Run() failed: %v", err)
+	}
+
+	// Verify SetThinkingMode was called
+	if convService.setThinkingModeCalls != 1 {
+		t.Errorf("SetThinkingMode() call count = %d, want 1", convService.setThinkingModeCalls)
+	}
+}
+
+// TestSubagentRunner_Run_DoesNotCallSetThinkingModeWhenDisabled verifies that
+// SubagentRunner.Run() does NOT call SetThinkingMode() when ThinkingEnabled is false.
+// EXPECTED TO PASS: Run() doesn't call SetThinkingMode at all currently.
+func TestSubagentRunner_Run_DoesNotCallSetThinkingModeWhenDisabled(t *testing.T) {
+	// Arrange
+	convService := newSubagentRunnerConvServiceMock()
+	convService.processResponseMessages = []*entity.Message{
+		{Role: entity.RoleAssistant, Content: "Task complete"},
+	}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
+
+	toolExecutor := newSubagentRunnerToolExecutorMock()
+	aiProvider := newSubagentRunnerAIProviderMock()
+
+	config := SubagentConfig{
+		MaxActions:      20,
+		ThinkingEnabled: false, // Disabled
+		ThinkingBudget:  0,
+		ShowThinking:    false,
+	}
+
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+	agent := createTestAgent("normal-agent", "Normal Agent System Prompt")
+
+	// Act
+	_, err := runner.Run(context.Background(), agent, "Do a task", "subagent-normal-001")
+	// Assert
+	if err != nil {
+		t.Fatalf("Run() failed: %v", err)
+	}
+
+	// Verify SetThinkingMode was NOT called
+	if convService.setThinkingModeCalls != 0 {
+		t.Errorf(
+			"SetThinkingMode() call count = %d, want 0 (should not be called when disabled)",
+			convService.setThinkingModeCalls,
+		)
+	}
+}
+
+// TestSubagentRunner_Run_PassesCorrectThinkingModeInfo verifies that
+// SubagentRunner.Run() passes the correct ThinkingModeInfo values from config.
+// EXPECTED TO FAIL: Run() does not currently call SetThinkingMode().
+func TestSubagentRunner_Run_PassesCorrectThinkingModeInfo(t *testing.T) {
+	tests := []struct {
+		name            string
+		thinkingEnabled bool
+		thinkingBudget  int64
+		showThinking    bool
+	}{
+		{
+			name:            "enabled with budget and show thinking",
+			thinkingEnabled: true,
+			thinkingBudget:  8192,
+			showThinking:    true,
+		},
+		{
+			name:            "enabled with budget but hide thinking",
+			thinkingEnabled: true,
+			thinkingBudget:  2048,
+			showThinking:    false,
+		},
+		{
+			name:            "enabled with zero budget (unlimited)",
+			thinkingEnabled: true,
+			thinkingBudget:  0,
+			showThinking:    true,
+		},
+		{
+			name:            "enabled with large budget",
+			thinkingEnabled: true,
+			thinkingBudget:  100000,
+			showThinking:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			convService := newSubagentRunnerConvServiceMock()
+			convService.processResponseMessages = []*entity.Message{
+				{Role: entity.RoleAssistant, Content: "Complete"},
+			}
+			convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
+
+			toolExecutor := newSubagentRunnerToolExecutorMock()
+			aiProvider := newSubagentRunnerAIProviderMock()
+
+			config := SubagentConfig{
+				MaxActions:      20,
+				ThinkingEnabled: tt.thinkingEnabled,
+				ThinkingBudget:  tt.thinkingBudget,
+				ShowThinking:    tt.showThinking,
+			}
+
+			runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+			agent := createTestAgent("test-agent", "Test System Prompt")
+
+			// Act
+			_, err := runner.Run(context.Background(), agent, "Task", "subagent-001")
+			// Assert
+			if err != nil {
+				t.Fatalf("Run() failed: %v", err)
+			}
+
+			// Verify SetThinkingMode was called with correct values
+			if convService.setThinkingModeCalls != 1 {
+				t.Fatalf("SetThinkingMode() call count = %d, want 1", convService.setThinkingModeCalls)
+			}
+
+			actualInfo := convService.setThinkingModeInfo[0]
+			if actualInfo.Enabled != tt.thinkingEnabled {
+				t.Errorf("ThinkingModeInfo.Enabled = %v, want %v", actualInfo.Enabled, tt.thinkingEnabled)
+			}
+			if actualInfo.BudgetTokens != tt.thinkingBudget {
+				t.Errorf("ThinkingModeInfo.BudgetTokens = %d, want %d", actualInfo.BudgetTokens, tt.thinkingBudget)
+			}
+			if actualInfo.ShowThinking != tt.showThinking {
+				t.Errorf("ThinkingModeInfo.ShowThinking = %v, want %v", actualInfo.ShowThinking, tt.showThinking)
+			}
+		})
+	}
+}
+
+// TestSubagentRunner_Run_CallsSetThinkingModeWithCorrectSessionID verifies that
+// SubagentRunner.Run() passes the correct session ID to SetThinkingMode().
+// EXPECTED TO FAIL: Run() does not currently call SetThinkingMode().
+func TestSubagentRunner_Run_CallsSetThinkingModeWithCorrectSessionID(t *testing.T) {
+	// Arrange
+	expectedSessionID := "subagent-session-xyz-789"
+
+	convService := newSubagentRunnerConvServiceMock()
+	convService.startConversationSession = expectedSessionID
+	convService.processResponseMessages = []*entity.Message{
+		{Role: entity.RoleAssistant, Content: "Done"},
+	}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
+
+	toolExecutor := newSubagentRunnerToolExecutorMock()
+	aiProvider := newSubagentRunnerAIProviderMock()
+
+	config := SubagentConfig{
+		MaxActions:      20,
+		ThinkingEnabled: true,
+		ThinkingBudget:  4096,
+		ShowThinking:    true,
+	}
+
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+	agent := createTestAgent("session-test-agent", "Session Test System Prompt")
+
+	// Act
+	_, err := runner.Run(context.Background(), agent, "Execute task", "subagent-session-001")
+	// Assert
+	if err != nil {
+		t.Fatalf("Run() failed: %v", err)
+	}
+
+	// Verify SetThinkingMode was called with correct session ID
+	if convService.setThinkingModeCalls != 1 {
+		t.Fatalf("SetThinkingMode() call count = %d, want 1", convService.setThinkingModeCalls)
+	}
+
+	actualSessionID := convService.setThinkingModeSessionID[0]
+	if actualSessionID != expectedSessionID {
+		t.Errorf("SetThinkingMode() sessionID = %q, want %q", actualSessionID, expectedSessionID)
+	}
+}
+
+// TestSubagentRunner_Run_ThinkingModeWithDifferentConfigs tests various config combinations.
+// EXPECTED TO FAIL: Run() does not currently call SetThinkingMode().
+func TestSubagentRunner_Run_ThinkingModeWithDifferentConfigs(t *testing.T) {
+	tests := []struct {
+		name               string
+		thinkingEnabled    bool
+		thinkingBudget     int64
+		showThinking       bool
+		expectSetThinkCall bool
+	}{
+		{
+			name:               "thinking enabled with standard budget",
+			thinkingEnabled:    true,
+			thinkingBudget:     4096,
+			showThinking:       true,
+			expectSetThinkCall: true,
+		},
+		{
+			name:               "thinking disabled",
+			thinkingEnabled:    false,
+			thinkingBudget:     0,
+			showThinking:       false,
+			expectSetThinkCall: false,
+		},
+		{
+			name:               "thinking enabled with unlimited budget",
+			thinkingEnabled:    true,
+			thinkingBudget:     0,
+			showThinking:       false,
+			expectSetThinkCall: true,
+		},
+		{
+			name:               "thinking enabled with large budget",
+			thinkingEnabled:    true,
+			thinkingBudget:     50000,
+			showThinking:       true,
+			expectSetThinkCall: true,
+		},
+		{
+			name:               "thinking enabled but show thinking off",
+			thinkingEnabled:    true,
+			thinkingBudget:     2048,
+			showThinking:       false,
+			expectSetThinkCall: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			convService := newSubagentRunnerConvServiceMock()
+			convService.processResponseMessages = []*entity.Message{
+				{Role: entity.RoleAssistant, Content: "Done"},
+			}
+			convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
+
+			toolExecutor := newSubagentRunnerToolExecutorMock()
+			aiProvider := newSubagentRunnerAIProviderMock()
+
+			config := SubagentConfig{
+				MaxActions:      20,
+				ThinkingEnabled: tt.thinkingEnabled,
+				ThinkingBudget:  tt.thinkingBudget,
+				ShowThinking:    tt.showThinking,
+			}
+
+			runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+			agent := createTestAgent("config-test-agent", "Config Test System Prompt")
+
+			// Act
+			_, err := runner.Run(context.Background(), agent, "Task", "subagent-config-001")
+			// Assert
+			if err != nil {
+				t.Fatalf("Run() failed: %v", err)
+			}
+
+			// Verify SetThinkingMode call expectation
+			if tt.expectSetThinkCall {
+				if convService.setThinkingModeCalls != 1 {
+					t.Errorf(
+						"SetThinkingMode() call count = %d, want 1 (thinking enabled)",
+						convService.setThinkingModeCalls,
+					)
+				}
+			} else {
+				if convService.setThinkingModeCalls != 0 {
+					t.Errorf("SetThinkingMode() call count = %d, want 0 (thinking disabled)", convService.setThinkingModeCalls)
+				}
+			}
+		})
 	}
 }
 
