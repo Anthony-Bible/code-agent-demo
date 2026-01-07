@@ -198,11 +198,12 @@ func (uc *MessageProcessUseCase) convertToolCalls(portCalls []port.ToolCallInfo)
 	dtoCalls := make([]dto.ToolCallInfo, len(portCalls))
 	for i, call := range portCalls {
 		dtoCalls[i] = dto.ToolCallInfo{
-			ToolID:       call.ToolID,
-			ToolName:     call.ToolName,
-			Input:        call.Input,
-			InputJSON:    call.InputJSON,
-			CallPriority: i,
+			ToolID:           call.ToolID,
+			ToolName:         call.ToolName,
+			Input:            call.Input,
+			InputJSON:        call.InputJSON,
+			CallPriority:     i,
+			ThoughtSignature: call.ThoughtSignature, // Preserve Gemini thought signature
 		}
 	}
 	return dtoCalls

@@ -152,6 +152,14 @@ func (m *investigationRunnerConvServiceMock) SetCustomSystemPrompt(
 	return m.setCustomSystemPromptError
 }
 
+func (m *investigationRunnerConvServiceMock) SetThinkingMode(sessionID string, info port.ThinkingModeInfo) error {
+	return nil
+}
+
+func (m *investigationRunnerConvServiceMock) GetThinkingMode(sessionID string) (port.ThinkingModeInfo, error) {
+	return port.ThinkingModeInfo{}, nil
+}
+
 // investigationRunnerToolExecutorMock implements port.ToolExecutor for testing.
 type investigationRunnerToolExecutorMock struct {
 	mu sync.Mutex
