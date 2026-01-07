@@ -208,10 +208,26 @@ func (cs *ChatService) SendMessage(
 		Message:   message,
 	}
 
+	// Add thinking mode to context if enabled for this session
+	thinkingInfo, _ := cs.conversationService.GetThinkingMode(sessionID)
+	if thinkingInfo.Enabled {
+		ctx = port.WithThinkingMode(ctx, thinkingInfo)
+	}
+
 	// Process the user message
 	resp, err := cs.messageProcessUseCase.ProcessUserMessage(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process message: %w", err)
+	}
+
+	// Display thinking blocks if ShowThinking is enabled
+	if resp.AssistantMsg != nil && len(resp.AssistantMsg.ThinkingBlocks) > 0 {
+		thinkingInfo, _ := cs.conversationService.GetThinkingMode(sessionID)
+		if thinkingInfo.ShowThinking {
+			for _, block := range resp.AssistantMsg.ThinkingBlocks {
+				_ = cs.userInterface.DisplayThinking(block.Thinking)
+			}
+		}
 	}
 
 	// Display the assistant message if there is text content
@@ -364,9 +380,10 @@ func (cs *ChatService) addToolResultsToConversation(
 			result = toolResults[i].Error
 		}
 		toolResult := entity.ToolResult{
-			ToolID:  toolCall.ToolID,
-			Result:  result,
-			IsError: toolResults[i].Error != "",
+			ToolID:           toolCall.ToolID,
+			Result:           result,
+			IsError:          toolResults[i].Error != "",
+			ThoughtSignature: toolCall.ThoughtSignature, // Copy Gemini thought_signature from original tool call
 		}
 
 		entityToolResults = append(entityToolResults, toolResult)
@@ -385,9 +402,25 @@ func (cs *ChatService) continueAfterToolExecution(
 	ctx context.Context,
 	sessionID string,
 ) (*dto.SendMessageResponse, error) {
+	// Add thinking mode to context if enabled for this session
+	thinkingInfo, _ := cs.conversationService.GetThinkingMode(sessionID)
+	if thinkingInfo.Enabled {
+		ctx = port.WithThinkingMode(ctx, thinkingInfo)
+	}
+
 	contResp, err := cs.messageProcessUseCase.ContinueChat(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to continue chat after tool execution: %w", err)
+	}
+
+	// Display thinking blocks if ShowThinking is enabled
+	if contResp.AssistantMsg != nil && len(contResp.AssistantMsg.ThinkingBlocks) > 0 {
+		thinkingInfo, _ := cs.conversationService.GetThinkingMode(sessionID)
+		if thinkingInfo.ShowThinking {
+			for _, block := range contResp.AssistantMsg.ThinkingBlocks {
+				_ = cs.userInterface.DisplayThinking(block.Thinking)
+			}
+		}
 	}
 
 	// Display the assistant message if there is text content
@@ -550,7 +583,7 @@ func (cs *ChatService) SetAIModel(model string) error {
 //
 // Returns:
 //   - error: An error if the command is invalid
-func (cs *ChatService) HandleModeCommand(ctx context.Context, sessionID string, mode string) error {
+func (cs *ChatService) HandleModeCommand(_ context.Context, sessionID string, mode string) error {
 	// Validate session exists first
 	_, err := cs.messageProcessUseCase.GetConversationState(sessionID)
 	if err != nil {
@@ -595,6 +628,56 @@ func (cs *ChatService) HandleModeCommand(ctx context.Context, sessionID string, 
 		return nil
 	default:
 		return errors.New("invalid mode: must be 'plan', 'normal', or 'toggle'")
+	}
+}
+
+// HandleThinkingCommand handles the :thinking command for toggling extended thinking mode.
+//
+// Parameters:
+//   - ctx: Context for the operation
+//   - sessionID: The session ID
+//   - mode: The mode to set ("on", "off", or "toggle")
+//
+// Returns:
+//   - error: An error if the command is invalid
+func (cs *ChatService) HandleThinkingCommand(_ context.Context, sessionID string, mode string) error {
+	// Validate session exists first
+	_, err := cs.messageProcessUseCase.GetConversationState(sessionID)
+	if err != nil {
+		return errors.New("session not found")
+	}
+
+	// Normalize mode to lowercase
+	modeLower := strings.ToLower(mode)
+
+	switch modeLower {
+	case "on", "enable":
+		// Enable thinking mode with defaults
+		info := port.ThinkingModeInfo{
+			Enabled:      true,
+			BudgetTokens: 10000, // Default budget
+			ShowThinking: false, // Hidden by default
+		}
+		return cs.conversationService.SetThinkingMode(sessionID, info)
+	case "off", "disable":
+		// Disable thinking mode
+		info := port.ThinkingModeInfo{
+			Enabled:      false,
+			BudgetTokens: 0,
+			ShowThinking: false,
+		}
+		return cs.conversationService.SetThinkingMode(sessionID, info)
+	case "toggle":
+		// Toggle current thinking mode
+		currentInfo, _ := cs.conversationService.GetThinkingMode(sessionID)
+		newInfo := port.ThinkingModeInfo{
+			Enabled:      !currentInfo.Enabled,
+			BudgetTokens: 10000, // Use default budget
+			ShowThinking: currentInfo.ShowThinking,
+		}
+		return cs.conversationService.SetThinkingMode(sessionID, newInfo)
+	default:
+		return errors.New("invalid thinking mode: must be 'on', 'off', or 'toggle'")
 	}
 }
 
