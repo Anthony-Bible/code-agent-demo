@@ -24,34 +24,55 @@ var (
 
 // ToolCall represents a tool use block in an assistant message.
 type ToolCall struct {
-	ToolID   string                 `json:"tool_id"`
-	ToolName string                 `json:"tool_name"`
-	Input    map[string]interface{} `json:"input"`
+	ToolID           string                 `json:"tool_id"`
+	ToolName         string                 `json:"tool_name"`
+	Input            map[string]interface{} `json:"input"`
+	ThoughtSignature string                 `json:"thought_signature,omitempty"` // Gemini thought signature via Bifrost
 }
 
 // ToolResult represents a tool result block in a user message.
 type ToolResult struct {
-	ToolID  string `json:"tool_id"`
-	Result  string `json:"result"`
-	IsError bool   `json:"is_error"`
+	ToolID           string `json:"tool_id"`
+	Result           string `json:"result"`
+	IsError          bool   `json:"is_error"`
+	ThoughtSignature string `json:"thought_signature,omitempty"` // Gemini thought signature (via Bifrost)
+}
+
+// ThinkingBlock represents a thinking block in a message.
+type ThinkingBlock struct {
+	Thinking  string `json:"thinking"`
+	Signature string `json:"signature"`
 }
 
 // Message represents a chat message with role, content, and timestamp.
 // It is an immutable entity that represents a single message in a conversation.
 type Message struct {
-	Role        string       `json:"role"`                   // The role of the message sender (user, assistant, or system)
-	Content     string       `json:"content"`                // The actual content of the message
-	Timestamp   time.Time    `json:"timestamp"`              // When the message was created
-	ToolCalls   []ToolCall   `json:"tool_calls,omitempty"`   // Tool calls from assistant messages
-	ToolResults []ToolResult `json:"tool_results,omitempty"` // Tool results from user messages
+	Role           string          `json:"role"`                      // The role of the message sender (user, assistant, or system)
+	Content        string          `json:"content"`                   // The actual content of the message
+	Timestamp      time.Time       `json:"timestamp"`                 // When the message was created
+	ToolCalls      []ToolCall      `json:"tool_calls,omitempty"`      // Tool calls from assistant messages
+	ToolResults    []ToolResult    `json:"tool_results,omitempty"`    // Tool results from user messages
+	ThinkingBlocks []ThinkingBlock `json:"thinking_blocks,omitempty"` // Thinking blocks
+}
+
+// validateRole checks if the provided role is valid.
+// Returns an error if the role is empty or not one of the valid role constants.
+func validateRole(role string) error {
+	if role == "" {
+		return ErrEmptyRole
+	}
+	if role != RoleUser && role != RoleAssistant && role != RoleSystem {
+		return ErrInvalidRole
+	}
+	return nil
 }
 
 // NewMessage creates a new message with the given role and content.
 // The timestamp is automatically set to the current time.
 // Content can be empty if the message contains tool calls or results.
 func NewMessage(role, content string) (*Message, error) {
-	if role == "" {
-		return nil, ErrEmptyRole
+	if err := validateRole(role); err != nil {
+		return nil, err
 	}
 	// For backwards compatibility, if content is empty for a non-tool message, return error
 	// The tool fields will be added separately after creation via a different method
@@ -60,9 +81,6 @@ func NewMessage(role, content string) (*Message, error) {
 	}
 	if strings.TrimSpace(content) == "" {
 		return nil, ErrInvalidContent
-	}
-	if role != RoleUser && role != RoleAssistant && role != RoleSystem {
-		return nil, ErrInvalidRole
 	}
 
 	return &Message{
@@ -77,11 +95,8 @@ func NewMessage(role, content string) (*Message, error) {
 // NewToolCallMessage creates a new message with tool calls.
 // Content can be empty since the message contains tool calls.
 func NewToolCallMessage(role string, toolCalls []ToolCall) (*Message, error) {
-	if role == "" {
-		return nil, ErrEmptyRole
-	}
-	if role != RoleUser && role != RoleAssistant && role != RoleSystem {
-		return nil, ErrInvalidRole
+	if err := validateRole(role); err != nil {
+		return nil, err
 	}
 	if len(toolCalls) == 0 {
 		return nil, ErrNoContentOrTool
@@ -99,11 +114,8 @@ func NewToolCallMessage(role string, toolCalls []ToolCall) (*Message, error) {
 // NewToolResultMessage creates a new message with tool results.
 // Content can be empty since the message contains tool results.
 func NewToolResultMessage(role string, toolResults []ToolResult) (*Message, error) {
-	if role == "" {
-		return nil, ErrEmptyRole
-	}
-	if role != RoleUser && role != RoleAssistant && role != RoleSystem {
-		return nil, ErrInvalidRole
+	if err := validateRole(role); err != nil {
+		return nil, err
 	}
 	if len(toolResults) == 0 {
 		return nil, ErrNoContentOrTool
@@ -118,9 +130,32 @@ func NewToolResultMessage(role string, toolResults []ToolResult) (*Message, erro
 	}, nil
 }
 
+// NewMessageWithThinkingBlocks creates a new message with thinking blocks.
+// Content can be empty if thinking blocks are present.
+func NewMessageWithThinkingBlocks(role, content string, thinkingBlocks []ThinkingBlock) (*Message, error) {
+	if err := validateRole(role); err != nil {
+		return nil, err
+	}
+	if content == "" && len(thinkingBlocks) == 0 {
+		return nil, ErrEmptyContent
+	}
+	if content != "" && strings.TrimSpace(content) == "" {
+		return nil, ErrInvalidContent
+	}
+
+	return &Message{
+		Role:           role,
+		Content:        content,
+		Timestamp:      time.Now(),
+		ToolCalls:      nil,
+		ToolResults:    nil,
+		ThinkingBlocks: thinkingBlocks,
+	}, nil
+}
+
 // hasToolContent returns true if the message has either tool calls or tool results.
 func (m *Message) hasToolContent() bool {
-	return len(m.ToolCalls) > 0 || len(m.ToolResults) > 0
+	return len(m.ToolCalls) > 0 || len(m.ToolResults) > 0 || len(m.ThinkingBlocks) > 0
 }
 
 // IsUser returns true if the message is from a user.
@@ -149,8 +184,8 @@ func (m *Message) Validate() error {
 	if m.Content == "" && !m.hasToolContent() {
 		return ErrEmptyContent
 	}
-	// Check for whitespace-only content if no tool content
-	if m.Content != "" && strings.TrimSpace(m.Content) == "" && !m.hasToolContent() {
+	// Check for whitespace-only content (always invalid, even with tool content)
+	if m.Content != "" && strings.TrimSpace(m.Content) == "" {
 		return ErrInvalidContent
 	}
 	// Ensure at least one of content or tool content is present
