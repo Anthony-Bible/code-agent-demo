@@ -143,6 +143,107 @@ func (a *AnthropicAdapter) SendMessage(
 	return a.convertResponse(response)
 }
 
+// SendMessageStreaming sends a message to the Anthropic API with streaming support.
+// It calls the provided callbacks for each text and thinking chunk as they arrive from the API.
+//
+// The method accumulates the full message while streaming and handles both text content
+// and tool use blocks. The textCallback is called for text deltas, and thinkingCallback
+// is called for thinking deltas (if provided and thinking mode is enabled).
+//
+// Parameters:
+//   - ctx: Context for the request (supports cancellation and timeout)
+//   - messages: Slice of MessageParam representing the conversation history
+//   - tools: Slice of ToolParam representing available tools for the AI
+//   - textCallback: Function called for each text chunk as it arrives
+//   - thinkingCallback: Function called for each thinking chunk (can be nil to skip)
+//
+// Returns:
+//   - *entity.Message: The complete AI response including any tool use blocks
+//   - []port.ToolCallInfo: Information about tools requested by the AI
+//   - error: An error if the request fails or validation fails
+func (a *AnthropicAdapter) SendMessageStreaming(
+	ctx context.Context,
+	messages []port.MessageParam,
+	tools []port.ToolParam,
+	textCallback port.StreamCallback,
+	thinkingCallback port.ThinkingCallback,
+) (*entity.Message, []port.ToolCallInfo, error) {
+	// Validate inputs
+	if len(messages) == 0 {
+		return nil, nil, ErrEmptyMessages
+	}
+	if a.model == "" {
+		return nil, nil, ErrModelNotSet
+	}
+
+	// Convert port messages to Anthropic SDK messages
+	anthropicMessages := a.convertMessages(messages)
+
+	// Convert port tools to Anthropic SDK tools
+	anthropicTools := a.convertTools(tools)
+
+	// Get system prompt (may be modified if plan mode is active, includes skill metadata)
+	systemPrompt := a.getSystemPrompt(ctx)
+
+	// Build thinking config from context
+	thinkingConfig := anthropic.ThinkingConfigParamUnion{OfDisabled: &anthropic.ThinkingConfigDisabledParam{}}
+	if thinkingInfo, ok := port.ThinkingModeFromContext(ctx); ok && thinkingInfo.Enabled {
+		thinkingConfig = anthropic.ThinkingConfigParamOfEnabled(thinkingInfo.BudgetTokens)
+	}
+
+	// Create streaming request
+	stream := a.client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
+		Model:     anthropic.Model(a.model),
+		MaxTokens: a.maxTokens,
+		Messages:  anthropicMessages,
+		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
+		Thinking:  thinkingConfig,
+		Tools:     anthropicTools,
+	})
+
+	// Accumulate the message as events arrive
+	message := anthropic.Message{}
+	for stream.Next() {
+		event := stream.Current()
+		err := message.Accumulate(event)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to accumulate event: %w", err)
+		}
+
+		// Handle content block deltas (text and thinking)
+		eventVariant, ok := event.AsAny().(anthropic.ContentBlockDeltaEvent)
+		if !ok {
+			continue
+		}
+
+		// Handle text deltas for streaming display
+		if textDelta, ok := eventVariant.Delta.AsAny().(anthropic.TextDelta); ok {
+			if textCallback != nil {
+				if err := textCallback(textDelta.Text); err != nil {
+					return nil, nil, fmt.Errorf("text stream callback error: %w", err)
+				}
+			}
+		}
+
+		// Handle thinking deltas for streaming display
+		if thinkingDelta, ok := eventVariant.Delta.AsAny().(anthropic.ThinkingDelta); ok {
+			if thinkingCallback != nil {
+				if err := thinkingCallback(thinkingDelta.Thinking); err != nil {
+					return nil, nil, fmt.Errorf("thinking stream callback error: %w", err)
+				}
+			}
+		}
+	}
+
+	// Check for streaming errors
+	if stream.Err() != nil {
+		return nil, nil, fmt.Errorf("streaming error: %w", stream.Err())
+	}
+
+	// Convert accumulated message to domain Message and extract tool info
+	return a.convertResponse(&message)
+}
+
 // getSystemPrompt returns the system prompt for the AI based on context priority.
 //
 // Priority order (highest to lowest):

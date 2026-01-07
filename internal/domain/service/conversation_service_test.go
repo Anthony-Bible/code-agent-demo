@@ -596,13 +596,42 @@ type mockAIProvider struct {
 }
 
 func (m *mockAIProvider) SendMessage(
-	ctx context.Context,
-	messages []port.MessageParam,
-	tools []port.ToolParam,
+	_ context.Context,
+	_ []port.MessageParam,
+	_ []port.ToolParam,
 ) (*entity.Message, []port.ToolCallInfo, error) {
 	if m.err != nil {
 		return nil, nil, m.err
 	}
+	if m.response == nil {
+		return &entity.Message{
+			Role:    entity.RoleAssistant,
+			Content: "Mock response",
+		}, nil, nil
+	}
+	return m.response, m.toolCalls, nil
+}
+
+func (m *mockAIProvider) SendMessageStreaming(
+	_ context.Context,
+	_ []port.MessageParam,
+	_ []port.ToolParam,
+	textCallback port.StreamCallback,
+	_ port.ThinkingCallback,
+) (*entity.Message, []port.ToolCallInfo, error) {
+	if m.err != nil {
+		return nil, nil, m.err
+	}
+
+	// Call textCallback with content if provided
+	if textCallback != nil {
+		content := "Mock response"
+		if m.response != nil {
+			content = m.response.Content
+		}
+		_ = textCallback(content)
+	}
+
 	if m.response == nil {
 		return &entity.Message{
 			Role:    entity.RoleAssistant,

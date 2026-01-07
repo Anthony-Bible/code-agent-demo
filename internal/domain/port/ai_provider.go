@@ -58,6 +58,14 @@ type ToolCallInfo struct {
 	ThoughtSignature string                 `json:"thought_signature,omitempty"` // Gemini thought signature via Bifrost
 }
 
+// StreamCallback is called when streaming text is received from the AI provider.
+// It receives chunks of text as they arrive and returns an error if processing fails.
+type StreamCallback func(text string) error
+
+// ThinkingCallback is called when streaming thinking content is received from the AI provider.
+// It receives chunks of thinking text as they arrive and returns an error if processing fails.
+type ThinkingCallback func(thinking string) error
+
 // AIProvider defines the interface for external AI service integration.
 // This port represents the outbound dependency to AI services and follows
 // hexagonal architecture principles by abstracting AI provider implementations.
@@ -67,6 +75,18 @@ type AIProvider interface {
 		ctx context.Context,
 		messages []MessageParam,
 		tools []ToolParam,
+	) (*entity.Message, []ToolCallInfo, error)
+
+	// SendMessageStreaming sends a message to the AI provider with streaming support.
+	// The textCallback is called for each chunk of text as it arrives.
+	// The thinkingCallback is called for each chunk of thinking content (can be nil to skip).
+	// Returns the complete message, tool calls, and any error that occurred.
+	SendMessageStreaming(
+		ctx context.Context,
+		messages []MessageParam,
+		tools []ToolParam,
+		textCallback StreamCallback,
+		thinkingCallback ThinkingCallback,
 	) (*entity.Message, []ToolCallInfo, error)
 
 	// GenerateToolSchema generates a tool input schema.

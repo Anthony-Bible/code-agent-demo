@@ -250,6 +250,52 @@ func (c *CLIAdapter) DisplayMessage(message string, messageRole string) error {
 	return err
 }
 
+// BeginStreamingResponse starts a streaming response with color setup.
+func (c *CLIAdapter) BeginStreamingResponse() error {
+	_, err := fmt.Fprint(c.output, c.colors.Assistant)
+	return err
+}
+
+// EndStreamingResponse ends a streaming response with color teardown and newline.
+func (c *CLIAdapter) EndStreamingResponse() error {
+	_, err := fmt.Fprint(c.output, "\x1b[0m\n")
+	return err
+}
+
+// DisplayStreamingText displays a chunk of streaming text without a newline.
+// This is used to show text as it arrives in real-time from the AI provider.
+// The text is displayed without color codes - the caller should handle color setup/teardown.
+func (c *CLIAdapter) DisplayStreamingText(text string) error {
+	// Use direct write to avoid any potential buffering from fmt package
+	_, err := c.output.Write([]byte(text))
+	if err != nil {
+		return err
+	}
+
+	// Flush the output to ensure streaming text appears immediately
+	// This is needed because stdout is typically line-buffered when connected to a terminal
+	return c.flushOutput()
+}
+
+// flushOutput attempts to flush the output writer if it supports flushing.
+// For *os.File (like os.Stdout), this is a no-op since we can't reliably flush C stdio buffers from Go.
+// However, this works for bufio.Writer and other flushable writers.
+func (c *CLIAdapter) flushOutput() error {
+	type flusher interface {
+		Flush() error
+	}
+
+	if f, ok := c.output.(flusher); ok {
+		return f.Flush()
+	}
+
+	// For os.File/os.Stdout, we can't force a flush of the C library's stdio buffers
+	// from Go code. However, writes to os.Stdout are typically unbuffered or line-buffered,
+	// and calling Write() should make the data available to the OS immediately.
+	// The buffering issue is at the C stdio layer, not the Go layer.
+	return nil
+}
+
 // DisplayError displays an error message.
 func (c *CLIAdapter) DisplayError(err error) error {
 	if err == nil {

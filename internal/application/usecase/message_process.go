@@ -189,6 +189,49 @@ func (uc *MessageProcessUseCase) processAssistantMessage(
 	return assistantMsg, toolCalls, nil
 }
 
+// processAssistantMessageStreaming handles the core message processing flow with streaming.
+// It calls the AI provider with streaming support, parses the response, and extracts tool use requests.
+//
+// Parameters:
+//   - ctx: Context for the operation
+//   - sessionID: The session ID to process
+//   - textCallback: Function to call for each text chunk as it arrives
+//   - thinkingCallback: Function to call for each thinking chunk (can be nil)
+//
+// Returns:
+//   - *dto.AssistantMessage: The parsed assistant message
+//   - []dto.ToolCallInfo: List of tool calls requested by the AI
+//   - error: An error if processing fails
+func (uc *MessageProcessUseCase) processAssistantMessageStreaming(
+	ctx context.Context,
+	sessionID string,
+	textCallback port.StreamCallback,
+	thinkingCallback port.ThinkingCallback,
+) (*dto.AssistantMessage, []dto.ToolCallInfo, error) {
+	// Get AI response via domain service with streaming
+	response, portToolCalls, err := uc.conversationService.ProcessAssistantResponseStreaming(
+		ctx,
+		sessionID,
+		textCallback,
+		thinkingCallback,
+	)
+	if err != nil {
+		// Check if it's a context cancellation error and provide clearer messaging
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, nil, fmt.Errorf("request cancelled: AI request was interrupted (context: %w)", err)
+		}
+		return nil, nil, fmt.Errorf("AI provider error: %w", err)
+	}
+
+	// Convert to DTO
+	assistantMsg := dto.NewAssistantMessageFromEntity(response)
+
+	// Convert port.ToolCallInfo to dto.ToolCallInfo
+	toolCalls := uc.convertToolCalls(portToolCalls)
+
+	return assistantMsg, toolCalls, nil
+}
+
 // convertToolCalls converts port level ToolCallInfo to DTO level ToolCallInfo.
 func (uc *MessageProcessUseCase) convertToolCalls(portCalls []port.ToolCallInfo) []dto.ToolCallInfo {
 	if len(portCalls) == 0 {
@@ -320,4 +363,26 @@ func (uc *MessageProcessUseCase) GetConversationState(
 // This is used by services that need direct access to manage conversation state.
 func (uc *MessageProcessUseCase) GetConversationService() *service.ConversationService {
 	return uc.conversationService
+}
+
+// ProcessAssistantMessageStreaming is a public wrapper for processAssistantMessageStreaming.
+// It processes an AI assistant message with streaming support.
+//
+// Parameters:
+//   - ctx: Context for the operation
+//   - sessionID: The session ID to process
+//   - textCallback: Function to call for each text chunk as it arrives
+//   - thinkingCallback: Function to call for each thinking chunk (can be nil)
+//
+// Returns:
+//   - *dto.AssistantMessage: The parsed assistant message
+//   - []dto.ToolCallInfo: List of tool calls requested by the AI
+//   - error: An error if processing fails
+func (uc *MessageProcessUseCase) ProcessAssistantMessageStreaming(
+	ctx context.Context,
+	sessionID string,
+	textCallback port.StreamCallback,
+	thinkingCallback port.ThinkingCallback,
+) (*dto.AssistantMessage, []dto.ToolCallInfo, error) {
+	return uc.processAssistantMessageStreaming(ctx, sessionID, textCallback, thinkingCallback)
 }

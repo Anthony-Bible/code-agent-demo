@@ -132,15 +132,67 @@ func (cs *ConversationService) ProcessAssistantResponse(
 	ctx context.Context,
 	sessionID string,
 ) (*entity.Message, []port.ToolCallInfo, error) {
+	// Prepare context and parameters
+	conversation, messageParams, toolParams, preparedCtx, err := cs.prepareAIRequest(ctx, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Send to AI provider
+	response, toolCalls, err := cs.aiProvider.SendMessage(preparedCtx, messageParams, toolParams)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Finalize response
+	return cs.finalizeAIResponse(sessionID, conversation, response, toolCalls)
+}
+
+// ProcessAssistantResponseStreaming processes an AI assistant response with streaming support.
+// It calls the provided callback for each text chunk as it arrives from the AI provider.
+func (cs *ConversationService) ProcessAssistantResponseStreaming(
+	ctx context.Context,
+	sessionID string,
+	textCallback port.StreamCallback,
+	thinkingCallback port.ThinkingCallback,
+) (*entity.Message, []port.ToolCallInfo, error) {
+	// Prepare context and parameters
+	conversation, messageParams, toolParams, preparedCtx, err := cs.prepareAIRequest(ctx, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Send to AI provider with streaming
+	response, toolCalls, err := cs.aiProvider.SendMessageStreaming(
+		preparedCtx,
+		messageParams,
+		toolParams,
+		textCallback,
+		thinkingCallback,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Finalize response
+	return cs.finalizeAIResponse(sessionID, conversation, response, toolCalls)
+}
+
+// prepareAIRequest prepares the context, message parameters, and tool parameters for an AI request.
+// This is shared logic between streaming and non-streaming requests.
+func (cs *ConversationService) prepareAIRequest(
+	ctx context.Context,
+	sessionID string,
+) (*entity.Conversation, []port.MessageParam, []port.ToolParam, context.Context, error) {
 	select {
 	case <-ctx.Done():
-		return nil, nil, fmt.Errorf("context cancelled before AI call: %w", ctx.Err())
+		return nil, nil, nil, nil, fmt.Errorf("context cancelled before AI call: %w", ctx.Err())
 	default:
 	}
 
 	conversation, exists := cs.conversations[sessionID]
 	if !exists {
-		return nil, nil, ErrConversationNotFound
+		return nil, nil, nil, nil, ErrConversationNotFound
 	}
 
 	// Get conversation history for AI provider
@@ -190,7 +242,7 @@ func (cs *ConversationService) ProcessAssistantResponse(
 	// Get available tools
 	tools, err := cs.toolExecutor.ListTools()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	toolParams := make([]port.ToolParam, len(tools))
@@ -221,14 +273,19 @@ func (cs *ConversationService) ProcessAssistantResponse(
 		})
 	}
 
-	// Send to AI provider
-	response, toolCalls, err := cs.aiProvider.SendMessage(ctx, messageParams, toolParams)
-	if err != nil {
-		return nil, nil, err
-	}
+	return conversation, messageParams, toolParams, ctx, nil
+}
 
+// finalizeAIResponse adds the AI response to the conversation and updates processing state.
+// This is shared logic between streaming and non-streaming requests.
+func (cs *ConversationService) finalizeAIResponse(
+	sessionID string,
+	conversation *entity.Conversation,
+	response *entity.Message,
+	toolCalls []port.ToolCallInfo,
+) (*entity.Message, []port.ToolCallInfo, error) {
 	// Add response to conversation
-	err = conversation.AddMessage(*response)
+	err := conversation.AddMessage(*response)
 	if err != nil {
 		return nil, nil, err
 	}
