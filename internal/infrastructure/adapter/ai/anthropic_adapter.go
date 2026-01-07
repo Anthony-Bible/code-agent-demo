@@ -202,15 +202,19 @@ func (a *AnthropicAdapter) SendMessageStreaming(
 		}
 
 		// Handle text deltas for streaming display
-		switch eventVariant := event.AsAny().(type) {
-		case anthropic.ContentBlockDeltaEvent:
-			switch deltaVariant := eventVariant.Delta.AsAny().(type) {
-			case anthropic.TextDelta:
-				if callback != nil {
-					if err := callback(deltaVariant.Text); err != nil {
-						return nil, nil, fmt.Errorf("stream callback error: %w", err)
-					}
-				}
+		eventVariant, ok := event.AsAny().(anthropic.ContentBlockDeltaEvent)
+		if !ok {
+			continue
+		}
+
+		deltaVariant, ok := eventVariant.Delta.AsAny().(anthropic.TextDelta)
+		if !ok {
+			continue
+		}
+
+		if callback != nil {
+			if err := callback(deltaVariant.Text); err != nil {
+				return nil, nil, fmt.Errorf("stream callback error: %w", err)
 			}
 		}
 	}
