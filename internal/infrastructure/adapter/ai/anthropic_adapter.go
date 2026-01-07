@@ -367,8 +367,19 @@ func (a *AnthropicAdapter) convertUserToolResultMessage(msg port.MessageParam) a
 	for j, tr := range msg.ToolResults {
 		resultBlocks[j] = anthropic.NewToolResultBlock(tr.ToolID, tr.Result, tr.IsError)
 
-		// Log if we have a thought_signature (Gemini via Bifrost)
+		// Handle thought_signature from Gemini via Bifrost
 		if tr.ThoughtSignature != "" {
+			// SECURITY NOTE: The thought_signature is a cryptographic signature from Gemini AI
+			// that validates the authenticity of tool execution results. It should be:
+			// 1. Validated to ensure it hasn't been tampered with
+			// 2. Preserved across tool calls to maintain chain of custody
+			// 3. Injected at the HTTP level (not via SDK due to limitations)
+			//
+			// The signature format is currently opaque to this adapter and is passed through
+			// as-is. Future implementation should include:
+			// - Signature validation logic
+			// - HTTP interceptor for proper injection
+			// - Error handling for invalid signatures
 			fmt.Fprintf(
 				os.Stderr,
 				"[AnthropicAdapter] Tool result has thought_signature (need HTTP-level injection): ToolID=%s, Sig=%s\n",
@@ -377,7 +388,7 @@ func (a *AnthropicAdapter) convertUserToolResultMessage(msg port.MessageParam) a
 			)
 			// TODO: The SDK doesn't support adding signature to tool_result blocks
 			// We need to implement an HTTP interceptor to inject the signature field
-			// into the JSON payload before sending to Bifrost
+			// into the JSON payload before sending to Bifrost and validate signature format
 		}
 	}
 	return anthropic.NewUserMessage(resultBlocks...)

@@ -738,7 +738,7 @@ Content.`
 	}
 
 	// AllowedTools should be nil or empty when not specified
-	if subagent.AllowedTools != nil && len(subagent.AllowedTools) > 0 {
+	if len(subagent.AllowedTools) > 0 {
 		t.Errorf("AllowedTools should be empty when not specified, got %v", subagent.AllowedTools)
 	}
 }
@@ -757,7 +757,7 @@ Content.`
 	}
 
 	// AllowedTools should be empty for empty string
-	if subagent.AllowedTools != nil && len(subagent.AllowedTools) > 0 {
+	if len(subagent.AllowedTools) > 0 {
 		t.Errorf("AllowedTools should be empty for empty string, got %v", subagent.AllowedTools)
 	}
 }
@@ -875,5 +875,195 @@ description: Test whitespace handling
 	expectedContent := "Content with leading/trailing whitespace."
 	if subagent.RawContent != expectedContent {
 		t.Errorf("RawContent = %q, want %q", subagent.RawContent, expectedContent)
+	}
+}
+
+// ========================================
+// Edge Case Tests for YAML Parsing
+// ========================================
+
+func TestParseSubagentFromYAML_EdgeCaseValues(t *testing.T) {
+	tests := []struct {
+		name        string
+		yaml        string
+		wantErr     bool
+		expectedErr string
+	}{
+		{
+			name: "negative thinking budget",
+			yaml: `---
+name: test-agent
+description: Test agent
+thinking_budget: -1000
+---
+content`,
+			wantErr: false, // Currently accepts negative values
+		},
+		{
+			name: "zero thinking budget",
+			yaml: `---
+name: test-agent
+description: Test agent
+thinking_budget: 0
+---
+content`,
+			wantErr: false, // Zero is valid
+		},
+		{
+			name: "extremely large thinking budget",
+			yaml: `---
+name: test-agent
+description: Test agent
+thinking_budget: 9999999999999999999
+---
+content`,
+			wantErr: false, // int64 can handle large values
+		},
+		{
+			name: "thinking_budget as string instead of int",
+			yaml: `---
+name: test-agent
+description: Test agent
+thinking_budget: "1000"
+---
+content`,
+			wantErr: false, // Type mismatch - string ignored
+		},
+		{
+			name: "thinking_enabled as string instead of bool",
+			yaml: `---
+name: test-agent
+description: Test agent
+thinking_enabled: "true"
+---
+content`,
+			wantErr: false, // Type mismatch - string ignored
+		},
+		{
+			name: "max_actions as negative",
+			yaml: `---
+name: test-agent
+description: Test agent
+max_actions: -5
+---
+content`,
+			wantErr: false, // Currently accepts negative values
+		},
+		{
+			name: "max_actions as float",
+			yaml: `---
+name: test-agent
+description: Test agent
+max_actions: 5.5
+---
+content`,
+			wantErr: false, // Type mismatch - float ignored
+		},
+		{
+			name: "invalid characters in name",
+			yaml: `---
+name: "test@agent#$%^&*()"
+description: Test agent
+---
+content`,
+			wantErr: false, // Currently accepts any name
+		},
+		{
+			name: "null values",
+			yaml: `---
+name: null
+description: Test agent
+thinking_budget: null
+---
+content`,
+			wantErr: true, // null name is not allowed - validation error
+		},
+		{
+			name: "empty arrays",
+			yaml: `---
+name: test-agent
+description: Test agent
+allowed-tools: []
+---
+content`,
+			wantErr: false, // Empty arrays should be fine
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			subagent, err := ParseSubagentFromYAML(tt.yaml)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseSubagentFromYAML() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr && tt.expectedErr != "" && err != nil {
+				if !strings.Contains(err.Error(), tt.expectedErr) {
+					t.Errorf("ParseSubagentFromYAML() error = %v, expected to contain %s", err, tt.expectedErr)
+				}
+			}
+
+			if !tt.wantErr && subagent == nil {
+				t.Error("ParseSubagentFromYAML() returned nil subagent when error was not expected")
+			}
+		})
+	}
+}
+
+func TestParseSubagentFromYAML_MalformedStructures(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr bool
+	}{
+		{
+			name: "unterminated mapping",
+			yaml: `---
+name: test-agent
+description: Test agent
+invalid_map: {
+---
+content`,
+			wantErr: true,
+		},
+		{
+			name: "nested array without proper closure",
+			yaml: `---
+name: test-agent
+description: Test agent
+allowed-tools: [tool1, tool2
+---
+content`,
+			wantErr: true,
+		},
+		{
+			name: "invalid indentation",
+			yaml: `---
+name: test-agent
+description: Test agent
+  invalid-indent: value
+---
+content`,
+			wantErr: true, // YAML parser does not allow inconsistent indentation
+		},
+		{
+			name: "single quotes instead of double",
+			yaml: `---
+name: 'test-agent'
+description: 'Test agent'
+---
+content`,
+			wantErr: false, // Single quotes are valid YAML
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseSubagentFromYAML(tt.yaml)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseSubagentFromYAML() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }

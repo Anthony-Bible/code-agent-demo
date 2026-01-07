@@ -240,8 +240,18 @@ func (r *SubagentRunner) Run(
 	}
 
 	if thinkingInfo.Enabled {
-		_ = r.convService.SetThinkingMode(sessionID, thinkingInfo)
-		// Ignore error - thinking mode is optional, continue execution
+		if err := r.convService.SetThinkingMode(sessionID, thinkingInfo); err != nil {
+			// Log warning but don't fail - thinking mode is optional
+			fmt.Fprintf(
+				os.Stderr,
+				"[SubagentRunner] Failed to set thinking mode for subagent session: error=%v, agent=%s, sessionID=%s, enabled=%t, budget=%d\n",
+				err,
+				rc.agent.Name,
+				sessionID,
+				thinkingInfo.Enabled,
+				thinkingInfo.BudgetTokens,
+			)
+		}
 	}
 
 	if err := r.setupAgentSession(rc); err != nil {
