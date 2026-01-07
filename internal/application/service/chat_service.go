@@ -233,40 +233,56 @@ func (cs *ChatService) SendMessage(
 		fmt.Fprintf(os.Stderr, "Warning: failed to begin streaming response: %v\n", err)
 	}
 
-	// Create streaming callback that displays text as it arrives
-	// Add [PLAN MODE] prefix if in plan mode
-	isPlanMode, _ := cs.conversationService.IsPlanMode(sessionID)
-	prefixAdded := false
-	callback := func(text string) error {
-		if !prefixAdded && isPlanMode && text != "" {
-			prefixAdded = true
-			return cs.userInterface.DisplayStreamingText("[PLAN MODE] " + text)
+	// Ensure we always clean up terminal state, even on errors
+	defer func() {
+		if err := cs.userInterface.EndStreamingResponse(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to end streaming response: %v\n", err)
 		}
+	}()
+
+	// Display [PLAN MODE] prefix if in plan mode (before streaming starts)
+	isPlanMode, _ := cs.conversationService.IsPlanMode(sessionID)
+	if isPlanMode {
+		if err := cs.userInterface.DisplayStreamingText("[PLAN MODE] "); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to display plan mode prefix: %v\n", err)
+		}
+	}
+
+	// Create streaming callback that displays text as it arrives
+	textCallback := func(text string) error {
 		return cs.userInterface.DisplayStreamingText(text)
 	}
 
-	// Process the assistant message with streaming
-	assistantMsg, toolCalls, err := cs.messageProcessUseCase.ProcessAssistantMessageStreaming(ctx, sessionID, callback)
-	if err != nil {
-		// Ensure we clean up terminal state even if processing fails
-		_ = cs.userInterface.EndStreamingResponse()
-		return nil, fmt.Errorf("failed to process assistant message: %w", err)
-	}
-
-	// Display thinking blocks if ShowThinking is enabled
-	if assistantMsg != nil && len(assistantMsg.ThinkingBlocks) > 0 {
-		if thinkingInfo.ShowThinking {
-			for _, block := range assistantMsg.ThinkingBlocks {
-				_ = cs.userInterface.DisplayThinking(block.Thinking)
+	// Create thinking callback if ShowThinking is enabled
+	// Thinking is streamed inline, so we don't redisplay after completion
+	var thinkingCallback port.ThinkingCallback
+	thinkingHeaderDisplayed := false
+	if thinkingInfo.ShowThinking {
+		thinkingCallback = func(thinking string) error {
+			// Display header once when thinking starts
+			if !thinkingHeaderDisplayed {
+				thinkingHeaderDisplayed = true
+				// Display "Claude (thinking)" header in magenta
+				if err := cs.userInterface.DisplayStreamingText("\x1b[95mClaude (thinking)\x1b[0m: "); err != nil {
+					return err
+				}
 			}
+			return cs.userInterface.DisplayStreamingText(thinking)
 		}
 	}
 
-	// End streaming response with color teardown and newline
-	if err := cs.userInterface.EndStreamingResponse(); err != nil {
-		// Log error but continue - color teardown is not critical
-		fmt.Fprintf(os.Stderr, "Warning: failed to end streaming response: %v\n", err)
+	// Process the assistant message with streaming
+	assistantMsg, toolCalls, err := cs.messageProcessUseCase.ProcessAssistantMessageStreaming(
+		ctx,
+		sessionID,
+		textCallback,
+		thinkingCallback,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process assistant message: %w", err)
 	}
+
+	// Note: Thinking blocks are now streamed inline via thinkingCallback, so we don't redisplay them here
 
 	// Check if processing (has tools)
 	isProcessing, _ := cs.conversationService.IsProcessing(req.SessionID)
@@ -453,40 +469,56 @@ func (cs *ChatService) continueAfterToolExecution(
 		fmt.Fprintf(os.Stderr, "Warning: failed to begin streaming response: %v\n", err)
 	}
 
-	// Create streaming callback that displays text as it arrives
-	// Add [PLAN MODE] prefix if in plan mode
-	isPlanMode, _ := cs.conversationService.IsPlanMode(sessionID)
-	prefixAdded := false
-	callback := func(text string) error {
-		if !prefixAdded && isPlanMode && text != "" {
-			prefixAdded = true
-			return cs.userInterface.DisplayStreamingText("[PLAN MODE] " + text)
+	// Ensure we always clean up terminal state, even on errors
+	defer func() {
+		if err := cs.userInterface.EndStreamingResponse(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to end streaming response: %v\n", err)
 		}
+	}()
+
+	// Display [PLAN MODE] prefix if in plan mode (before streaming starts)
+	isPlanMode, _ := cs.conversationService.IsPlanMode(sessionID)
+	if isPlanMode {
+		if err := cs.userInterface.DisplayStreamingText("[PLAN MODE] "); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to display plan mode prefix: %v\n", err)
+		}
+	}
+
+	// Create streaming callback that displays text as it arrives
+	textCallback := func(text string) error {
 		return cs.userInterface.DisplayStreamingText(text)
 	}
 
-	// Process the assistant message with streaming
-	assistantMsg, toolCalls, err := cs.messageProcessUseCase.ProcessAssistantMessageStreaming(ctx, sessionID, callback)
-	if err != nil {
-		// Ensure we clean up terminal state even if processing fails
-		_ = cs.userInterface.EndStreamingResponse()
-		return nil, fmt.Errorf("failed to continue chat after tool execution: %w", err)
-	}
-
-	// Display thinking blocks if ShowThinking is enabled
-	if assistantMsg != nil && len(assistantMsg.ThinkingBlocks) > 0 {
-		if thinkingInfo.ShowThinking {
-			for _, block := range assistantMsg.ThinkingBlocks {
-				_ = cs.userInterface.DisplayThinking(block.Thinking)
+	// Create thinking callback if ShowThinking is enabled
+	// Thinking is streamed inline, so we don't redisplay after completion
+	var thinkingCallback port.ThinkingCallback
+	thinkingHeaderDisplayed := false
+	if thinkingInfo.ShowThinking {
+		thinkingCallback = func(thinking string) error {
+			// Display header once when thinking starts
+			if !thinkingHeaderDisplayed {
+				thinkingHeaderDisplayed = true
+				// Display "Claude (thinking)" header in magenta
+				if err := cs.userInterface.DisplayStreamingText("\x1b[95mClaude (thinking)\x1b[0m: "); err != nil {
+					return err
+				}
 			}
+			return cs.userInterface.DisplayStreamingText(thinking)
 		}
 	}
 
-	// End streaming response with color teardown and newline
-	if err := cs.userInterface.EndStreamingResponse(); err != nil {
-		// Log error but continue - color teardown is not critical
-		fmt.Fprintf(os.Stderr, "Warning: failed to end streaming response: %v\n", err)
+	// Process the assistant message with streaming
+	assistantMsg, toolCalls, err := cs.messageProcessUseCase.ProcessAssistantMessageStreaming(
+		ctx,
+		sessionID,
+		textCallback,
+		thinkingCallback,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to continue chat after tool execution: %w", err)
 	}
+
+	// Note: Thinking blocks are now streamed inline via thinkingCallback, so we don't redisplay them here
 
 	// Check if processing (has tools)
 	isProcessing, _ := cs.conversationService.IsProcessing(sessionID)

@@ -153,7 +153,8 @@ func (cs *ConversationService) ProcessAssistantResponse(
 func (cs *ConversationService) ProcessAssistantResponseStreaming(
 	ctx context.Context,
 	sessionID string,
-	callback port.StreamCallback,
+	textCallback port.StreamCallback,
+	thinkingCallback port.ThinkingCallback,
 ) (*entity.Message, []port.ToolCallInfo, error) {
 	// Prepare context and parameters
 	conversation, messageParams, toolParams, preparedCtx, err := cs.prepareAIRequest(ctx, sessionID)
@@ -162,7 +163,13 @@ func (cs *ConversationService) ProcessAssistantResponseStreaming(
 	}
 
 	// Send to AI provider with streaming
-	response, toolCalls, err := cs.aiProvider.SendMessageStreaming(preparedCtx, messageParams, toolParams, callback)
+	response, toolCalls, err := cs.aiProvider.SendMessageStreaming(
+		preparedCtx,
+		messageParams,
+		toolParams,
+		textCallback,
+		thinkingCallback,
+	)
 	if err != nil {
 		return nil, nil, err
 	}

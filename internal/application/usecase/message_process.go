@@ -195,7 +195,8 @@ func (uc *MessageProcessUseCase) processAssistantMessage(
 // Parameters:
 //   - ctx: Context for the operation
 //   - sessionID: The session ID to process
-//   - callback: Function to call for each text chunk as it arrives
+//   - textCallback: Function to call for each text chunk as it arrives
+//   - thinkingCallback: Function to call for each thinking chunk (can be nil)
 //
 // Returns:
 //   - *dto.AssistantMessage: The parsed assistant message
@@ -204,10 +205,16 @@ func (uc *MessageProcessUseCase) processAssistantMessage(
 func (uc *MessageProcessUseCase) processAssistantMessageStreaming(
 	ctx context.Context,
 	sessionID string,
-	callback port.StreamCallback,
+	textCallback port.StreamCallback,
+	thinkingCallback port.ThinkingCallback,
 ) (*dto.AssistantMessage, []dto.ToolCallInfo, error) {
 	// Get AI response via domain service with streaming
-	response, portToolCalls, err := uc.conversationService.ProcessAssistantResponseStreaming(ctx, sessionID, callback)
+	response, portToolCalls, err := uc.conversationService.ProcessAssistantResponseStreaming(
+		ctx,
+		sessionID,
+		textCallback,
+		thinkingCallback,
+	)
 	if err != nil {
 		// Check if it's a context cancellation error and provide clearer messaging
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -364,7 +371,8 @@ func (uc *MessageProcessUseCase) GetConversationService() *service.ConversationS
 // Parameters:
 //   - ctx: Context for the operation
 //   - sessionID: The session ID to process
-//   - callback: Function to call for each text chunk as it arrives
+//   - textCallback: Function to call for each text chunk as it arrives
+//   - thinkingCallback: Function to call for each thinking chunk (can be nil)
 //
 // Returns:
 //   - *dto.AssistantMessage: The parsed assistant message
@@ -373,7 +381,8 @@ func (uc *MessageProcessUseCase) GetConversationService() *service.ConversationS
 func (uc *MessageProcessUseCase) ProcessAssistantMessageStreaming(
 	ctx context.Context,
 	sessionID string,
-	callback port.StreamCallback,
+	textCallback port.StreamCallback,
+	thinkingCallback port.ThinkingCallback,
 ) (*dto.AssistantMessage, []dto.ToolCallInfo, error) {
-	return uc.processAssistantMessageStreaming(ctx, sessionID, callback)
+	return uc.processAssistantMessageStreaming(ctx, sessionID, textCallback, thinkingCallback)
 }

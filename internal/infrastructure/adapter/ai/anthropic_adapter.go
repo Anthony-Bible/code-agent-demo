@@ -144,16 +144,18 @@ func (a *AnthropicAdapter) SendMessage(
 }
 
 // SendMessageStreaming sends a message to the Anthropic API with streaming support.
-// It calls the provided callback for each text chunk as it arrives from the API.
+// It calls the provided callbacks for each text and thinking chunk as they arrive from the API.
 //
 // The method accumulates the full message while streaming and handles both text content
-// and tool use blocks. The callback is only called for text deltas, not tool use blocks.
+// and tool use blocks. The textCallback is called for text deltas, and thinkingCallback
+// is called for thinking deltas (if provided and thinking mode is enabled).
 //
 // Parameters:
 //   - ctx: Context for the request (supports cancellation and timeout)
 //   - messages: Slice of MessageParam representing the conversation history
 //   - tools: Slice of ToolParam representing available tools for the AI
-//   - callback: Function called for each text chunk as it arrives
+//   - textCallback: Function called for each text chunk as it arrives
+//   - thinkingCallback: Function called for each thinking chunk (can be nil to skip)
 //
 // Returns:
 //   - *entity.Message: The complete AI response including any tool use blocks
@@ -163,7 +165,8 @@ func (a *AnthropicAdapter) SendMessageStreaming(
 	ctx context.Context,
 	messages []port.MessageParam,
 	tools []port.ToolParam,
-	callback port.StreamCallback,
+	textCallback port.StreamCallback,
+	thinkingCallback port.ThinkingCallback,
 ) (*entity.Message, []port.ToolCallInfo, error) {
 	// Validate inputs
 	if len(messages) == 0 {
@@ -207,20 +210,27 @@ func (a *AnthropicAdapter) SendMessageStreaming(
 			return nil, nil, fmt.Errorf("failed to accumulate event: %w", err)
 		}
 
-		// Handle text deltas for streaming display
+		// Handle content block deltas (text and thinking)
 		eventVariant, ok := event.AsAny().(anthropic.ContentBlockDeltaEvent)
 		if !ok {
 			continue
 		}
 
-		deltaVariant, ok := eventVariant.Delta.AsAny().(anthropic.TextDelta)
-		if !ok {
-			continue
+		// Handle text deltas for streaming display
+		if textDelta, ok := eventVariant.Delta.AsAny().(anthropic.TextDelta); ok {
+			if textCallback != nil {
+				if err := textCallback(textDelta.Text); err != nil {
+					return nil, nil, fmt.Errorf("text stream callback error: %w", err)
+				}
+			}
 		}
 
-		if callback != nil {
-			if err := callback(deltaVariant.Text); err != nil {
-				return nil, nil, fmt.Errorf("stream callback error: %w", err)
+		// Handle thinking deltas for streaming display
+		if thinkingDelta, ok := eventVariant.Delta.AsAny().(anthropic.ThinkingDelta); ok {
+			if thinkingCallback != nil {
+				if err := thinkingCallback(thinkingDelta.Thinking); err != nil {
+					return nil, nil, fmt.Errorf("thinking stream callback error: %w", err)
+				}
 			}
 		}
 	}
