@@ -18,6 +18,7 @@ type ColorScheme struct {
 	Error     string `json:"error"`     // Color for error messages
 	Tool      string `json:"tool"`      // Color for tool results
 	Prompt    string `json:"prompt"`    // Color for user prompt
+	Thinking  string `json:"thinking"`  // Color for thinking content
 }
 
 // UserInterface defines the interface for CLI interactions.

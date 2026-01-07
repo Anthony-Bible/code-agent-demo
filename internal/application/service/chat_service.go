@@ -250,7 +250,8 @@ func (cs *ChatService) SendMessage(
 
 	// Create streaming callback that displays text as it arrives
 	textCallback := func(text string) error {
-		return cs.userInterface.DisplayStreamingText(text)
+		// Reset and set assistant color for regular text
+		return cs.userInterface.DisplayStreamingText("\x1b[0m\x1b[93m" + text)
 	}
 
 	// Create thinking callback if ShowThinking is enabled
@@ -262,8 +263,8 @@ func (cs *ChatService) SendMessage(
 			// Display header once when thinking starts
 			if !thinkingHeaderDisplayed {
 				thinkingHeaderDisplayed = true
-				// Display "Claude (thinking)" header in magenta
-				if err := cs.userInterface.DisplayStreamingText("\x1b[95mClaude (thinking)\x1b[0m: "); err != nil {
+				// Reset, show "Claude (thinking)" header in magenta, continue with thinking color
+				if err := cs.userInterface.DisplayStreamingText("\x1b[0m\x1b[95mClaude (thinking)\x1b[0m: \x1b[95m"); err != nil {
 					return err
 				}
 			}
@@ -486,7 +487,8 @@ func (cs *ChatService) continueAfterToolExecution(
 
 	// Create streaming callback that displays text as it arrives
 	textCallback := func(text string) error {
-		return cs.userInterface.DisplayStreamingText(text)
+		// Reset and set assistant color for regular text
+		return cs.userInterface.DisplayStreamingText("\x1b[0m\x1b[93m" + text)
 	}
 
 	// Create thinking callback if ShowThinking is enabled
@@ -498,8 +500,8 @@ func (cs *ChatService) continueAfterToolExecution(
 			// Display header once when thinking starts
 			if !thinkingHeaderDisplayed {
 				thinkingHeaderDisplayed = true
-				// Display "Claude (thinking)" header in magenta
-				if err := cs.userInterface.DisplayStreamingText("\x1b[95mClaude (thinking)\x1b[0m: "); err != nil {
+				// Reset, show "Claude (thinking)" header in magenta, continue with thinking color
+				if err := cs.userInterface.DisplayStreamingText("\x1b[0m\x1b[95mClaude (thinking)\x1b[0m: \x1b[95m"); err != nil {
 					return err
 				}
 			}

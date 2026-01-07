@@ -50,6 +50,7 @@ func defaultColorScheme() port.ColorScheme {
 		Error:     "\x1b[91m", // Red
 		Tool:      "\x1b[92m", // Green
 		Prompt:    "\x1b[94m", // Blue
+		Thinking:  "\x1b[95m", // Bright Magenta
 	}
 }
 
@@ -341,9 +342,30 @@ func (c *CLIAdapter) DisplaySystemMessage(message string) error {
 }
 
 // DisplayThinking displays extended thinking content from the AI.
-// Uses magenta color (ANSI code 95 for bright magenta) to distinguish from regular responses.
+// Uses thinking color from the color scheme to distinguish from regular responses.
 func (c *CLIAdapter) DisplayThinking(content string) error {
-	_, err := fmt.Fprintf(c.output, "\x1b[95mClaude (thinking)\x1b[0m: %s\n", content)
+	// Use the thinking color from the color scheme and format with clear separation
+	_, err := fmt.Fprintf(c.output, "%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n", c.colors.Thinking)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(c.output, "%sClaude is thinking...\x1b[0m\n", c.colors.Thinking)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(c.output, "%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n", c.colors.Thinking)
+	if err != nil {
+		return err
+	}
+	// Indent the thinking content for better visual separation
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		_, err = fmt.Fprintf(c.output, "%s  %s\x1b[0m\n", c.colors.Thinking, line)
+		if err != nil {
+			return err
+		}
+	}
+	_, err = fmt.Fprintf(c.output, "%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n\n", c.colors.Thinking)
 	return err
 }
 
@@ -380,7 +402,7 @@ func (c *CLIAdapter) ClearScreen() error {
 func (c *CLIAdapter) SetColorScheme(scheme port.ColorScheme) error {
 	// Basic validation - ensure at least one color is set
 	if scheme.User == "" && scheme.Assistant == "" && scheme.System == "" &&
-		scheme.Error == "" && scheme.Tool == "" && scheme.Prompt == "" {
+		scheme.Error == "" && scheme.Tool == "" && scheme.Prompt == "" && scheme.Thinking == "" {
 		return port.ErrInvalidColor
 	}
 
@@ -402,6 +424,9 @@ func (c *CLIAdapter) SetColorScheme(scheme port.ColorScheme) error {
 	}
 	if scheme.Prompt != "" {
 		c.colors.Prompt = scheme.Prompt
+	}
+	if scheme.Thinking != "" {
+		c.colors.Thinking = scheme.Thinking
 	}
 
 	return nil
