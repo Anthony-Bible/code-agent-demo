@@ -102,7 +102,7 @@ func NewContainer(cfg *Config) (*Container, error) {
 	// Step 1: Create infrastructure adapters
 	// Note: order matters - skillManager and subagentManager must be created before aiAdapter
 	fileManager := file.NewLocalFileManager(cfg.WorkingDir)
-	uiAdapter := ui.NewCLIAdapterWithHistory(cfg.HistoryFile, cfg.HistoryMaxEntries)
+	uiAdapter := ui.NewCLIAdapterWithHistory(cfg.HistoryFile)
 	skillManager := skill.NewLocalSkillManager()
 
 	// Create subagentManager early (before aiAdapter) so it can be included in system prompt

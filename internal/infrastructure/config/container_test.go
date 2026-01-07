@@ -32,22 +32,6 @@ func TestContainer_UsesHistoryConfig(t *testing.T) {
 			"CLIAdapter should use HistoryFile from config")
 	})
 
-	t.Run("container passes HistoryMaxEntries from config to CLIAdapter", func(t *testing.T) {
-		cfg := Defaults()
-		cfg.HistoryFile = "/tmp/test-history"
-		cfg.HistoryMaxEntries = 2500
-
-		container, err := NewContainer(cfg)
-		require.NoError(t, err, "NewContainer should not return an error")
-
-		cliAdapter, ok := container.UIAdapter().(*ui.CLIAdapter)
-		require.True(t, ok, "UIAdapter should be a *ui.CLIAdapter")
-
-		// Verify max entries is set from config
-		assert.Equal(t, 2500, cliAdapter.GetMaxHistoryEntries(),
-			"CLIAdapter should use HistoryMaxEntries from config")
-	})
-
 	t.Run("container uses default history values when config has defaults", func(t *testing.T) {
 		cfg := Defaults()
 
@@ -60,10 +44,6 @@ func TestContainer_UsesHistoryConfig(t *testing.T) {
 		// Default HistoryFile is "~/.code-editing-agent-history"
 		assert.Equal(t, "~/.code-editing-agent-history", cliAdapter.GetHistoryFile(),
 			"CLIAdapter should use default HistoryFile from config")
-
-		// Default HistoryMaxEntries is 1000
-		assert.Equal(t, 1000, cliAdapter.GetMaxHistoryEntries(),
-			"CLIAdapter should use default HistoryMaxEntries from config")
 	})
 
 	t.Run("container supports empty history file for in-memory mode", func(t *testing.T) {
@@ -85,23 +65,6 @@ func TestContainer_UsesHistoryConfig(t *testing.T) {
 // TestContainer_UIAdapterHasHistory verifies that the UI adapter returned by
 // container is configured with a HistoryManager for interactive use.
 func TestContainer_UIAdapterHasHistory(t *testing.T) {
-	t.Run("UIAdapter has non-nil HistoryManager when history is configured", func(t *testing.T) {
-		cfg := Defaults()
-		cfg.HistoryFile = "/tmp/container-test-history"
-		cfg.HistoryMaxEntries = 100
-
-		container, err := NewContainer(cfg)
-		require.NoError(t, err, "NewContainer should not return an error")
-
-		cliAdapter, ok := container.UIAdapter().(*ui.CLIAdapter)
-		require.True(t, ok, "UIAdapter should be a *ui.CLIAdapter")
-
-		// The adapter should have a HistoryManager initialized
-		historyManager := cliAdapter.GetHistoryManager()
-		assert.NotNil(t, historyManager,
-			"CLIAdapter should have a HistoryManager when history is configured")
-	})
-
 	t.Run("UIAdapter is in interactive mode when history is configured", func(t *testing.T) {
 		cfg := Defaults()
 		cfg.HistoryFile = "/tmp/interactive-test-history"
@@ -116,55 +79,11 @@ func TestContainer_UIAdapterHasHistory(t *testing.T) {
 		assert.True(t, cliAdapter.IsInteractive(),
 			"CLIAdapter should be in interactive mode when created with history config")
 	})
-
-	t.Run("HistoryManager has correct max entries", func(t *testing.T) {
-		cfg := Defaults()
-		cfg.HistoryFile = "/tmp/max-entries-test"
-		cfg.HistoryMaxEntries = 750
-
-		container, err := NewContainer(cfg)
-		require.NoError(t, err, "NewContainer should not return an error")
-
-		cliAdapter, ok := container.UIAdapter().(*ui.CLIAdapter)
-		require.True(t, ok, "UIAdapter should be a *ui.CLIAdapter")
-
-		historyManager := cliAdapter.GetHistoryManager()
-		require.NotNil(t, historyManager, "HistoryManager should not be nil")
-
-		// The HistoryManager should be configured with the correct max entries
-		// We verify this indirectly through the CLIAdapter's GetMaxHistoryEntries
-		assert.Equal(t, 750, cliAdapter.GetMaxHistoryEntries(),
-			"HistoryManager should use max entries from config")
-	})
 }
 
 // TestContainer_HistoryFilePath verifies that the container properly handles
 // history file paths, including tilde expansion.
 func TestContainer_HistoryFilePath(t *testing.T) {
-	t.Run("container expands tilde in history file path", func(t *testing.T) {
-		cfg := Defaults()
-		cfg.HistoryFile = "~/.custom-agent-history"
-
-		container, err := NewContainer(cfg)
-		require.NoError(t, err, "NewContainer should not return an error")
-
-		cliAdapter, ok := container.UIAdapter().(*ui.CLIAdapter)
-		require.True(t, ok, "UIAdapter should be a *ui.CLIAdapter")
-
-		// The raw history file path should be preserved (CLIAdapter stores original)
-		// but the HistoryManager should have the expanded path
-		historyFile := cliAdapter.GetHistoryFile()
-
-		// GetHistoryFile returns the original path as passed to the adapter
-		assert.Equal(t, "~/.custom-agent-history", historyFile,
-			"GetHistoryFile should return the configured path")
-
-		// The HistoryManager internally uses the expanded path
-		historyManager := cliAdapter.GetHistoryManager()
-		assert.NotNil(t, historyManager,
-			"HistoryManager should be initialized with expanded path")
-	})
-
 	t.Run("container passes absolute path unchanged", func(t *testing.T) {
 		cfg := Defaults()
 		cfg.HistoryFile = "/var/lib/agent/history"
@@ -211,64 +130,12 @@ func TestContainer_HistoryIntegrationWithChatService(t *testing.T) {
 		chatService := container.ChatService()
 		require.NotNil(t, chatService, "ChatService should not be nil")
 
-		// Get the UI adapter from container and verify it has history
+		// Get the UI adapter from container and verify it's configured
 		cliAdapter, ok := container.UIAdapter().(*ui.CLIAdapter)
 		require.True(t, ok, "UIAdapter should be a *ui.CLIAdapter")
 
-		assert.NotNil(t, cliAdapter.GetHistoryManager(),
-			"UIAdapter used by ChatService should have HistoryManager")
-	})
-}
-
-// TestContainer_HistoryConfigEdgeCases verifies edge cases in history configuration.
-func TestContainer_HistoryConfigEdgeCases(t *testing.T) {
-	t.Run("zero max entries uses default value", func(t *testing.T) {
-		cfg := Defaults()
-		cfg.HistoryFile = "/tmp/zero-max-test"
-		cfg.HistoryMaxEntries = 0 // Invalid, should use default
-
-		container, err := NewContainer(cfg)
-		require.NoError(t, err, "NewContainer should not return an error")
-
-		cliAdapter, ok := container.UIAdapter().(*ui.CLIAdapter)
-		require.True(t, ok, "UIAdapter should be a *ui.CLIAdapter")
-
-		// Zero max entries should be converted to default (1000)
-		maxEntries := cliAdapter.GetMaxHistoryEntries()
-		assert.Equal(t, 1000, maxEntries,
-			"Zero max entries should fall back to default of 1000")
-	})
-
-	t.Run("negative max entries uses default value", func(t *testing.T) {
-		cfg := Defaults()
-		cfg.HistoryFile = "/tmp/negative-max-test"
-		cfg.HistoryMaxEntries = -50 // Invalid, should use default
-
-		container, err := NewContainer(cfg)
-		require.NoError(t, err, "NewContainer should not return an error")
-
-		cliAdapter, ok := container.UIAdapter().(*ui.CLIAdapter)
-		require.True(t, ok, "UIAdapter should be a *ui.CLIAdapter")
-
-		// Negative max entries should be converted to default (1000)
-		maxEntries := cliAdapter.GetMaxHistoryEntries()
-		assert.Equal(t, 1000, maxEntries,
-			"Negative max entries should fall back to default of 1000")
-	})
-
-	t.Run("very large max entries is accepted", func(t *testing.T) {
-		cfg := Defaults()
-		cfg.HistoryFile = "/tmp/large-max-test"
-		cfg.HistoryMaxEntries = 100000
-
-		container, err := NewContainer(cfg)
-		require.NoError(t, err, "NewContainer should not return an error")
-
-		cliAdapter, ok := container.UIAdapter().(*ui.CLIAdapter)
-		require.True(t, ok, "UIAdapter should be a *ui.CLIAdapter")
-
-		// Large values should be accepted
-		assert.Equal(t, 100000, cliAdapter.GetMaxHistoryEntries(),
-			"Large max entries value should be accepted")
+		// Verify history file is configured
+		assert.Equal(t, "/tmp/chatservice-history-test", cliAdapter.GetHistoryFile(),
+			"UIAdapter used by ChatService should have history file configured")
 	})
 }
