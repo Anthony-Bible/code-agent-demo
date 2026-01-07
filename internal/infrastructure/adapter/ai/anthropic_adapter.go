@@ -182,13 +182,19 @@ func (a *AnthropicAdapter) SendMessageStreaming(
 	// Get system prompt (may be modified if plan mode is active, includes skill metadata)
 	systemPrompt := a.getSystemPrompt(ctx)
 
+	// Build thinking config from context
+	thinkingConfig := anthropic.ThinkingConfigParamUnion{OfDisabled: &anthropic.ThinkingConfigDisabledParam{}}
+	if thinkingInfo, ok := port.ThinkingModeFromContext(ctx); ok && thinkingInfo.Enabled {
+		thinkingConfig = anthropic.ThinkingConfigParamOfEnabled(thinkingInfo.BudgetTokens)
+	}
+
 	// Create streaming request
 	stream := a.client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.Model(a.model),
-		MaxTokens: int64(4096),
+		MaxTokens: a.maxTokens,
 		Messages:  anthropicMessages,
 		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
-		Thinking:  anthropic.ThinkingConfigParamUnion{OfDisabled: &anthropic.ThinkingConfigDisabledParam{}},
+		Thinking:  thinkingConfig,
 		Tools:     anthropicTools,
 	})
 
