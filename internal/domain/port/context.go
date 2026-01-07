@@ -92,3 +92,25 @@ func IsSubagentContext(ctx context.Context) bool {
 	_, ok := SubagentContextFromContext(ctx)
 	return ok
 }
+
+// thinkingModeKey is the key for storing thinking mode state in context.
+type thinkingModeKey struct{}
+
+// ThinkingModeInfo contains thinking mode configuration for the AI.
+type ThinkingModeInfo struct {
+	Enabled      bool
+	BudgetTokens int64
+	ShowThinking bool
+}
+
+// WithThinkingMode adds thinking mode info to the context.
+func WithThinkingMode(ctx context.Context, info ThinkingModeInfo) context.Context {
+	return context.WithValue(ctx, thinkingModeKey{}, info)
+}
+
+// ThinkingModeFromContext retrieves thinking mode info from the context.
+// Returns the thinking mode info and a boolean indicating if it was found.
+func ThinkingModeFromContext(ctx context.Context) (ThinkingModeInfo, bool) {
+	info, ok := ctx.Value(thinkingModeKey{}).(ThinkingModeInfo)
+	return info, ok
+}

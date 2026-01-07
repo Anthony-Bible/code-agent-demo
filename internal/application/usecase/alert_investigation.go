@@ -21,6 +21,8 @@ type ConversationServiceInterface interface {
 	AddToolResultMessage(ctx context.Context, sessionID string, toolResults []entity.ToolResult) error
 	EndConversation(ctx context.Context, sessionID string) error
 	SetCustomSystemPrompt(ctx context.Context, sessionID, prompt string) error
+	SetThinkingMode(sessionID string, info port.ThinkingModeInfo) error
+	GetThinkingMode(sessionID string) (port.ThinkingModeInfo, error)
 }
 
 // SafetyEnforcer defines the interface for safety checks during investigations.

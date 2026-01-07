@@ -40,6 +40,11 @@ type UserInterface interface {
 	// DisplaySystemMessage displays a system message.
 	DisplaySystemMessage(message string) error
 
+	// DisplayThinking displays extended thinking content from the AI.
+	// Used when extended thinking mode is enabled with ShowThinking flag.
+	// The content contains the AI's internal reasoning process before generating a response.
+	DisplayThinking(content string) error
+
 	// DisplaySubagentStatus displays a status message for subagent execution.
 	// Used to show when subagents start, complete, or execute tools during delegated tasks.
 	// Parameters:

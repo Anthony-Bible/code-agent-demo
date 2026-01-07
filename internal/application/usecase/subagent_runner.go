@@ -11,6 +11,14 @@ import (
 	"time"
 )
 
+const (
+	// Subagent status constants for display messages.
+	statusStarting  = "Starting"
+	statusCompleted = "Completed"
+	statusFailed    = "Failed"
+	statusThinking  = "Thinking"
+)
+
 // resolveModelShorthand converts shorthand model names to actual Anthropic model IDs.
 // It supports:
 //   - "haiku" -> "claude-3-5-haiku-20241022"
@@ -41,6 +49,9 @@ type SubagentConfig struct {
 	MaxConcurrent   int
 	AllowedTools    []string
 	BlockedCommands []string
+	ThinkingEnabled bool  // Enable extended thinking mode for subagent
+	ThinkingBudget  int64 // Thinking token budget (0 = unlimited)
+	ShowThinking    bool  // Display thinking output to user
 }
 
 // SubagentResult holds the result of a subagent execution.
@@ -210,12 +221,45 @@ func (r *SubagentRunner) Run(
 	rc.sessionID = sessionID
 	defer func() { _ = r.convService.EndConversation(ctx, sessionID) }()
 
+	// Extract thinking mode from context (from parent) or fall back to static config
+	thinkingInfo, hasThinking := port.ThinkingModeFromContext(ctx)
+	if !hasThinking {
+		thinkingInfo = port.ThinkingModeInfo{
+			Enabled:      r.config.ThinkingEnabled,
+			BudgetTokens: r.config.ThinkingBudget,
+			ShowThinking: r.config.ShowThinking,
+		}
+	}
+
+	// Agent-specific override: if agent specifies thinking config in AGENT.md, use it
+	if agent.ThinkingEnabled != nil {
+		thinkingInfo.Enabled = *agent.ThinkingEnabled
+	}
+	if agent.ThinkingBudget > 0 {
+		thinkingInfo.BudgetTokens = agent.ThinkingBudget
+	}
+
+	if thinkingInfo.Enabled {
+		if err := r.convService.SetThinkingMode(sessionID, thinkingInfo); err != nil {
+			// Log warning but don't fail - thinking mode is optional
+			fmt.Fprintf(
+				os.Stderr,
+				"[SubagentRunner] Failed to set thinking mode for subagent session: error=%v, agent=%s, sessionID=%s, enabled=%t, budget=%d\n",
+				err,
+				rc.agent.Name,
+				sessionID,
+				thinkingInfo.Enabled,
+				thinkingInfo.BudgetTokens,
+			)
+		}
+	}
+
 	if err := r.setupAgentSession(rc); err != nil {
 		return rc.failedResult(err), err
 	}
 
 	// Display subagent starting
-	r.displayStatus(agent.Name, "Starting", "")
+	r.displayStatus(agent.Name, statusStarting, "")
 
 	return r.runExecutionLoop(rc)
 }
@@ -252,7 +296,7 @@ func (r *SubagentRunner) validationFailedResult(
 // failedResult creates a failed result from the run context.
 func (rc *subagentRunContext) failedResult(err error) *SubagentResult {
 	// Display failure status
-	rc.runner.displayStatus(rc.agent.Name, "Failed", err.Error())
+	rc.runner.displayStatus(rc.agent.Name, statusFailed, err.Error())
 
 	return &SubagentResult{
 		SubagentID:   rc.subagentID,
@@ -276,7 +320,7 @@ func (rc *subagentRunContext) completedResult() *SubagentResult {
 
 	// Display completion status with details
 	details := fmt.Sprintf("%d actions, %.1fs", rc.actionsTaken, duration.Seconds())
-	rc.runner.displayStatus(rc.agent.Name, "Completed", details)
+	rc.runner.displayStatus(rc.agent.Name, statusCompleted, details)
 
 	return &SubagentResult{
 		SubagentID:   rc.subagentID,
@@ -307,8 +351,19 @@ func (r *SubagentRunner) setupAgentSession(rc *subagentRunContext) error {
 // runExecutionLoop runs the main tool execution loop until completion or limit.
 func (r *SubagentRunner) runExecutionLoop(rc *subagentRunContext) (*SubagentResult, error) {
 	for rc.actionsTaken < rc.maxActions {
+		// Add thinking mode to context if enabled for this session
+		ctx := rc.ctx
+		thinkingInfo, _ := r.convService.GetThinkingMode(rc.sessionID)
+		if thinkingInfo.Enabled {
+			ctx = port.WithThinkingMode(ctx, thinkingInfo)
+			// Display thinking status indicator.
+			// Note: Thinking content itself is never displayed for subagents,
+			// only the status indicator to show the AI is processing.
+			r.displayStatus(rc.agent.Name, statusThinking, "")
+		}
+
 		// Process assistant response
-		msg, toolCalls, err := r.convService.ProcessAssistantResponse(rc.ctx, rc.sessionID)
+		msg, toolCalls, err := r.convService.ProcessAssistantResponse(ctx, rc.sessionID)
 		if err != nil {
 			return rc.failedResult(err), err
 		}

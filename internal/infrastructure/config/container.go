@@ -112,7 +112,7 @@ func NewContainer(cfg *Config) (*Container, error) {
 		{Path: filepath.Join(getUserHome(), ".claude", "agents"), SourceType: entity.SubagentSourceUser},
 	})
 
-	aiAdapter := ai.NewAnthropicAdapter(cfg.AIModel, skillManager, subagentManager)
+	aiAdapter := ai.NewAnthropicAdapter(cfg.AIModel, cfg.MaxTokens, skillManager, subagentManager)
 
 	// Create base executor and wrap with planning decorator
 	baseExecutor := tool.NewExecutorAdapter(fileManager)

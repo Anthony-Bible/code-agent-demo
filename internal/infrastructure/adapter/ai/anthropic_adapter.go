@@ -49,6 +49,7 @@ var (
 type AnthropicAdapter struct {
 	client             anthropic.Client
 	model              string
+	maxTokens          int64
 	skillManager       port.SkillManager
 	subagentManager    port.SubagentManager
 	cachedSystemPrompt string // Cached system prompt to avoid repeated skill discovery
@@ -60,6 +61,7 @@ type AnthropicAdapter struct {
 //
 // Parameters:
 //   - model: The AI model to use (e.g., "hf:zai-org/GLM-4.6", "claude-3-5-sonnet-20241022")
+//   - maxTokens: Maximum tokens for AI response
 //   - skillManager: Optional skill manager for providing skill metadata to the system prompt
 //   - subagentManager: Optional subagent manager for providing subagent metadata to the system prompt
 //
@@ -67,12 +69,14 @@ type AnthropicAdapter struct {
 //   - port.AIProvider: An implementation of the AIProvider interface
 func NewAnthropicAdapter(
 	model string,
+	maxTokens int64,
 	skillManager port.SkillManager,
 	subagentManager port.SubagentManager,
 ) port.AIProvider {
 	return &AnthropicAdapter{
 		client:          anthropic.NewClient(),
 		model:           model,
+		maxTokens:       maxTokens,
 		skillManager:    skillManager,
 		subagentManager: subagentManager,
 	}
@@ -116,13 +120,19 @@ func (a *AnthropicAdapter) SendMessage(
 	// Get system prompt (may be modified if plan mode is active, includes skill metadata)
 	systemPrompt := a.getSystemPrompt(ctx)
 
+	// Build thinking config from context
+	thinkingConfig := anthropic.ThinkingConfigParamUnion{OfDisabled: &anthropic.ThinkingConfigDisabledParam{}}
+	if thinkingInfo, ok := port.ThinkingModeFromContext(ctx); ok && thinkingInfo.Enabled {
+		thinkingConfig = anthropic.ThinkingConfigParamOfEnabled(thinkingInfo.BudgetTokens)
+	}
+
 	// Call Anthropic API
 	response, err := a.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.Model(a.model),
-		MaxTokens: int64(4096),
+		MaxTokens: a.maxTokens,
 		Messages:  anthropicMessages,
 		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
-		Thinking:  anthropic.ThinkingConfigParamUnion{OfDisabled: &anthropic.ThinkingConfigDisabledParam{}},
+		Thinking:  thinkingConfig,
 		Tools:     anthropicTools,
 	})
 	if err != nil {
@@ -335,35 +345,98 @@ func (a *AnthropicAdapter) GetModel() string {
 func (a *AnthropicAdapter) convertMessages(messages []port.MessageParam) []anthropic.MessageParam {
 	result := make([]anthropic.MessageParam, len(messages))
 	for i, msg := range messages {
-		switch {
-		case msg.Role == entity.RoleUser && len(msg.ToolResults) > 0:
-			// Build tool result blocks for user messages
-			resultBlocks := make([]anthropic.ContentBlockParamUnion, len(msg.ToolResults))
-			for j, tr := range msg.ToolResults {
-				resultBlocks[j] = anthropic.NewToolResultBlock(tr.ToolID, tr.Result, tr.IsError)
-			}
-			result[i] = anthropic.NewUserMessage(resultBlocks...)
-		case msg.Role == entity.RoleAssistant && len(msg.ToolCalls) > 0:
-			// Build assistant message with tool use blocks
-			blocks := []anthropic.ContentBlockParamUnion{}
-			if msg.Content != "" {
-				blocks = append(blocks, anthropic.NewTextBlock(msg.Content))
-			}
-			for _, tc := range msg.ToolCalls {
-				blocks = append(blocks, anthropic.NewToolUseBlock(tc.ToolID, tc.Input, tc.ToolName))
-			}
-			result[i] = anthropic.NewAssistantMessage(blocks...)
-		default:
-			// Simple text message (backward compatible)
-			if msg.Role == entity.RoleAssistant {
-				result[i] = anthropic.NewAssistantMessage(anthropic.NewTextBlock(msg.Content))
-			} else {
-				// Default to user message for roles like "user" and "system"
-				result[i] = anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content))
-			}
-		}
+		result[i] = a.convertMessage(msg)
 	}
 	return result
+}
+
+// convertMessage converts a single port MessageParam to Anthropic SDK MessageParam.
+func (a *AnthropicAdapter) convertMessage(msg port.MessageParam) anthropic.MessageParam {
+	if msg.Role == entity.RoleUser && len(msg.ToolResults) > 0 {
+		return a.convertUserToolResultMessage(msg)
+	}
+	if msg.Role == entity.RoleAssistant && (len(msg.ToolCalls) > 0 || len(msg.ThinkingBlocks) > 0) {
+		return a.convertAssistantToolMessage(msg)
+	}
+	return a.convertSimpleMessage(msg)
+}
+
+// convertUserToolResultMessage converts a user message with tool results.
+func (a *AnthropicAdapter) convertUserToolResultMessage(msg port.MessageParam) anthropic.MessageParam {
+	resultBlocks := make([]anthropic.ContentBlockParamUnion, len(msg.ToolResults))
+	for j, tr := range msg.ToolResults {
+		resultBlocks[j] = anthropic.NewToolResultBlock(tr.ToolID, tr.Result, tr.IsError)
+
+		// Handle thought_signature from Gemini via Bifrost
+		if tr.ThoughtSignature != "" {
+			// SECURITY NOTE: The thought_signature is a cryptographic signature from Gemini AI
+			// that validates the authenticity of tool execution results. It should be:
+			// 1. Validated to ensure it hasn't been tampered with
+			// 2. Preserved across tool calls to maintain chain of custody
+			// 3. Injected at the HTTP level (not via SDK due to limitations)
+			//
+			// The signature format is currently opaque to this adapter and is passed through
+			// as-is. Future implementation should include:
+			// - Signature validation logic
+			// - HTTP interceptor for proper injection
+			// - Error handling for invalid signatures
+			fmt.Fprintf(
+				os.Stderr,
+				"[AnthropicAdapter] Tool result has thought_signature (need HTTP-level injection): ToolID=%s, Sig=%s\n",
+				tr.ToolID,
+				tr.ThoughtSignature,
+			)
+			// TODO: The SDK doesn't support adding signature to tool_result blocks
+			// We need to implement an HTTP interceptor to inject the signature field
+			// into the JSON payload before sending to Bifrost and validate signature format
+		}
+	}
+	return anthropic.NewUserMessage(resultBlocks...)
+}
+
+// convertAssistantToolMessage converts an assistant message with thinking blocks, text, and tool calls.
+// CRITICAL: Thinking blocks MUST come first in the content array.
+func (a *AnthropicAdapter) convertAssistantToolMessage(msg port.MessageParam) anthropic.MessageParam {
+	blocks := []anthropic.ContentBlockParamUnion{}
+
+	// CRITICAL: Thinking blocks MUST come first
+	for _, tb := range msg.ThinkingBlocks {
+		blocks = append(blocks, anthropic.NewThinkingBlock(tb.Signature, tb.Thinking))
+	}
+
+	if msg.Content != "" {
+		blocks = append(blocks, anthropic.NewTextBlock(msg.Content))
+	}
+
+	for _, tc := range msg.ToolCalls {
+		// If thought_signature is present (Gemini via Bifrost), include it
+		// The SDK doesn't expose Signature field, so we use the standard method
+		// and rely on Bifrost to handle signature preservation at the HTTP level
+		blocks = append(blocks, anthropic.NewToolUseBlock(tc.ToolID, tc.Input, tc.ToolName))
+
+		// Log if we have a thought_signature (for debugging Bifrost integration)
+		if tc.ThoughtSignature != "" {
+			fmt.Fprintf(
+				os.Stderr,
+				"[AnthropicAdapter] Tool call has thought_signature (need HTTP-level injection): ID=%s, Sig=%s\n",
+				tc.ToolID,
+				tc.ThoughtSignature,
+			)
+			// TODO: Implement HTTP interceptor to inject signature field into JSON payload
+			// The SDK doesn't support adding custom fields to tool_use blocks
+			// For now, we'll need to intercept the HTTP request and inject the signature
+		}
+	}
+
+	return anthropic.NewAssistantMessage(blocks...)
+}
+
+// convertSimpleMessage converts a simple text message.
+func (a *AnthropicAdapter) convertSimpleMessage(msg port.MessageParam) anthropic.MessageParam {
+	if msg.Role == entity.RoleAssistant {
+		return anthropic.NewAssistantMessage(anthropic.NewTextBlock(msg.Content))
+	}
+	return anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content))
 }
 
 // convertTools converts port ToolParam slice to Anthropic SDK ToolUnionParam slice.
@@ -432,6 +505,7 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 	var contentBuilder strings.Builder
 	toolCalls := []port.ToolCallInfo{}
 	entityToolCalls := []entity.ToolCall{}
+	thinkingBlocks := []entity.ThinkingBlock{}
 
 	for _, content := range response.Content {
 		switch content.Type {
@@ -443,66 +517,63 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 			toolName := content.Name
 			inputMap := make(map[string]interface{})
 
-			// Log tool_use block for debugging
-			fmt.Fprintf(
-				os.Stderr,
-				"[AnthropicAdapter] Found tool_use: ID=%s, Name=%s, InputLen=%d\n",
-				toolID,
-				toolName,
-				len(content.Input),
-			)
+			// Extract thought_signature from Signature field (Gemini via Bifrost)
+			var thoughtSignature string
+			if content.JSON.Signature.Valid() {
+				sigRaw := content.JSON.Signature.Raw()
+				if sigRaw != "" {
+					thoughtSignature = sigRaw
+				}
+			}
+
+			if content.JSON.Data.Valid() {
+				dataRaw := content.JSON.Data.Raw()
+				if dataRaw != "" && thoughtSignature == "" {
+					thoughtSignature = dataRaw
+				}
+			}
 
 			// Convert Input JSON to map
 			if len(content.Input) > 0 {
 				if err := json.Unmarshal(content.Input, &inputMap); err == nil {
 					inputJSON := string(content.Input)
 					toolCalls = append(toolCalls, port.ToolCallInfo{
-						ToolID:    toolID,
-						ToolName:  toolName,
-						Input:     inputMap,
-						InputJSON: inputJSON,
+						ToolID:           toolID,
+						ToolName:         toolName,
+						Input:            inputMap,
+						InputJSON:        inputJSON,
+						ThoughtSignature: thoughtSignature,
 					})
-					// Populate entity tool calls for storage in Message
 					entityToolCalls = append(entityToolCalls, entity.ToolCall{
-						ToolID:   toolID,
-						ToolName: toolName,
-						Input:    inputMap,
+						ToolID:           toolID,
+						ToolName:         toolName,
+						Input:            inputMap,
+						ThoughtSignature: thoughtSignature,
 					})
-					fmt.Fprintf(os.Stderr, "[AnthropicAdapter] Successfully parsed tool_use\n")
-				} else {
-					fmt.Fprintf(
-						os.Stderr,
-						"[AnthropicAdapter] Failed to unmarshal tool input: %v (raw: %s)\n",
-						err,
-						string(content.Input),
-					)
 				}
-			} else {
-				fmt.Fprintf(os.Stderr, "[AnthropicAdapter] tool_use has empty Input - skipping\n")
 			}
-		case "thinking":
-			// Thinking blocks are optional
+		case "thinking", "redacted_thinking":
+			// Extract thinking blocks with signatures (preserve signature exactly)
+			// Note: Gemini sends "redacted_thinking" with encrypted content in the "data" field
+			// that cannot be decrypted client-side. We show a placeholder instead.
+			thinkingContent := content.Thinking
+
+			// If thinking is empty but this is a redacted_thinking block, use a placeholder
+			if thinkingContent == "" && content.Type == "redacted_thinking" {
+				thinkingContent = "[Thinking content is encrypted and cannot be displayed - Gemini extended thinking mode]"
+			}
+
+			thinkingBlocks = append(thinkingBlocks, entity.ThinkingBlock{
+				Thinking:  thinkingContent,
+				Signature: content.Signature,
+			})
 		}
 	}
 
 	content := contentBuilder.String()
 	if content == "" {
 		content = string(response.StopReason)
-		fmt.Fprintf(
-			os.Stderr,
-			"[AnthropicAdapter] No text content, using StopReason: %s\n",
-			response.StopReason,
-		)
 	}
-
-	// Log final parsing result
-	fmt.Fprintf(
-		os.Stderr,
-		"[AnthropicAdapter] Response parsed: content_len=%d, tool_calls=%d, content_blocks=%d\n",
-		len(content),
-		len(toolCalls),
-		len(response.Content),
-	)
 
 	// Create the message
 	msg, err := entity.NewMessage(entity.RoleAssistant, content)
@@ -513,6 +584,11 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 	// Store tool calls in the message entity so they persist in conversation history
 	if len(entityToolCalls) > 0 {
 		msg.ToolCalls = entityToolCalls
+	}
+
+	// Store thinking blocks in the message entity (CRITICAL: signatures preserved exactly)
+	if len(thinkingBlocks) > 0 {
+		msg.ThinkingBlocks = thinkingBlocks
 	}
 
 	return msg, toolCalls, nil

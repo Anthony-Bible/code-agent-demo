@@ -23,8 +23,8 @@ type Config struct {
 	AIModel string
 
 	// MaxTokens is the maximum number of tokens to generate in AI responses.
-	// Defaults to 1024
-	MaxTokens int
+	// Defaults to 20000
+	MaxTokens int64
 
 	// WorkingDir is the base directory for file operations.
 	// All file paths are resolved relative to this directory.
@@ -48,6 +48,18 @@ type Config struct {
 	// Defaults to 1000.
 	HistoryMaxEntries int
 
+	// ExtendedThinking enables extended thinking mode.
+	// Defaults to false.
+	ExtendedThinking bool
+
+	// ThinkingBudget is the token budget for extended thinking.
+	// Defaults to 10000.
+	ThinkingBudget int64
+
+	// ShowThinking determines whether to show thinking output.
+	// Defaults to false.
+	ShowThinking bool
+
 	// AutoApproveSafeCommands determines whether non-dangerous bash commands
 	// are automatically approved without user confirmation.
 	// Dangerous commands are still blocked.
@@ -59,12 +71,15 @@ type Config struct {
 func Defaults() *Config {
 	return &Config{
 		AIModel:           "hf:zai-org/GLM-4.6",
-		MaxTokens:         1024,
+		MaxTokens:         20000,
 		WorkingDir:        ".",
 		WelcomeMessage:    "Chat with Claude (use 'ctrl+c' to quit)",
 		GoodbyeMessage:    "Bye!",
 		HistoryFile:       "~/.code-editing-agent-history",
 		HistoryMaxEntries: 1000,
+		ExtendedThinking:  false,
+		ThinkingBudget:    10000,
+		ShowThinking:      false,
 	}
 }
 
@@ -89,8 +104,8 @@ func LoadConfig() *Config {
 	if viper.IsSet("model") {
 		cfg.AIModel = viper.GetString("model")
 	}
-	if viper.IsSet("maxTokens") {
-		cfg.MaxTokens = viper.GetInt("maxTokens")
+	if viper.IsSet("max_tokens") {
+		cfg.MaxTokens = viper.GetInt64("max_tokens")
 	}
 	if viper.IsSet("workingDir") {
 		cfg.WorkingDir = viper.GetString("workingDir")
@@ -114,6 +129,23 @@ func LoadConfig() *Config {
 	}
 	if viper.IsSet("auto_approve_safe") {
 		cfg.AutoApproveSafeCommands = viper.GetBool("auto_approve_safe")
+	}
+	if viper.IsSet("thinking.enabled") {
+		cfg.ExtendedThinking = viper.GetBool("thinking.enabled")
+	}
+	if viper.IsSet("thinking.budget") {
+		budget := viper.GetInt64("thinking.budget")
+		switch {
+		case budget <= 0:
+			cfg.ThinkingBudget = 10000
+		case budget < 1024:
+			cfg.ThinkingBudget = 1024
+		default:
+			cfg.ThinkingBudget = budget
+		}
+	}
+	if viper.IsSet("thinking.show") {
+		cfg.ShowThinking = viper.GetBool("thinking.show")
 	}
 
 	return cfg

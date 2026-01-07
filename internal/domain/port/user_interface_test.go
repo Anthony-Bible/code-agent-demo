@@ -34,6 +34,10 @@ func (m *mockUserInterface) DisplaySystemMessage(_ string) error {
 	return nil
 }
 
+func (m *mockUserInterface) DisplayThinking(_ string) error {
+	return nil
+}
+
 func (m *mockUserInterface) DisplaySubagentStatus(_, _, _ string) error {
 	return nil
 }

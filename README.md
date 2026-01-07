@@ -9,12 +9,13 @@ Code Editing Agent is an intelligent CLI tool that combines conversational AI wi
 ### Key Features
 
 - **Interactive CLI Chat** - Terminal-based conversation with AI assistant
+- **Extended Thinking** - Claude's internal reasoning process with configurable token budgets
 - **File System Tools** - Read, list, and edit files directly from chat
+- **Subagent System** - Spawn specialized AI assistants for delegated tasks
+- **Plan Mode** - Propose changes for review before applying them
 - **Hexagonal Architecture** - Clean separation of concerns with ports and adapters
 - **Tool System** - Modular architecture for adding custom tools with JSON schema validation
-- **Session Management** - Multi-session support with unique session IDs
-- **Multiple AI Models** - Supports various AI models via Anthropic SDK
-- **Dependency Injection** - Clean DI container for managing application dependencies
+- **Skill System** - Project-specific and global AI capabilities following agentskills.io
 
 ## Architecture
 
@@ -198,6 +199,55 @@ New session started: 3a1b2c3d4e5f6789...
 [Assistant: Found 5 Go files...]
 ```
 
+### Extended Thinking Mode
+
+Extended thinking allows Claude to show its internal reasoning process before generating responses. This feature helps you understand how the AI approaches problems and can improve response quality for complex tasks.
+
+#### Enabling Extended Thinking
+
+**Via CLI flags:**
+```bash
+# Enable with defaults (10,000 token budget, thinking hidden)
+./agent chat --thinking
+
+# Enable with custom budget and show thinking
+./agent chat --thinking --thinking-budget 15000 --show-thinking
+```
+
+**Via environment variables:**
+```bash
+export AGENT_THINKING_ENABLED=true
+export AGENT_THINKING_BUDGET=10000
+export AGENT_SHOW_THINKING=true
+./agent chat
+```
+
+**Via runtime commands:**
+```
+> :thinking on        # Enable thinking mode
+Extended thinking enabled: Budget 10000 tokens
+
+> :thinking off       # Disable thinking mode
+Extended thinking disabled
+
+> :thinking toggle    # Toggle current state
+```
+
+#### Extended Thinking Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--thinking` | `false` | Enable extended thinking mode |
+| `--thinking-budget` | `10000` | Token budget for thinking (minimum 1024) |
+| `--show-thinking` | `false` | Display AI's reasoning process |
+| `--max-tokens` | `20000` | Maximum tokens for responses (increased to accommodate thinking) |
+
+**Notes:**
+- Extended thinking requires Claude Sonnet 3.7+ or Claude Sonnet 4.5 models
+- The thinking budget is separate from but counted within `max-tokens`
+- By default, thinking is processed but not displayed (hidden from output)
+- Use `--show-thinking` to see the AI's reasoning in magenta color
+
 ### Available Tools
 
 | Tool | Description | Usage |
@@ -206,6 +256,15 @@ New session started: 3a1b2c3d4e5f6789...
 | `list_files` | List files in directory | Ask to "List all files in ./internal" |
 | `edit_file` | Edit files via string replacement | Ask to "Replace this text in file.go" |
 | `bash` | Execute shell commands | Ask to "Run command: go test ./..." |
+| `fetch` | Fetch web resources via HTTP/HTTPS | Ask to "Fetch the contents of https://example.com" |
+| `task` | Spawn a pre-defined subagent | Ask to "Delegate security review to code-reviewer" |
+| `delegate` | Spawn a dynamic subagent | Ask to "Create an agent to analyze this log file" |
+| `batch_tool` | Execute multiple tools in parallel/sequence | Ask to "Read all these 3 files at once" |
+| `activate_skill` | Load skill instructions | Ask to "Activate the code-review skill" |
+| `enter_plan_mode`| Propose changes before execution | Ask to "Enter plan mode to redesign this" |
+| `complete_investigation` | Complete an investigation with findings | Used to finalize investigation with confidence and findings |
+| `escalate_investigation` | Escalate investigation to higher priority | Used to escalate issues requiring human review |
+| `report_investigation` | Report progress during investigation | Used to provide status updates during investigation |
 
 **Built-in Safety Features:**
 - **Path Traversal Protection**: All file operations are sandboxed within the working directory
@@ -259,31 +318,89 @@ Instructions for how the AI should perform code reviews...
 
 Skills are automatically discovered at startup and listed in the AI's context. The AI can activate a skill when its capabilities are needed using the `activate_skill` tool.
 
+### Subagent System
+
+The subagent system allows the main agent to delegate tasks to specialized or dynamic AI assistants. This is useful for complex, multi-step tasks or when isolation is beneficial.
+
+#### Pre-defined Subagents
+
+Subagents are discovered from three directories in **priority order**:
+1. `./agents` (project root, highest priority)
+2. `./.claude/agents` (project .claude directory)
+3. `~/.claude/agents` (user global, lowest priority)
+
+When the same agent name exists in multiple directories, the highest priority version is used. Common agents include `code-reviewer`, `test-writer`, and `documentation-writer`. Each agent has its own `AGENT.md` file defining its system prompt, allowed tools, model selection, and thinking configuration.
+
+**Agent Configuration Options:**
+- **allowed_tools**: Restrict which tools the agent can use for safety
+- **model**: Choose between `haiku` (fast), `sonnet` (balanced), `opus` (complex), or `inherit` (default)
+- **max_actions**: Limit tool calls to prevent runaway execution (default: 20)
+- **thinking_enabled**: Enable/disable extended thinking for this agent (default: inherit)
+- **thinking_budget**: Token budget for thinking process (default: inherit)
+
+See CLAUDE.md for detailed AGENT.md format and frontmatter options.
+
+**Usage:**
+```
+> Delegate a security review of internal/infrastructure to the code-reviewer agent
+```
+
+#### Dynamic Subagents (Delegation)
+
+You can also create dynamic agents on-the-fly with custom system prompts using the `delegate` tool.
+
+**Usage:**
+```
+> Use the delegate tool to create a 'regex-specialist' to help fix these patterns
+```
+
+### Plan Mode
+
+Plan mode allows you to review and approve proposed changes before they are applied. When in plan mode, tools like `edit_file` or `bash` (if mutating) will write their intended actions to a plan file instead of executing them.
+
+#### Activating Plan Mode
+
+**Via runtime command:**
+```
+> :mode plan      # Enable plan mode
+> :mode normal    # Return to normal mode
+> :mode toggle    # Toggle between modes
+```
+
+**Via tool:**
+The AI can proactively enter plan mode using the `enter_plan_mode` tool when it detects a complex task.
+
 ### Configuration
 
 The application supports configuration via:
 
 **Command-line flags:**
 ```bash
-./agent chat --model "hf:zai-org/GLM-4.6" --max-tokens 2048
+./agent chat --model "hf:zai-org/GLM-4.6" --max-tokens 20000 --thinking
 ```
 
 **Environment variables (AGENT_* prefix):**
 ```bash
 export AGENT_MODEL=hf:zai-org/GLM-4.6
-export AGENT_MAX_TOKENS=2048
+export AGENT_MAX_TOKENS=20000
 export AGENT_WORKING_DIR=/path/to/project
 export AGENT_WELCOME_MESSAGE="Hello! How can I help?"
 export AGENT_GOODBYE_MESSAGE="Goodbye!"
 export AGENT_HISTORY_FILE=""  # Disable history
 export AGENT_HISTORY_MAX_ENTRIES=500
+export AGENT_THINKING_ENABLED=true
+export AGENT_THINKING_BUDGET=10000
+export AGENT_SHOW_THINKING=false
 ```
 
 **Configuration options:**
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--model` | `hf:zai-org/GLM-4.6` | AI model to use |
-| `--maxTokens` | `1024` | Maximum tokens in responses |
+| `--max-tokens` | `20000` | Maximum tokens in responses |
+| `--thinking` | `false` | Enable extended thinking mode |
+| `--thinking-budget` | `10000` | Token budget for thinking (min 1024) |
+| `--show-thinking` | `false` | Display AI's reasoning process |
 | `--workingDir` | `.` | Base directory for file operations |
 | `--welcomeMessage` | `Chat with Claude (use 'ctrl+c' to quit)` | Displayed on session start |
 | `--goodbyeMessage` | `Bye!` | Displayed on session end |
@@ -416,6 +533,8 @@ The project uses table-driven tests throughout. Look at existing tests for patte
 | `github.com/stretchr/testify` | v1.11.1 | Testing utilities |
 | `github.com/spf13/cobra` | v1.10.2 | CLI framework |
 | `github.com/spf13/viper` | v1.21.0 | Configuration management |
+| `github.com/chzyer/readline` | v1.5.1 | Interactive input with history |
+| `golang.org/x/net` | v0.48.0 | HTTP utilities |
 
 ## License
 

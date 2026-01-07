@@ -294,6 +294,13 @@ func (c *CLIAdapter) DisplaySystemMessage(message string) error {
 	return err
 }
 
+// DisplayThinking displays extended thinking content from the AI.
+// Uses magenta color (ANSI code 95 for bright magenta) to distinguish from regular responses.
+func (c *CLIAdapter) DisplayThinking(content string) error {
+	_, err := fmt.Fprintf(c.output, "\x1b[95mClaude (thinking)\x1b[0m: %s\n", content)
+	return err
+}
+
 // DisplaySubagentStatus displays a status message for subagent execution.
 // Uses magenta color (ANSI code 35) to distinguish from regular system messages.
 func (c *CLIAdapter) DisplaySubagentStatus(agentName string, status string, details string) error {
