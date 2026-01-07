@@ -3,13 +3,12 @@ package service
 import (
 	"code-editing-agent/internal/domain/entity"
 	"code-editing-agent/internal/domain/port"
-	"code-editing-agent/internal/infrastructure/adapter/file"
-	"code-editing-agent/internal/infrastructure/adapter/tool"
 	"context"
 	"errors"
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestNewConversationService(t *testing.T) {
@@ -728,12 +727,7 @@ func (m *mockToolExecutor) ValidateToolInput(name string, input interface{}) err
 
 func TestConversationService_SetPlanMode(t *testing.T) {
 	t.Run("enables plan mode for a session", func(t *testing.T) {
-		// Use real ExecutorAdapter and real FileManager with temp directory
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		executorAdapter := tool.NewExecutorAdapter(fileManager)
-
-		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
 		if err != nil {
 			t.Fatalf("Failed to create service: %v", err)
 		}
@@ -761,11 +755,7 @@ func TestConversationService_SetPlanMode(t *testing.T) {
 	})
 
 	t.Run("disables plan mode for a session", func(t *testing.T) {
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		executorAdapter := tool.NewExecutorAdapter(fileManager)
-
-		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
 		if err != nil {
 			t.Fatalf("Failed to create service: %v", err)
 		}
@@ -796,11 +786,7 @@ func TestConversationService_SetPlanMode(t *testing.T) {
 	})
 
 	t.Run("returns error for non-existent session", func(t *testing.T) {
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		executorAdapter := tool.NewExecutorAdapter(fileManager)
-
-		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
 		if err != nil {
 			t.Fatalf("Failed to create service: %v", err)
 		}
@@ -816,11 +802,7 @@ func TestConversationService_SetPlanMode(t *testing.T) {
 	})
 
 	t.Run("initial mode is not plan mode by default", func(t *testing.T) {
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		executorAdapter := tool.NewExecutorAdapter(fileManager)
-
-		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
 		if err != nil {
 			t.Fatalf("Failed to create service: %v", err)
 		}
@@ -844,11 +826,7 @@ func TestConversationService_SetPlanMode(t *testing.T) {
 
 func TestConversationService_IsPlanMode(t *testing.T) {
 	t.Run("returns correct mode after SetPlanMode", func(t *testing.T) {
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		executorAdapter := tool.NewExecutorAdapter(fileManager)
-
-		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
 		if err != nil {
 			t.Fatalf("Failed to create service: %v", err)
 		}
@@ -884,11 +862,7 @@ func TestConversationService_IsPlanMode(t *testing.T) {
 	})
 
 	t.Run("returns error for non-existent session", func(t *testing.T) {
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		executorAdapter := tool.NewExecutorAdapter(fileManager)
-
-		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
 		if err != nil {
 			t.Fatalf("Failed to create service: %v", err)
 		}
@@ -906,11 +880,7 @@ func TestConversationService_IsPlanMode(t *testing.T) {
 
 func TestConversationService_ModeStateIsolation(t *testing.T) {
 	t.Run("sessions have independent mode states", func(t *testing.T) {
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		executorAdapter := tool.NewExecutorAdapter(fileManager)
-
-		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
 		if err != nil {
 			t.Fatalf("Failed to create service: %v", err)
 		}
@@ -967,11 +937,7 @@ func TestConversationService_ModeStateIsolation(t *testing.T) {
 
 func TestConversationService_ModeStatePersistence(t *testing.T) {
 	t.Run("mode persists across multiple sessions", func(t *testing.T) {
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		executorAdapter := tool.NewExecutorAdapter(fileManager)
-
-		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
 		if err != nil {
 			t.Fatalf("Failed to create service: %v", err)
 		}
@@ -1005,11 +971,7 @@ func TestConversationService_ModeStatePersistence(t *testing.T) {
 	})
 
 	t.Run("mode persists after processing state changes", func(t *testing.T) {
-		tempDir := t.TempDir()
-		fileManager := file.NewLocalFileManager(tempDir)
-		executorAdapter := tool.NewExecutorAdapter(fileManager)
-
-		service, err := NewConversationService(&mockAIProvider{}, executorAdapter)
+		service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
 		if err != nil {
 			t.Fatalf("Failed to create service: %v", err)
 		}
@@ -1539,6 +1501,475 @@ func (m *contextVerifyingMockAIProvider) SendMessage(
 		}
 		m.contextWasVerified = true
 	}
+
+	// Delegate to base mock
+	return m.mockAIProvider.SendMessage(ctx, messages, tools)
+}
+
+// =============================================================================
+// Thinking Block Integration Tests (RED PHASE - Intentionally Failing)
+// These tests define the expected behavior for thinking block conversion
+// in ProcessAssistantResponse().
+// =============================================================================
+
+func TestProcessAssistantResponse_WithThinkingBlocks(t *testing.T) {
+	t.Run("converts thinking blocks from entity to port when building message params", func(t *testing.T) {
+		// Create a mock AI provider that captures the messages it receives
+		captureProvider := &messageCapturingMockAIProvider{
+			mockAIProvider: mockAIProvider{
+				response: &entity.Message{
+					Role:    entity.RoleAssistant,
+					Content: "I thought about it deeply and here's the answer.",
+				},
+			},
+		}
+
+		service, err := NewConversationService(captureProvider, &mockToolExecutor{})
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		// Add a user message with thinking blocks
+		userMsg := &entity.Message{
+			Role:      entity.RoleUser,
+			Content:   "What is 2+2?",
+			Timestamp: time.Now(),
+			ThinkingBlocks: []entity.ThinkingBlock{
+				{
+					Thinking:  "Let me think about this math problem...",
+					Signature: "sig123",
+				},
+				{
+					Thinking:  "I need to add two numbers together.",
+					Signature: "sig456",
+				},
+			},
+		}
+
+		// Manually add message to conversation
+		conversation, _ := service.GetConversation(sessionID)
+		_ = conversation.AddMessage(*userMsg)
+
+		// Process assistant response
+		_, _, err = service.ProcessAssistantResponse(ctx, sessionID)
+		if err != nil {
+			t.Errorf("Expected ProcessAssistantResponse to succeed, got error: %v", err)
+		}
+
+		// Verify the AI provider received thinking blocks converted to port.ThinkingBlockParam
+		if !captureProvider.messagesCaptured {
+			t.Fatal("Expected AI provider to capture messages")
+		}
+
+		// Find the user message in captured messages
+		var foundUserMessage *port.MessageParam
+		for i := range captureProvider.capturedMessages {
+			if captureProvider.capturedMessages[i].Role == entity.RoleUser {
+				foundUserMessage = &captureProvider.capturedMessages[i]
+				break
+			}
+		}
+
+		if foundUserMessage == nil {
+			t.Fatal("Expected to find user message in captured messages")
+		}
+
+		// Verify thinking blocks were converted
+		if len(foundUserMessage.ThinkingBlocks) != 2 {
+			t.Errorf("Expected 2 thinking blocks in message params, got %d", len(foundUserMessage.ThinkingBlocks))
+			return // Stop test here if wrong count to prevent panic
+		}
+
+		// Verify first thinking block
+		if foundUserMessage.ThinkingBlocks[0].Thinking != "Let me think about this math problem..." {
+			t.Errorf("Expected first thinking block content 'Let me think about this math problem...', got '%s'",
+				foundUserMessage.ThinkingBlocks[0].Thinking)
+		}
+		if foundUserMessage.ThinkingBlocks[0].Signature != "sig123" {
+			t.Errorf("Expected first thinking block signature 'sig123', got '%s'",
+				foundUserMessage.ThinkingBlocks[0].Signature)
+		}
+
+		// Verify second thinking block
+		if foundUserMessage.ThinkingBlocks[1].Thinking != "I need to add two numbers together." {
+			t.Errorf("Expected second thinking block content 'I need to add two numbers together.', got '%s'",
+				foundUserMessage.ThinkingBlocks[1].Thinking)
+		}
+		if foundUserMessage.ThinkingBlocks[1].Signature != "sig456" {
+			t.Errorf("Expected second thinking block signature 'sig456', got '%s'",
+				foundUserMessage.ThinkingBlocks[1].Signature)
+		}
+	})
+
+	t.Run("handles messages without thinking blocks correctly", func(t *testing.T) {
+		captureProvider := &messageCapturingMockAIProvider{
+			mockAIProvider: mockAIProvider{
+				response: &entity.Message{
+					Role:    entity.RoleAssistant,
+					Content: "Simple answer without thinking.",
+				},
+			},
+		}
+
+		service, err := NewConversationService(captureProvider, &mockToolExecutor{})
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		// Add a user message WITHOUT thinking blocks
+		_, _ = service.AddUserMessage(ctx, sessionID, "What is 2+2?")
+
+		// Process assistant response
+		_, _, err = service.ProcessAssistantResponse(ctx, sessionID)
+		if err != nil {
+			t.Errorf("Expected ProcessAssistantResponse to succeed, got error: %v", err)
+		}
+
+		// Verify the AI provider received messages
+		if !captureProvider.messagesCaptured {
+			t.Fatal("Expected AI provider to capture messages")
+		}
+
+		// Find the user message
+		var foundUserMessage *port.MessageParam
+		for i := range captureProvider.capturedMessages {
+			if captureProvider.capturedMessages[i].Role == entity.RoleUser {
+				foundUserMessage = &captureProvider.capturedMessages[i]
+				break
+			}
+		}
+
+		if foundUserMessage == nil {
+			t.Fatal("Expected to find user message in captured messages")
+		}
+
+		// Verify no thinking blocks present
+		if foundUserMessage.ThinkingBlocks != nil {
+			t.Errorf("Expected nil thinking blocks for message without thinking, got %d blocks",
+				len(foundUserMessage.ThinkingBlocks))
+		}
+	})
+
+	t.Run("handles empty thinking blocks slice correctly", func(t *testing.T) {
+		captureProvider := &messageCapturingMockAIProvider{
+			mockAIProvider: mockAIProvider{
+				response: &entity.Message{
+					Role:    entity.RoleAssistant,
+					Content: "Response to empty thinking.",
+				},
+			},
+		}
+
+		service, err := NewConversationService(captureProvider, &mockToolExecutor{})
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		// Add a user message with empty thinking blocks slice
+		userMsg := &entity.Message{
+			Role:           entity.RoleUser,
+			Content:        "What is 2+2?",
+			Timestamp:      time.Now(),
+			ThinkingBlocks: []entity.ThinkingBlock{}, // Empty slice, not nil
+		}
+
+		conversation, _ := service.GetConversation(sessionID)
+		_ = conversation.AddMessage(*userMsg)
+
+		// Process assistant response
+		_, _, err = service.ProcessAssistantResponse(ctx, sessionID)
+		if err != nil {
+			t.Errorf("Expected ProcessAssistantResponse to succeed, got error: %v", err)
+		}
+
+		// Verify message was processed correctly
+		if !captureProvider.messagesCaptured {
+			t.Fatal("Expected AI provider to capture messages")
+		}
+
+		// Find the user message
+		var foundUserMessage *port.MessageParam
+		for i := range captureProvider.capturedMessages {
+			if captureProvider.capturedMessages[i].Role == entity.RoleUser {
+				foundUserMessage = &captureProvider.capturedMessages[i]
+				break
+			}
+		}
+
+		if foundUserMessage == nil {
+			t.Fatal("Expected to find user message in captured messages")
+		}
+
+		// Empty slice should be converted (may be nil or empty slice, both acceptable)
+		if foundUserMessage.ThinkingBlocks != nil && len(foundUserMessage.ThinkingBlocks) != 0 {
+			t.Errorf("Expected empty or nil thinking blocks for empty slice, got %d blocks",
+				len(foundUserMessage.ThinkingBlocks))
+		}
+	})
+
+	t.Run("handles assistant messages with thinking blocks", func(t *testing.T) {
+		captureProvider := &messageCapturingMockAIProvider{
+			mockAIProvider: mockAIProvider{
+				response: &entity.Message{
+					Role:    entity.RoleAssistant,
+					Content: "Here's my thoughtful response.",
+					ThinkingBlocks: []entity.ThinkingBlock{
+						{
+							Thinking:  "The assistant is thinking deeply about the response...",
+							Signature: "assistant_sig_789",
+						},
+					},
+				},
+			},
+		}
+
+		service, err := NewConversationService(captureProvider, &mockToolExecutor{})
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		// Add a user message
+		_, _ = service.AddUserMessage(ctx, sessionID, "Tell me something interesting")
+
+		// Process assistant response (which has thinking blocks)
+		response, _, err := service.ProcessAssistantResponse(ctx, sessionID)
+		if err != nil {
+			t.Errorf("Expected ProcessAssistantResponse to succeed, got error: %v", err)
+		}
+
+		// Verify the response message was added with thinking blocks preserved
+		if response == nil {
+			t.Fatal("Expected response message")
+		}
+
+		if len(response.ThinkingBlocks) != 1 {
+			t.Errorf("Expected 1 thinking block in response message, got %d", len(response.ThinkingBlocks))
+		}
+
+		if response.ThinkingBlocks[0].Thinking != "The assistant is thinking deeply about the response..." {
+			t.Errorf("Expected thinking content to be preserved in response, got '%s'",
+				response.ThinkingBlocks[0].Thinking)
+		}
+
+		if response.ThinkingBlocks[0].Signature != "assistant_sig_789" {
+			t.Errorf("Expected signature 'assistant_sig_789', got '%s'",
+				response.ThinkingBlocks[0].Signature)
+		}
+	})
+
+	t.Run("round-trip conversion preserves thinking block data", func(t *testing.T) {
+		// Test that entity -> param -> back to entity preserves all data
+		originalBlocks := []entity.ThinkingBlock{
+			{
+				Thinking:  "First thought with special chars: \n\t\"quotes\" and 'apostrophes'",
+				Signature: "sig_special_123",
+			},
+			{
+				Thinking:  "Second thought with unicode: 你好世界 🎉",
+				Signature: "sig_unicode_456",
+			},
+		}
+
+		captureProvider := &messageCapturingMockAIProvider{
+			mockAIProvider: mockAIProvider{
+				response: &entity.Message{
+					Role:    entity.RoleAssistant,
+					Content: "Round-trip test response.",
+				},
+			},
+		}
+
+		service, err := NewConversationService(captureProvider, &mockToolExecutor{})
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		// Add a message with thinking blocks
+		userMsg := &entity.Message{
+			Role:           entity.RoleUser,
+			Content:        "Test message",
+			Timestamp:      time.Now(),
+			ThinkingBlocks: originalBlocks,
+		}
+
+		conversation, _ := service.GetConversation(sessionID)
+		_ = conversation.AddMessage(*userMsg)
+
+		// Process assistant response
+		_, _, err = service.ProcessAssistantResponse(ctx, sessionID)
+		if err != nil {
+			t.Errorf("Expected ProcessAssistantResponse to succeed, got error: %v", err)
+		}
+
+		// Verify data was preserved through conversion
+		if !captureProvider.messagesCaptured {
+			t.Fatal("Expected AI provider to capture messages")
+		}
+
+		var foundUserMessage *port.MessageParam
+		for i := range captureProvider.capturedMessages {
+			if captureProvider.capturedMessages[i].Role == entity.RoleUser {
+				foundUserMessage = &captureProvider.capturedMessages[i]
+				break
+			}
+		}
+
+		if foundUserMessage == nil {
+			t.Fatal("Expected to find user message")
+		}
+
+		if len(foundUserMessage.ThinkingBlocks) != 2 {
+			t.Fatalf("Expected 2 thinking blocks after conversion, got %d", len(foundUserMessage.ThinkingBlocks))
+		}
+
+		// Verify all data preserved
+		for i := range originalBlocks {
+			if foundUserMessage.ThinkingBlocks[i].Thinking != originalBlocks[i].Thinking {
+				t.Errorf("Thinking content not preserved at index %d: expected '%s', got '%s'",
+					i, originalBlocks[i].Thinking, foundUserMessage.ThinkingBlocks[i].Thinking)
+			}
+			if foundUserMessage.ThinkingBlocks[i].Signature != originalBlocks[i].Signature {
+				t.Errorf("Signature not preserved at index %d: expected '%s', got '%s'",
+					i, originalBlocks[i].Signature, foundUserMessage.ThinkingBlocks[i].Signature)
+			}
+		}
+	})
+
+	t.Run("handles conversation with multiple messages having thinking blocks", func(t *testing.T) {
+		captureProvider := &messageCapturingMockAIProvider{
+			mockAIProvider: mockAIProvider{
+				response: &entity.Message{
+					Role:    entity.RoleAssistant,
+					Content: "Final response after multiple thoughts.",
+				},
+			},
+		}
+
+		service, err := NewConversationService(captureProvider, &mockToolExecutor{})
+		if err != nil {
+			t.Fatalf("Failed to create service: %v", err)
+		}
+
+		ctx := context.Background()
+		sessionID, err := service.StartConversation(ctx)
+		if err != nil {
+			t.Fatalf("Failed to start conversation: %v", err)
+		}
+
+		conversation, _ := service.GetConversation(sessionID)
+
+		// Add multiple messages with thinking blocks
+		msg1 := &entity.Message{
+			Role:      entity.RoleUser,
+			Content:   "First question",
+			Timestamp: time.Now(),
+			ThinkingBlocks: []entity.ThinkingBlock{
+				{Thinking: "First user thought", Signature: "user1"},
+			},
+		}
+		_ = conversation.AddMessage(*msg1)
+
+		msg2 := &entity.Message{
+			Role:      entity.RoleAssistant,
+			Content:   "First answer",
+			Timestamp: time.Now(),
+			ThinkingBlocks: []entity.ThinkingBlock{
+				{Thinking: "First assistant thought", Signature: "assistant1"},
+			},
+		}
+		_ = conversation.AddMessage(*msg2)
+
+		msg3 := &entity.Message{
+			Role:      entity.RoleUser,
+			Content:   "Second question",
+			Timestamp: time.Now(),
+			ThinkingBlocks: []entity.ThinkingBlock{
+				{Thinking: "Second user thought", Signature: "user2"},
+			},
+		}
+		_ = conversation.AddMessage(*msg3)
+
+		// Process assistant response
+		_, _, err = service.ProcessAssistantResponse(ctx, sessionID)
+		if err != nil {
+			t.Errorf("Expected ProcessAssistantResponse to succeed, got error: %v", err)
+		}
+
+		// Verify all messages were sent with thinking blocks preserved
+		if !captureProvider.messagesCaptured {
+			t.Fatal("Expected AI provider to capture messages")
+		}
+
+		// Should have 3 messages in captured messages (user, assistant, user)
+		if len(captureProvider.capturedMessages) != 3 {
+			t.Errorf("Expected 3 messages captured, got %d", len(captureProvider.capturedMessages))
+		}
+
+		// Verify each message has its thinking blocks
+		expectedThinking := []string{"First user thought", "First assistant thought", "Second user thought"}
+		for i, msg := range captureProvider.capturedMessages {
+			if len(msg.ThinkingBlocks) != 1 {
+				t.Errorf("Message %d: expected 1 thinking block, got %d", i, len(msg.ThinkingBlocks))
+				continue
+			}
+			if msg.ThinkingBlocks[0].Thinking != expectedThinking[i] {
+				t.Errorf("Message %d: expected thinking '%s', got '%s'",
+					i, expectedThinking[i], msg.ThinkingBlocks[0].Thinking)
+			}
+		}
+	})
+}
+
+// =============================================================================
+// Message Capturing Mock AI Provider
+// This mock captures the messages it receives for verification
+// =============================================================================
+
+type messageCapturingMockAIProvider struct {
+	mockAIProvider
+
+	capturedMessages []port.MessageParam
+	messagesCaptured bool
+}
+
+func (m *messageCapturingMockAIProvider) SendMessage(
+	ctx context.Context,
+	messages []port.MessageParam,
+	tools []port.ToolParam,
+) (*entity.Message, []port.ToolCallInfo, error) {
+	// Capture the messages
+	m.capturedMessages = messages
+	m.messagesCaptured = true
 
 	// Delegate to base mock
 	return m.mockAIProvider.SendMessage(ctx, messages, tools)

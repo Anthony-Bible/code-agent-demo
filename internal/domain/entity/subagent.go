@@ -38,16 +38,18 @@ const (
 
 // Subagent represents an agent with a specialized system prompt.
 type Subagent struct {
-	Name           string             `yaml:"name"`                    // Required: subagent name
-	Description    string             `yaml:"description"`             // Required: what the subagent does
-	Model          string             `yaml:"model,omitempty"`         // Optional: model to use
-	MaxActions     int                `yaml:"max_actions,omitempty"`   // Optional: maximum actions
-	AllowedTools   []string           `yaml:"allowed-tools,omitempty"` // Optional: allowed tools
-	ScriptPath     string             `yaml:"-"`                       // Absolute path to subagent directory
-	OriginalPath   string             `yaml:"-"`                       // Original path (relative or absolute)
-	RawFrontmatter string             `yaml:"-"`                       // Raw YAML frontmatter
-	RawContent     string             `yaml:"-"`                       // Content after frontmatter (system prompt)
-	SourceType     SubagentSourceType `yaml:"-"`                       // Where the subagent was discovered from
+	Name            string             `yaml:"name"`                       // Required: subagent name
+	Description     string             `yaml:"description"`                // Required: what the subagent does
+	Model           string             `yaml:"model,omitempty"`            // Optional: model to use
+	MaxActions      int                `yaml:"max_actions,omitempty"`      // Optional: maximum actions
+	AllowedTools    []string           `yaml:"allowed-tools,omitempty"`    // Optional: allowed tools
+	ThinkingEnabled *bool              `yaml:"thinking_enabled,omitempty"` // Optional: enable thinking (nil = inherit)
+	ThinkingBudget  int64              `yaml:"thinking_budget,omitempty"`  // Optional: thinking token budget (0 = inherit)
+	ScriptPath      string             `yaml:"-"`                          // Absolute path to subagent directory
+	OriginalPath    string             `yaml:"-"`                          // Original path (relative or absolute)
+	RawFrontmatter  string             `yaml:"-"`                          // Raw YAML frontmatter
+	RawContent      string             `yaml:"-"`                          // Content after frontmatter (system prompt)
+	SourceType      SubagentSourceType `yaml:"-"`                          // Where the subagent was discovered from
 }
 
 // UnmarshalYAML implements custom YAML unmarshaling to handle allowed-tools as either a string or slice.
@@ -60,6 +62,7 @@ func (s *Subagent) UnmarshalYAML(value *yaml.Node) error {
 
 	s.parseStringFields(raw)
 	s.parseIntFields(raw)
+	s.parseBoolFields(raw)
 	s.parseAllowedTools(raw)
 
 	return nil
@@ -80,6 +83,15 @@ func (s *Subagent) parseStringFields(raw map[string]interface{}) {
 func (s *Subagent) parseIntFields(raw map[string]interface{}) {
 	if v, ok := raw["max_actions"].(int); ok {
 		s.MaxActions = v
+	}
+	if v, ok := raw["thinking_budget"].(int); ok {
+		s.ThinkingBudget = int64(v)
+	}
+}
+
+func (s *Subagent) parseBoolFields(raw map[string]interface{}) {
+	if v, ok := raw["thinking_enabled"].(bool); ok {
+		s.ThinkingEnabled = &v
 	}
 }
 
