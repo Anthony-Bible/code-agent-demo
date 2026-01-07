@@ -247,7 +247,7 @@ func (r *InvestigationRunner) Run(
 		maxActions:      r.config.MaxActions,
 	}
 	if rc.maxActions == 0 {
-		rc.maxActions = 20
+		rc.maxActions = 50
 	}
 
 	sessionID, err := r.convService.StartConversation(ctx)
