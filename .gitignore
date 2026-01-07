@@ -1,2 +1,18 @@
 agent
 .agent/investigations/
+
+# Binary artifacts
+code-editing-agent
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Database files
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Log files
+*.log
+logs/*.log
