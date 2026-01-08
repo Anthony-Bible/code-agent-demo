@@ -429,7 +429,12 @@ Content.`,
 					t.Fatalf("%s: ThinkingEnabled should not be nil", tt.description)
 				}
 				if *subagent.ThinkingEnabled != tt.expectValue {
-					t.Errorf("%s: ThinkingEnabled = %v, want %v", tt.description, *subagent.ThinkingEnabled, tt.expectValue)
+					t.Errorf(
+						"%s: ThinkingEnabled = %v, want %v",
+						tt.description,
+						*subagent.ThinkingEnabled,
+						tt.expectValue,
+					)
 				}
 			}
 		})

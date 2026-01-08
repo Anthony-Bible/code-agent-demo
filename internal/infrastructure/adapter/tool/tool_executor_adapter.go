@@ -142,6 +142,16 @@ func (a *ExecutorAdapter) SetSkillManager(sm port.SkillManager) {
 // SetSubagentManager sets the subagent manager for agent discovery functionality.
 // This should be called after creation to enable dynamic agent listing in tool descriptions.
 // The subagent manager is used to discover available agents and include them in the task tool description.
+//
+// Blocking Behavior:
+// This method is thread-safe but blocks ALL tool operations while executing. It acquires a write lock
+// on the internal mutex, preventing concurrent access to ExecuteTool, ListTools, GetTool,
+// ValidateToolInput, and SetSubagentUseCase. The method holds the lock while calling registerTaskTool(),
+// which may perform I/O operations (DiscoverAgents) that could be slow.
+//
+// WARNING: Set the subagent manager once during initialization. Avoid calling this method frequently
+// in hot paths or during active tool execution, as it will block all tool operations until complete.
+// For optimal performance, configure the subagent manager before starting the main execution loop.
 func (a *ExecutorAdapter) SetSubagentManager(sm port.SubagentManager) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -1131,7 +1141,11 @@ func validateURL(rawURL string) error {
 		// Check all resolved IP addresses
 		for _, ip := range ips {
 			if isPrivateIP(ip) {
-				return fmt.Errorf("hostname %s resolves to private IP address %s and is blocked for security", host, ip.String())
+				return fmt.Errorf(
+					"hostname %s resolves to private IP address %s and is blocked for security",
+					host,
+					ip.String(),
+				)
 			}
 		}
 
@@ -1182,6 +1196,9 @@ func htmlToText(htmlContent string) (string, error) {
 			for c := n.FirstChild; c != nil; c = c.NextSibling {
 				extractText(c)
 			}
+		case html.ErrorNode, html.CommentNode, html.DoctypeNode, html.RawNode:
+			// Skip these node types - they don't contain text content
+			return
 		}
 	}
 
