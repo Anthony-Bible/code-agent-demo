@@ -91,7 +91,12 @@ This subagent has complete metadata including optional fields.`
 		expectedTools := []string{"bash", "read_file", "write_file"}
 		for i, expected := range expectedTools {
 			if subagent.AllowedTools[i] != expected {
-				t.Errorf("ParseSubagentFromYAML() AllowedTools[%d] = %v, want %v", i, subagent.AllowedTools[i], expected)
+				t.Errorf(
+					"ParseSubagentFromYAML() AllowedTools[%d] = %v, want %v",
+					i,
+					subagent.AllowedTools[i],
+					expected,
+				)
 			}
 		}
 	}
@@ -133,7 +138,12 @@ Content here.`
 		expectedTools := []string{"bash", "read_file", "list_files", "edit_file"}
 		for i, expected := range expectedTools {
 			if subagent.AllowedTools[i] != expected {
-				t.Errorf("ParseSubagentFromYAML() AllowedTools[%d] = %v, want %v", i, subagent.AllowedTools[i], expected)
+				t.Errorf(
+					"ParseSubagentFromYAML() AllowedTools[%d] = %v, want %v",
+					i,
+					subagent.AllowedTools[i],
+					expected,
+				)
 			}
 		}
 	}
@@ -163,7 +173,12 @@ Content here.`
 		expectedTools := []string{"tool1", "tool2", "tool3"}
 		for i, expected := range expectedTools {
 			if subagent.AllowedTools[i] != expected {
-				t.Errorf("ParseSubagentFromYAML() AllowedTools[%d] = %v, want %v", i, subagent.AllowedTools[i], expected)
+				t.Errorf(
+					"ParseSubagentFromYAML() AllowedTools[%d] = %v, want %v",
+					i,
+					subagent.AllowedTools[i],
+					expected,
+				)
 			}
 		}
 	}

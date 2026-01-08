@@ -105,7 +105,7 @@ func NewContainer(cfg *Config) (*Container, error) {
 	uiAdapter := ui.NewCLIAdapterWithHistory(cfg.HistoryFile)
 	skillManager := skill.NewLocalSkillManager()
 
-	// Create subagentManager early (before aiAdapter) so it can be included in system prompt
+	// Create subagentManager early for tool and system prompt integration
 	subagentManager := subagent.NewLocalSubagentManagerWithDirs([]subagent.DirConfig{
 		{Path: filepath.Join(cfg.WorkingDir, "agents"), SourceType: entity.SubagentSourceProject},
 		{Path: filepath.Join(cfg.WorkingDir, ".claude", "agents"), SourceType: entity.SubagentSourceProjectClaude},
@@ -117,6 +117,7 @@ func NewContainer(cfg *Config) (*Container, error) {
 	// Create base executor and wrap with planning decorator
 	baseExecutor := tool.NewExecutorAdapter(fileManager)
 	baseExecutor.SetSkillManager(skillManager)
+	baseExecutor.SetSubagentManager(subagentManager)
 	toolExecutor := tool.NewPlanningExecutorAdapter(baseExecutor, fileManager, cfg.WorkingDir)
 
 	// Set up bash command confirmation callback

@@ -2472,7 +2472,10 @@ func TestSubagentRunner_Run_ThinkingModeWithDifferentConfigs(t *testing.T) {
 				}
 			} else {
 				if convService.setThinkingModeCalls != 0 {
-					t.Errorf("SetThinkingMode() call count = %d, want 0 (thinking disabled)", convService.setThinkingModeCalls)
+					t.Errorf(
+						"SetThinkingMode() call count = %d, want 0 (thinking disabled)",
+						convService.setThinkingModeCalls,
+					)
 				}
 			}
 		})

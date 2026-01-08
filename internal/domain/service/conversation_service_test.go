@@ -1523,7 +1523,11 @@ func (m *contextVerifyingMockAIProvider) SendMessage(
 			return nil, nil, errors.New("expected custom system prompt in context, but not found")
 		}
 		if customPromptInfo.SessionID != m.expectedSessionID {
-			return nil, nil, fmt.Errorf("expected session ID '%s', got '%s'", m.expectedSessionID, customPromptInfo.SessionID)
+			return nil, nil, fmt.Errorf(
+				"expected session ID '%s', got '%s'",
+				m.expectedSessionID,
+				customPromptInfo.SessionID,
+			)
 		}
 		if customPromptInfo.Prompt != m.expectedPrompt {
 			return nil, nil, fmt.Errorf("expected prompt '%s', got '%s'", m.expectedPrompt, customPromptInfo.Prompt)

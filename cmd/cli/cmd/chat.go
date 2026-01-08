@@ -154,7 +154,9 @@ func runChat(cmd *cobra.Command, args []string) error {
 				// Display current mode status
 				convSvc := container.ConversationService()
 				if isPlanMode, _ := convSvc.IsPlanMode(sessionID); isPlanMode {
-					_ = uiAdapter.DisplaySystemMessage("Plan mode enabled: Tools will write plans to files instead of executing.")
+					_ = uiAdapter.DisplaySystemMessage(
+						"Plan mode enabled: Tools will write plans to files instead of executing.",
+					)
 				} else {
 					_ = uiAdapter.DisplaySystemMessage("Plan mode disabled: Tools will execute normally.")
 				}
@@ -178,7 +180,9 @@ func runChat(cmd *cobra.Command, args []string) error {
 				// Display current thinking mode status
 				convSvc := container.ConversationService()
 				if thinkingInfo, _ := convSvc.GetThinkingMode(sessionID); thinkingInfo.Enabled {
-					_ = uiAdapter.DisplaySystemMessage(fmt.Sprintf("Extended thinking enabled: Budget %d tokens", thinkingInfo.BudgetTokens))
+					_ = uiAdapter.DisplaySystemMessage(
+						fmt.Sprintf("Extended thinking enabled: Budget %d tokens", thinkingInfo.BudgetTokens),
+					)
 				} else {
 					_ = uiAdapter.DisplaySystemMessage("Extended thinking disabled")
 				}

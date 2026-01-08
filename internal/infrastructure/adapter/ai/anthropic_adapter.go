@@ -369,22 +369,6 @@ func (a *AnthropicAdapter) buildBasePromptWithSkills() string {
 		"Use the `activate_skill` tool to load the full content of a skill when its capabilities are needed for the task at hand.",
 	)
 
-	// Add subagents section if subagent manager is available
-	if a.subagentManager != nil {
-		agents, err := a.subagentManager.DiscoverAgents(context.Background())
-		if err == nil && agents.TotalCount > 0 {
-			sb.WriteString("\n\n<available_subagents>\n")
-			sb.WriteString("Use the 'task' tool to delegate work to these specialized agents:\n")
-			for _, agent := range agents.Subagents {
-				sb.WriteString("  <agent>\n")
-				sb.WriteString(fmt.Sprintf("    <name>%s</name>\n", agent.Name))
-				sb.WriteString(fmt.Sprintf("    <description>%s</description>\n", agent.Description))
-				sb.WriteString("  </agent>\n")
-			}
-			sb.WriteString("</available_subagents>\n")
-		}
-	}
-
 	a.cachedSystemPrompt = sb.String()
 	return a.cachedSystemPrompt
 }
@@ -676,8 +660,20 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 		content = string(response.StopReason)
 	}
 
-	// Create the message
-	msg, err := entity.NewMessage(entity.RoleAssistant, content)
+	// If we still have no content but have thinking blocks, use a placeholder
+	// This allows messages with only thinking content to pass validation
+	if content == "" && len(thinkingBlocks) > 0 {
+		content = "[AI internal reasoning completed]"
+	}
+
+	// Final safety net - if we still have no content, use a generic placeholder
+	if content == "" {
+		content = "[No content received from AI]"
+	}
+
+	// Create the message with thinking blocks (if any)
+	// This properly handles the case where content is empty but thinking blocks are present
+	msg, err := entity.NewMessageWithThinkingBlocks(entity.RoleAssistant, content, thinkingBlocks)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create message: %w", err)
 	}
@@ -685,11 +681,6 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 	// Store tool calls in the message entity so they persist in conversation history
 	if len(entityToolCalls) > 0 {
 		msg.ToolCalls = entityToolCalls
-	}
-
-	// Store thinking blocks in the message entity (CRITICAL: signatures preserved exactly)
-	if len(thinkingBlocks) > 0 {
-		msg.ThinkingBlocks = thinkingBlocks
 	}
 
 	return msg, toolCalls, nil

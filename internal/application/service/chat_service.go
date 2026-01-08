@@ -264,7 +264,9 @@ func (cs *ChatService) SendMessage(
 			if !thinkingHeaderDisplayed {
 				thinkingHeaderDisplayed = true
 				// Reset, show "Claude (thinking)" header in magenta, continue with thinking color
-				if err := cs.userInterface.DisplayStreamingText("\x1b[0m\x1b[95mClaude (thinking)\x1b[0m: \x1b[95m"); err != nil {
+				if err := cs.userInterface.DisplayStreamingText(
+					"\x1b[0m\x1b[95mClaude (thinking)\x1b[0m: \x1b[95m",
+				); err != nil {
 					return err
 				}
 			}
@@ -501,7 +503,9 @@ func (cs *ChatService) continueAfterToolExecution(
 			if !thinkingHeaderDisplayed {
 				thinkingHeaderDisplayed = true
 				// Reset, show "Claude (thinking)" header in magenta, continue with thinking color
-				if err := cs.userInterface.DisplayStreamingText("\x1b[0m\x1b[95mClaude (thinking)\x1b[0m: \x1b[95m"); err != nil {
+				if err := cs.userInterface.DisplayStreamingText(
+					"\x1b[0m\x1b[95mClaude (thinking)\x1b[0m: \x1b[95m",
+				); err != nil {
 					return err
 				}
 			}
