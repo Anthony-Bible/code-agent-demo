@@ -369,22 +369,6 @@ func (a *AnthropicAdapter) buildBasePromptWithSkills() string {
 		"Use the `activate_skill` tool to load the full content of a skill when its capabilities are needed for the task at hand.",
 	)
 
-	// Add subagents section if subagent manager is available
-	if a.subagentManager != nil {
-		agents, err := a.subagentManager.DiscoverAgents(context.Background())
-		if err == nil && agents.TotalCount > 0 {
-			sb.WriteString("\n\n<available_subagents>\n")
-			sb.WriteString("Use the 'task' tool to delegate work to these specialized agents:\n")
-			for _, agent := range agents.Subagents {
-				sb.WriteString("  <agent>\n")
-				sb.WriteString(fmt.Sprintf("    <name>%s</name>\n", agent.Name))
-				sb.WriteString(fmt.Sprintf("    <description>%s</description>\n", agent.Description))
-				sb.WriteString("  </agent>\n")
-			}
-			sb.WriteString("</available_subagents>\n")
-		}
-	}
-
 	a.cachedSystemPrompt = sb.String()
 	return a.cachedSystemPrompt
 }

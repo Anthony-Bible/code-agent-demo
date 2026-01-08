@@ -62,6 +62,7 @@ type CommandConfirmationCallback func(command string, isDangerous bool, reason s
 type ExecutorAdapter struct {
 	fileManager                 port.FileManager
 	skillManager                port.SkillManager
+	subagentManager             port.SubagentManager
 	subagentUseCase             SubagentUseCaseInterface
 	tools                       map[string]entity.Tool
 	mu                          sync.RWMutex
@@ -115,11 +116,13 @@ func wrapFileOperationError(operation string, err error) error {
 
 // NewExecutorAdapter creates a new ExecutorAdapter with the provided FileManager.
 // SkillManager can be provided via SetSkillManager for skill-related functionality.
+// SubagentManager can be provided via SetSubagentManager for subagent-related functionality.
 // It also registers the default tools (read_file, list_files, edit_file, bash, fetch, activate_skill).
 func NewExecutorAdapter(fileManager port.FileManager) *ExecutorAdapter {
 	adapter := &ExecutorAdapter{
 		fileManager:         fileManager,
 		skillManager:        nil,
+		subagentManager:     nil,
 		tools:               make(map[string]entity.Tool),
 		investigationStates: make(map[string]string),
 	}
@@ -134,6 +137,17 @@ func NewExecutorAdapter(fileManager port.FileManager) *ExecutorAdapter {
 // This should be called after creation to enable skill activation features.
 func (a *ExecutorAdapter) SetSkillManager(sm port.SkillManager) {
 	a.skillManager = sm
+}
+
+// SetSubagentManager sets the subagent manager for agent discovery functionality.
+// This should be called after creation to enable dynamic agent listing in tool descriptions.
+// The subagent manager is used to discover available agents and include them in the task tool description.
+func (a *ExecutorAdapter) SetSubagentManager(sm port.SubagentManager) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.subagentManager = sm
+	// Re-register the task tool with updated agent list
+	a.registerTaskTool()
 }
 
 // SetSubagentUseCase sets the subagent use case for task delegation.
@@ -498,28 +512,8 @@ The tool returns aggregated results showing success/failure counts and individua
 	}
 	a.tools[batchToolTool.Name] = batchToolTool
 
-	// Register task tool
-	taskTool := entity.Tool{
-		ID:          "task",
-		Name:        "task",
-		Description: "Spawns a subagent to handle a delegated task. Returns the subagent's result when complete. Cannot be called from within a subagent (prevents recursion).",
-		InputSchema: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"agent_name": map[string]interface{}{
-					"type":        "string",
-					"description": "Name of the subagent to spawn (e.g., 'code-reviewer', 'test-writer')",
-				},
-				"prompt": map[string]interface{}{
-					"type":        "string",
-					"description": "Task description/instructions for the subagent to execute",
-				},
-			},
-			"required": []string{"agent_name", "prompt"},
-		},
-		RequiredFields: []string{"agent_name", "prompt"},
-	}
-	a.tools[taskTool.Name] = taskTool
+	// Register task tool (dynamically includes available agents if subagentManager is set)
+	a.registerTaskTool()
 
 	// Register delegate tool
 	delegateTool := entity.Tool{
@@ -1528,6 +1522,49 @@ func (a *ExecutorAdapter) registerInvestigationTools() {
 		RequiredFields: []string{"investigation_id", "message"},
 	}
 	a.tools[reportInvestigationTool.Name] = reportInvestigationTool
+}
+
+// registerTaskTool registers the task tool with dynamic agent listing.
+// If a subagentManager is available, it discovers agents and includes them in the tool description.
+// This method is called during initialization and when SetSubagentManager is invoked.
+func (a *ExecutorAdapter) registerTaskTool() {
+	baseDescription := "Spawns a subagent to handle a delegated task. Returns the subagent's result when complete. Cannot be called from within a subagent (prevents recursion)."
+
+	// Try to discover available agents if subagentManager is set
+	var fullDescription strings.Builder
+	fullDescription.WriteString(baseDescription)
+
+	if a.subagentManager != nil {
+		agents, err := a.subagentManager.DiscoverAgents(context.Background())
+		if err == nil && agents.TotalCount > 0 {
+			fullDescription.WriteString("\n\nAvailable agents:\n")
+			for _, agent := range agents.Subagents {
+				fullDescription.WriteString(fmt.Sprintf("- %s: %s\n", agent.Name, agent.Description))
+			}
+		}
+	}
+
+	taskTool := entity.Tool{
+		ID:          "task",
+		Name:        "task",
+		Description: fullDescription.String(),
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"agent_name": map[string]interface{}{
+					"type":        "string",
+					"description": "Name of the subagent to spawn (e.g., 'code-reviewer', 'test-writer')",
+				},
+				"prompt": map[string]interface{}{
+					"type":        "string",
+					"description": "Task description/instructions for the subagent to execute",
+				},
+			},
+			"required": []string{"agent_name", "prompt"},
+		},
+		RequiredFields: []string{"agent_name", "prompt"},
+	}
+	a.tools[taskTool.Name] = taskTool
 }
 
 // Investigation status constants.
