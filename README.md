@@ -179,121 +179,19 @@ code-editing-agent/
    cd code-editing-agent
    ```
 
-### Extended Thinking Mode 🧠
+2. **Install dependencies**
+   ```bash
+   go mod download
+   ```
 
-Extended thinking allows Claude to show its internal reasoning process before generating responses. This feature helps you understand how the AI approaches problems and can improve response quality for complex tasks.
+3. **Build the application**
+   ```bash
+   go build -o agent ./cmd/cli
+   ```
 
-#### Enabling Extended Thinking
-
-**Via CLI flags:**
-```bash
-# Enable with defaults (10,000 token budget, thinking hidden)
-./agent chat --thinking
-
-# Enable with custom budget and show thinking
-./agent chat --thinking --thinking-budget 15000 --show-thinking
-```
-
-**Via environment variables:**
-```bash
-export AGENT_THINKING_ENABLED=true
-export AGENT_THINKING_BUDGET=10000
-export AGENT_SHOW_THINKING=true
-./agent chat
-```
-
-**Via runtime commands:**
-```
-> :thinking on         # Enable thinking mode
-Extended thinking enabled (budget: 10000 tokens)
-
-> :thinking off        # Disable thinking mode
-Extended thinking disabled
-
-> :thinking budget 15000  # Set custom budget
-Thinking budget set to 15000 tokens
-```
-
-#### Extended Thinking Configuration
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--thinking` | `false` | Enable extended thinking mode |
-| `--thinking-budget` | `10000` | Token budget for thinking (min 1024) |
-| `--show-thinking` | `false` | Display AI's reasoning process |
-| `--max-tokens` | `20000` | Maximum tokens for responses |
-
-**Notes:**
-- Extended thinking requires Claude Sonnet 3.5+ models
-- The thinking budget is separate from but counted within `max-tokens`
-- By default, thinking is processed but not displayed (hidden from output)
-- Use `--show-thinking` to see the AI's reasoning in terminal
-
-### Available Tools 🛠️
-go install github.com/yourusername/code-editing-agent/cmd/cli@latest
-```
-
-### Verify Installation
+#### Method 2: Global Install via Go
 
 ```bash
-# Check the agent is working
-./agent --version
-
-# Test with a simple command
-./agent chat --help
-```
-
-### Extended Thinking Mode 🧠
-
-Extended thinking allows Claude to show its internal reasoning process before generating responses. This feature helps you understand how the AI approaches problems and can improve response quality for complex tasks.
-
-#### Enabling Extended Thinking
-
-**Via CLI flags:**
-```bash
-# Enable with defaults (10,000 token budget, thinking hidden)
-./agent chat --thinking
-
-# Enable with custom budget and show thinking
-./agent chat --thinking --thinking-budget 15000 --show-thinking
-```
-
-**Via environment variables:**
-```bash
-export AGENT_THINKING_ENABLED=true
-export AGENT_THINKING_BUDGET=10000
-export AGENT_SHOW_THINKING=true
-./agent chat
-```
-
-**Via runtime commands:**
-```
-> :thinking on         # Enable thinking mode
-Extended thinking enabled (budget: 10000 tokens)
-
-> :thinking off        # Disable thinking mode
-Extended thinking disabled
-
-> :thinking budget 15000  # Set custom budget
-Thinking budget set to 15000 tokens
-```
-
-#### Extended Thinking Configuration
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--thinking` | `false` | Enable extended thinking mode |
-| `--thinking-budget` | `10000` | Token budget for thinking (min 1024) |
-| `--show-thinking` | `false` | Display AI's reasoning process |
-| `--max-tokens` | `20000` | Maximum tokens for responses |
-
-**Notes:**
-- Extended thinking requires Claude Sonnet 3.5+ models
-- The thinking budget is separate from but counted within `max-tokens`
-- By default, thinking is processed but not displayed (hidden from output)
-- Use `--show-thinking` to see the AI's reasoning in terminal
-
-### Available Tools 🛠️
 go install github.com/yourusername/code-editing-agent/cmd/cli@latest
 ```
 
@@ -326,7 +224,7 @@ New session started: 3a1b2c3d4e5f6789...
 [Assistant: Found 5 Go files...]
 ```
 
-### Extended Thinking Mode
+### Extended Thinking Mode 🧠
 
 Extended thinking allows Claude to show its internal reasoning process before generating responses. This feature helps you understand how the AI approaches problems and can improve response quality for complex tasks.
 
@@ -351,29 +249,32 @@ export AGENT_SHOW_THINKING=true
 
 **Via runtime commands:**
 ```
-> :thinking on        # Enable thinking mode
-Extended thinking enabled: Budget 10000 tokens
+> :thinking on         # Enable thinking mode
+Extended thinking enabled (budget: 10000 tokens)
 
-> :thinking off       # Disable thinking mode
+> :thinking off        # Disable thinking mode
 Extended thinking disabled
+
+> :thinking budget 15000  # Set custom budget
+Thinking budget set to 15000 tokens
 
 > :thinking toggle    # Toggle current state
 ```
 
-#### Extended Thinking Options
+#### Extended Thinking Configuration
 
-| Flag | Default | Description |
-|------|---------|-------------|
+| Option | Default | Description |
+|--------|---------|-------------|
 | `--thinking` | `false` | Enable extended thinking mode |
-| `--thinking-budget` | `10000` | Token budget for thinking (minimum 1024) |
+| `--thinking-budget` | `10000` | Token budget for thinking (min 1024) |
 | `--show-thinking` | `false` | Display AI's reasoning process |
-| `--max-tokens` | `20000` | Maximum tokens for responses (increased to accommodate thinking) |
+| `--max-tokens` | `20000` | Maximum tokens for responses |
 
 **Notes:**
-- Extended thinking requires Claude Sonnet 3.7+ or Claude Sonnet 4.5 models
+- Extended thinking requires Claude 3.5 Sonnet or newer models
 - The thinking budget is separate from but counted within `max-tokens`
 - By default, thinking is processed but not displayed (hidden from output)
-- Use `--show-thinking` to see the AI's reasoning in magenta color
+- Use `--show-thinking` to see the AI's reasoning in the terminal
 
 ### Available Tools
 
