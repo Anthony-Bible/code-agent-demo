@@ -354,18 +354,14 @@ This skill should appear in the system prompt.
 		t.Fatalf("Failed to discover skills: %v", err)
 	}
 
-	// Create AI adapter with skill manager
-	_ = ai.NewAnthropicAdapter("test-model", 4096, skillManager, nil)
+	// Create AI adapter (skills are now in tool descriptions, not system prompt)
+	_ = ai.NewAnthropicAdapter("test-model", 4096, nil)
 
-	// The system prompt should include skill metadata
-	// We can verify this by checking that the skill name appears in messages
-	// Note: We can't directly access the internal system prompt,
-	// but we can verify the AI adapter has the skill manager
+	// Skills are now included in the activate_skill tool description instead of the system prompt.
+	// The AI adapter no longer needs the skill manager.
 
-	// Test that the adapter can be created with skill manager
-	// We can't test the actual system prompt content directly since it's internal,
-	// but we verify that the adapter is properly constructed with skill manager integration
-	adapter := ai.NewAnthropicAdapter("test-model", 4096, skillManager, nil)
+	// Test that the adapter can be created
+	adapter := ai.NewAnthropicAdapter("test-model", 4096, nil)
 
 	// Verify the adapter was created (non-nil)
 	if adapter == nil {

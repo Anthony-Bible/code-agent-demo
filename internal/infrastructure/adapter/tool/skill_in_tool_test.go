@@ -11,9 +11,15 @@ import (
 
 // TestSkillsInToolDescription verifies that skills are included in the activate_skill tool description.
 func TestSkillsInToolDescription(t *testing.T) {
-	// Change to project root for test to find skills directory
-	originalWd, _ := os.Getwd()
-	projectRoot := filepath.Join(originalWd, "../../../..")
+	// Get project root with proper error handling
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+	projectRoot, err := filepath.Abs(filepath.Join(originalWd, "../../../.."))
+	if err != nil {
+		t.Fatalf("Failed to get project root: %v", err)
+	}
 	t.Chdir(projectRoot)
 
 	// Create skill manager

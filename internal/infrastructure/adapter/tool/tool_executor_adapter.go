@@ -136,8 +136,14 @@ func NewExecutorAdapter(fileManager port.FileManager) *ExecutorAdapter {
 // SetSkillManager sets the skill manager for skill-related functionality.
 // This should be called after creation to enable skill activation features.
 // It also rebuilds the activate_skill tool to include available skills in its description.
+//
+// This method is thread-safe but blocks tool operations momentarily while updating.
+// Call once during initialization before starting the main execution loop.
 func (a *ExecutorAdapter) SetSkillManager(sm port.SkillManager) {
+	// Acquire lock to safely set skillManager field
+	a.mu.Lock()
 	a.skillManager = sm
+	a.mu.Unlock()
 	// Rebuild activate_skill tool with skill manager for dynamic description
 	a.rebuildActivateSkillTool()
 }
@@ -645,9 +651,16 @@ func (a *ExecutorAdapter) buildActivateSkillDescription() string {
 		return baseDescription
 	}
 
-	// Try to discover skills
-	skills, err := a.skillManager.DiscoverSkills(context.Background())
-	if err != nil || len(skills.Skills) == 0 {
+	// Try to discover skills with timeout to prevent blocking indefinitely
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	skills, err := a.skillManager.DiscoverSkills(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to discover skills for tool description: %v\n", err)
+		return baseDescription
+	}
+	if len(skills.Skills) == 0 {
 		return baseDescription
 	}
 

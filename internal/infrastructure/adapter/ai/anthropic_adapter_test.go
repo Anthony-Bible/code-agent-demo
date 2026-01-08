@@ -462,8 +462,7 @@ func TestConvertTools_RequiredPreservesOrder(t *testing.T) {
 func TestGetSystemPrompt_CustomPromptTakesPrecedenceOverBasePrompt(t *testing.T) {
 	// Setup: create adapter with no skill manager for predictable base prompt
 	adapter := &AnthropicAdapter{
-		model:        "test-model",
-		skillManager: nil, // No skills for simpler test
+		model: "test-model",
 	}
 
 	// Expected prompts
@@ -503,8 +502,7 @@ func TestGetSystemPrompt_CustomPromptTakesPrecedenceOverBasePrompt(t *testing.T)
 func TestGetSystemPrompt_CustomPromptTakesPrecedenceOverPlanMode(t *testing.T) {
 	// Setup: create adapter
 	adapter := &AnthropicAdapter{
-		model:        "test-model",
-		skillManager: nil,
+		model: "test-model",
 	}
 
 	// Expected prompts
@@ -555,8 +553,7 @@ func TestGetSystemPrompt_CustomPromptTakesPrecedenceOverPlanMode(t *testing.T) {
 func TestGetSystemPrompt_EmptyCustomPromptFallsBackToBasePrompt(t *testing.T) {
 	// Setup: create adapter
 	adapter := &AnthropicAdapter{
-		model:        "test-model",
-		skillManager: nil,
+		model: "test-model",
 	}
 
 	// Setup: create context with empty custom prompt
@@ -589,8 +586,7 @@ func TestGetSystemPrompt_EmptyCustomPromptFallsBackToBasePrompt(t *testing.T) {
 func TestGetSystemPrompt_NoCustomPromptWithPlanModeReturnsPlanPrompt(t *testing.T) {
 	// Setup: create adapter
 	adapter := &AnthropicAdapter{
-		model:        "test-model",
-		skillManager: nil,
+		model: "test-model",
 	}
 
 	planPath := ".agent/plans/session-abc.md"
@@ -633,8 +629,7 @@ func TestGetSystemPrompt_NoCustomPromptWithPlanModeReturnsPlanPrompt(t *testing.
 func TestGetSystemPrompt_NoCustomPromptNoPlanModeReturnsBasePrompt(t *testing.T) {
 	// Setup: create adapter
 	adapter := &AnthropicAdapter{
-		model:        "test-model",
-		skillManager: nil,
+		model: "test-model",
 	}
 
 	// Setup: create plain context with no custom prompt or plan mode
@@ -670,8 +665,7 @@ func TestGetSystemPrompt_NoCustomPromptNoPlanModeReturnsBasePrompt(t *testing.T)
 func TestGetSystemPrompt_CustomPromptWithWhitespaceIsNotEmpty(t *testing.T) {
 	// Setup: create adapter
 	adapter := &AnthropicAdapter{
-		model:        "test-model",
-		skillManager: nil,
+		model: "test-model",
 	}
 
 	// Custom prompt with only whitespace
@@ -705,8 +699,7 @@ func TestGetSystemPrompt_CustomPromptWithWhitespaceIsNotEmpty(t *testing.T) {
 func TestGetSystemPrompt_CustomPromptSessionIDNotValidated(t *testing.T) {
 	// Setup: create adapter
 	adapter := &AnthropicAdapter{
-		model:        "test-model",
-		skillManager: nil,
+		model: "test-model",
 	}
 
 	customPrompt := "You are a refactoring specialist."
@@ -760,8 +753,7 @@ func TestGetSystemPrompt_CustomPromptSessionIDNotValidated(t *testing.T) {
 func TestGetSystemPrompt_MultipleCustomPromptsInSequence(t *testing.T) {
 	// Setup: create adapter
 	adapter := &AnthropicAdapter{
-		model:        "test-model",
-		skillManager: nil,
+		model: "test-model",
 	}
 
 	prompt1 := "First custom prompt for session 1"
@@ -900,8 +892,7 @@ func TestSendMessage_ThinkingModeDisabledByDefault(t *testing.T) {
 
 	// Setup: create adapter
 	adapter := &AnthropicAdapter{
-		model:        "test-model",
-		skillManager: nil,
+		model: "test-model",
 	}
 
 	// Setup: create context without thinking mode
@@ -937,8 +928,7 @@ func TestSendMessage_ThinkingModeDisabledByDefault(t *testing.T) {
 func TestSendMessage_ThinkingModeEnabledWithContext(t *testing.T) {
 	// Setup: create adapter
 	adapter := &AnthropicAdapter{
-		model:        "test-model",
-		skillManager: nil,
+		model: "test-model",
 	}
 
 	// Setup: create context with thinking mode enabled
@@ -998,8 +988,7 @@ func TestSendMessage_UsesConfigurableMaxTokens(t *testing.T) {
 			// Setup: create adapter with custom MaxTokens
 			// This will fail because AnthropicAdapter doesn't have maxTokens field yet
 			adapter := &AnthropicAdapter{
-				model:        "test-model",
-				skillManager: nil,
+				model: "test-model",
 				// maxTokens: tt.maxTokens, // This field doesn't exist yet
 			}
 
@@ -1076,8 +1065,7 @@ func TestConvertResponse_PreservesThinkingSignatures(t *testing.T) {
 func TestConvertMessages_IncludesThinkingBlocks(t *testing.T) {
 	// Setup: create adapter
 	adapter := &AnthropicAdapter{
-		model:        "test-model",
-		skillManager: nil,
+		model: "test-model",
 	}
 
 	// Setup: create message with thinking blocks
@@ -1116,8 +1104,7 @@ func TestConvertMessages_IncludesThinkingBlocks(t *testing.T) {
 func TestConvertMessages_ThinkingBlocksFirst(t *testing.T) {
 	// Setup: create adapter
 	adapter := &AnthropicAdapter{
-		model:        "test-model",
-		skillManager: nil,
+		model: "test-model",
 	}
 
 	// Setup: create message with thinking blocks, text, and tool calls
@@ -1164,8 +1151,7 @@ func TestConvertMessages_ThinkingBlocksFirst(t *testing.T) {
 func TestConvertMessages_PreservesSignaturesInRequest(t *testing.T) {
 	// Setup: create adapter
 	adapter := &AnthropicAdapter{
-		model:        "test-model",
-		skillManager: nil,
+		model: "test-model",
 	}
 
 	// Setup: original signature (as if from previous API response)
@@ -1213,8 +1199,7 @@ func TestConvertMessages_PreservesSignaturesInRequest(t *testing.T) {
 func TestThinkingBlocksInToolLoop(t *testing.T) {
 	// Setup: create adapter
 	adapter := &AnthropicAdapter{
-		model:        "test-model",
-		skillManager: nil,
+		model: "test-model",
 	}
 
 	// Scenario:
@@ -1304,8 +1289,7 @@ func TestSendMessage_ThinkingModeWithCustomBudget(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup: create adapter
 			adapter := &AnthropicAdapter{
-				model:        "test-model",
-				skillManager: nil,
+				model: "test-model",
 			}
 
 			// Setup: create context with custom thinking budget
@@ -1342,8 +1326,7 @@ func TestSendMessage_ThinkingModeWithCustomBudget(t *testing.T) {
 func TestConvertMessages_EmptyThinkingBlocks(t *testing.T) {
 	// Setup: create adapter
 	adapter := &AnthropicAdapter{
-		model:        "test-model",
-		skillManager: nil,
+		model: "test-model",
 	}
 
 	// Setup: create message with nil thinking blocks
@@ -1376,8 +1359,7 @@ func TestConvertMessages_EmptyThinkingBlocks(t *testing.T) {
 func TestConvertMessages_MultipleThinkingBlocks(t *testing.T) {
 	// Setup: create adapter
 	adapter := &AnthropicAdapter{
-		model:        "test-model",
-		skillManager: nil,
+		model: "test-model",
 	}
 
 	// Setup: create message with multiple thinking blocks

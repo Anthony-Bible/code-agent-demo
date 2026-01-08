@@ -46,13 +46,10 @@ var (
 // The struct maintains an internal Anthropic client and model configuration,
 // allowing for consistent model usage across all requests.
 type AnthropicAdapter struct {
-	client             anthropic.Client
-	model              string
-	maxTokens          int64
-	skillManager       port.SkillManager
-	subagentManager    port.SubagentManager
-	cachedSystemPrompt string // Cached system prompt to avoid repeated skill discovery
-	skillsDiscovered   bool   // Whether skills have been discovered at least once
+	client          anthropic.Client
+	model           string
+	maxTokens       int64
+	subagentManager port.SubagentManager
 }
 
 // NewAnthropicAdapter creates a new AnthropicAdapter with the specified model.
@@ -61,7 +58,6 @@ type AnthropicAdapter struct {
 // Parameters:
 //   - model: The AI model to use (e.g., "hf:zai-org/GLM-4.6", "claude-3-5-sonnet-20241022")
 //   - maxTokens: Maximum tokens for AI response
-//   - skillManager: Optional skill manager for providing skill metadata to the system prompt
 //   - subagentManager: Optional subagent manager for providing subagent metadata to the system prompt
 //
 // Returns:
@@ -69,14 +65,12 @@ type AnthropicAdapter struct {
 func NewAnthropicAdapter(
 	model string,
 	maxTokens int64,
-	skillManager port.SkillManager,
 	subagentManager port.SubagentManager,
 ) port.AIProvider {
 	return &AnthropicAdapter{
 		client:          anthropic.NewClient(),
 		model:           model,
 		maxTokens:       maxTokens,
-		skillManager:    skillManager,
 		subagentManager: subagentManager,
 	}
 }
@@ -320,23 +314,8 @@ When your plan is complete, tell the user to exit plan mode with :mode normal to
 
 // buildBasePromptWithSkills constructs the base system prompt.
 // Skills are now included in the activate_skill tool description instead of the system prompt.
-// The system prompt is cached after first call to avoid repeated construction.
 func (a *AnthropicAdapter) buildBasePromptWithSkills() string {
-	basePrompt := "You are an AI assistant that helps users with code editing and explanations. Use the available tools when necessary to provide accurate and helpful responses."
-
-	// Return cached prompt if already built
-	if a.skillsDiscovered && a.cachedSystemPrompt != "" {
-		return a.cachedSystemPrompt
-	}
-
-	// Mark as discovered to avoid rebuilding
-	a.skillsDiscovered = true
-
-	var sb strings.Builder
-	sb.WriteString(basePrompt)
-
-	a.cachedSystemPrompt = sb.String()
-	return a.cachedSystemPrompt
+	return "You are an AI assistant that helps users with code editing and explanations. Use the available tools when necessary to provide accurate and helpful responses."
 }
 
 // GenerateToolSchema returns an empty tool input schema.

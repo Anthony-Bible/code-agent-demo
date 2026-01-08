@@ -8,12 +8,10 @@ import (
 // TestSystemPromptDoesNotContainSkills verifies that the system prompt does not contain skills.
 // Skills should now be in the activate_skill tool description instead.
 func TestSystemPromptDoesNotContainSkills(t *testing.T) {
-	// Create AI adapter without skill manager
-	// The buildBasePromptWithSkills method doesn't actually use the skill manager,
-	// as skills are now loaded in the activate_skill tool description
+	// Create AI adapter
+	// Skills are now in the activate_skill tool description, not the system prompt
 	adapter := &AnthropicAdapter{
-		model:        "test-model",
-		skillManager: nil,
+		model: "test-model",
 	}
 
 	// Get system prompt
