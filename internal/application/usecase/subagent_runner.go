@@ -385,7 +385,7 @@ func (r *SubagentRunner) runExecutionLoop(rc *subagentRunContext) (*SubagentResu
 				// Restore original model and retry
 				if modelErr := r.aiProvider.SetModel(rc.originalModel); modelErr != nil {
 					return rc.failedResult(
-						fmt.Errorf("failed to restore original model: %w (original error: %v)", modelErr, err),
+						fmt.Errorf("failed to restore original model: %w (original error: %w)", modelErr, err),
 					), err
 				}
 				// Retry with parent model
@@ -537,7 +537,7 @@ func (r *SubagentRunner) injectTurnWarningIfNeeded(rc *subagentRunContext) {
 	}
 }
 
-// isModelError checks if an error is a model-related API error (400 status)
+// isModelError checks if an error is a model-related API error (400 status).
 func (r *SubagentRunner) isModelError(err error) bool {
 	if err == nil {
 		return false

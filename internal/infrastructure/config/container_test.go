@@ -2,6 +2,8 @@ package config
 
 import (
 	"code-editing-agent/internal/infrastructure/adapter/ui"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -41,9 +43,12 @@ func TestContainer_UsesHistoryConfig(t *testing.T) {
 		cliAdapter, ok := container.UIAdapter().(*ui.CLIAdapter)
 		require.True(t, ok, "UIAdapter should be a *ui.CLIAdapter")
 
-		// Default HistoryFile is "~/.code-editing-agent-history"
-		assert.Equal(t, "~/.code-editing-agent-history", cliAdapter.GetHistoryFile(),
-			"CLIAdapter should use default HistoryFile from config")
+		// Default HistoryFile gets expanded from "~/.code-editing-agent-history"
+		homeDir, err := os.UserHomeDir()
+		require.NoError(t, err, "should be able to get home directory")
+		expectedPath := filepath.Join(homeDir, ".code-editing-agent-history")
+		assert.Equal(t, expectedPath, cliAdapter.GetHistoryFile(),
+			"CLIAdapter should expand ~ in HistoryFile from config")
 	})
 
 	t.Run("container supports empty history file for in-memory mode", func(t *testing.T) {

@@ -284,6 +284,24 @@ func (m *subagentRunnerAIProviderMock) SendMessage(
 	return m.sendMessageResponse, m.sendMessageToolCall, nil
 }
 
+func (m *subagentRunnerAIProviderMock) SendMessageStreaming(
+	_ context.Context,
+	messages []port.MessageParam,
+	tools []port.ToolParam,
+	_ port.StreamCallback,
+	_ port.ThinkingCallback,
+) (*entity.Message, []port.ToolCallInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sendMessageCalls++
+	m.sendMessageMessages = append(m.sendMessageMessages, messages)
+	m.sendMessageTools = append(m.sendMessageTools, tools)
+	if m.sendMessageError != nil {
+		return nil, nil, m.sendMessageError
+	}
+	return m.sendMessageResponse, m.sendMessageToolCall, nil
+}
+
 func (m *subagentRunnerAIProviderMock) GenerateToolSchema() port.ToolInputSchemaParam {
 	return port.ToolInputSchemaParam{}
 }

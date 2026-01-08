@@ -22,6 +22,9 @@ const (
 	KeyShiftTab = "shift+tab"
 )
 
+// defaultMaxHistoryEntries is the default number of history entries to store.
+const defaultMaxHistoryEntries = 100
+
 // CLIAdapter implements the UserInterface port using the command line.
 type CLIAdapter struct {
 	input              io.Reader
@@ -32,6 +35,7 @@ type CLIAdapter struct {
 	truncationConfig   TruncationConfig
 	useInteractive     bool
 	historyFile        string
+	maxHistoryEntries  int
 	readlineInstance   *readline.Instance
 	modeToggleCallback func()
 	planMode           bool
@@ -87,13 +91,14 @@ func NewCLIAdapterWithHistory(historyFile string) *CLIAdapter {
 	expandedPath := expandPath(historyFile)
 
 	return &CLIAdapter{
-		input:            os.Stdin,
-		output:           os.Stdout,
-		prompt:           "> ",
-		colors:           defaultColorScheme(),
-		truncationConfig: DefaultTruncationConfig(),
-		useInteractive:   true,
-		historyFile:      expandedPath,
+		input:             os.Stdin,
+		output:            os.Stdout,
+		prompt:            "> ",
+		colors:            defaultColorScheme(),
+		truncationConfig:  DefaultTruncationConfig(),
+		useInteractive:    true,
+		historyFile:       expandedPath,
+		maxHistoryEntries: defaultMaxHistoryEntries,
 	}
 }
 
@@ -590,9 +595,8 @@ func (c *CLIAdapter) GetHistoryFile() string {
 }
 
 // GetMaxHistoryEntries returns the maximum number of history entries to store.
-// Returns 0 if using the default value.
 func (c *CLIAdapter) GetMaxHistoryEntries() int {
-	return 0 // readline handles this internally
+	return c.maxHistoryEntries
 }
 
 // ConfirmBashCommand prompts the user to confirm a bash command before execution.
