@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -319,55 +318,22 @@ When your plan is complete, tell the user to exit plan mode with :mode normal to
 	)
 }
 
-// buildBasePromptWithSkills constructs the base system prompt with optional skill metadata.
-// If a skill manager is available, it includes available skills in the prompt
-// following the agentskills.io specification format.
-// The system prompt is cached after first discovery to avoid repeated filesystem scans.
+// buildBasePromptWithSkills constructs the base system prompt.
+// Skills are now included in the activate_skill tool description instead of the system prompt.
+// The system prompt is cached after first call to avoid repeated construction.
 func (a *AnthropicAdapter) buildBasePromptWithSkills() string {
 	basePrompt := "You are an AI assistant that helps users with code editing and explanations. Use the available tools when necessary to provide accurate and helpful responses."
 
-	// If no skill manager, return base prompt
-	if a.skillManager == nil {
-		return basePrompt
-	}
-
-	// Return cached prompt if skills have already been discovered
+	// Return cached prompt if already built
 	if a.skillsDiscovered && a.cachedSystemPrompt != "" {
 		return a.cachedSystemPrompt
 	}
 
-	// Try to discover skills (only done once per adapter instance)
-	skills, err := a.skillManager.DiscoverSkills(context.Background())
-	a.skillsDiscovered = true // Mark as discovered even on error to avoid retries
+	// Mark as discovered to avoid rebuilding
+	a.skillsDiscovered = true
 
-	if err != nil || len(skills.Skills) == 0 {
-		a.cachedSystemPrompt = basePrompt
-		return basePrompt
-	}
-
-	// Build skills section following agentskills.io XML specification
 	var sb strings.Builder
 	sb.WriteString(basePrompt)
-	sb.WriteString("\n\n<available_skills>\n")
-
-	for _, skill := range skills.Skills {
-		sb.WriteString("  <skill>\n")
-		sb.WriteString(fmt.Sprintf("    <name>%s</name>\n", skill.Name))
-		sb.WriteString(fmt.Sprintf("    <description>%s</description>\n", skill.Description))
-		if skill.DirectoryPath != "" {
-			location := skill.DirectoryPath
-			if absDir, err := filepath.Abs(skill.DirectoryPath); err == nil {
-				location = absDir
-			}
-			sb.WriteString(fmt.Sprintf("    <location>%s</location>\n", filepath.Join(location, "SKILL.md")))
-		}
-		sb.WriteString("  </skill>\n")
-	}
-
-	sb.WriteString("</available_skills>\n\n")
-	sb.WriteString(
-		"Use the `activate_skill` tool to load the full content of a skill when its capabilities are needed for the task at hand.",
-	)
 
 	a.cachedSystemPrompt = sb.String()
 	return a.cachedSystemPrompt
