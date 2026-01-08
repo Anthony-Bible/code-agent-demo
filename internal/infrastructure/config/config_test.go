@@ -199,11 +199,11 @@ func TestConfig_ExtendedThinkingEnvironmentVariables(t *testing.T) {
 			"AGENT_THINKING_BUDGET should override the default thinking budget")
 	})
 
-	t.Run("AGENT_SHOW_THINKING overrides default", func(t *testing.T) {
+	t.Run("AGENT_THINKING_SHOW overrides default", func(t *testing.T) {
 		resetViper()
 		defer resetViper()
 
-		t.Setenv("AGENT_SHOW_THINKING", "true")
+		t.Setenv("AGENT_THINKING_SHOW", "true")
 
 		cfg := LoadConfig()
 
@@ -229,7 +229,7 @@ func TestConfig_ExtendedThinkingEnvironmentVariables(t *testing.T) {
 
 		t.Setenv("AGENT_THINKING_ENABLED", "true")
 		t.Setenv("AGENT_THINKING_BUDGET", "25000")
-		t.Setenv("AGENT_SHOW_THINKING", "true")
+		t.Setenv("AGENT_THINKING_SHOW", "true")
 		t.Setenv("AGENT_MAX_TOKENS", "50000")
 
 		cfg := LoadConfig()

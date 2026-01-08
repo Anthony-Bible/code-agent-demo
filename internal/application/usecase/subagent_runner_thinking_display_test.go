@@ -84,6 +84,18 @@ func (m *thinkingDisplayUIMock) ConfirmBashCommand(_ string, _ bool, _ string, _
 	return false
 }
 
+func (m *thinkingDisplayUIMock) BeginStreamingResponse() error {
+	return nil
+}
+
+func (m *thinkingDisplayUIMock) EndStreamingResponse() error {
+	return nil
+}
+
+func (m *thinkingDisplayUIMock) DisplayStreamingText(_ string) error {
+	return nil
+}
+
 // getStatusCallsForType returns the number of times DisplaySubagentStatus was called with a specific status type.
 func (m *thinkingDisplayUIMock) getStatusCallsForType(statusType string) int {
 	m.mu.Lock()

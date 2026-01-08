@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -2072,5 +2071,3 @@ func TestCLIAdapter_GetUserInput_InteractiveMode(t *testing.T) {
 		_ = ok // Result depends on implementation
 	})
 }
-
-		adapter := ui.NewCLIAdapterWithHistory(historyFile)

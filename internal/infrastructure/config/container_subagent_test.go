@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 // =============================================================================
@@ -43,13 +42,7 @@ import (
 func createTestConfigForSubagent(t *testing.T) *Config {
 	t.Helper()
 
-	tmpDir, err := os.MkdirTemp("", "container-subagent-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	t.Cleanup(func() {
-		os.RemoveAll(tmpDir)
-	})
+	tmpDir := t.TempDir()
 
 	// Create agents directories to prevent errors
 	agentsDir := filepath.Join(tmpDir, "agents")
@@ -315,38 +308,6 @@ func TestContainer_SubagentUseCaseAccessor_SameInstance(t *testing.T) {
 	}
 }
 
-// TestContainer_SubagentUseCaseAccessor_CanSpawnSubagent verifies that
-// the SubagentUseCase is properly wired and can attempt to spawn a subagent.
-func TestContainer_SubagentUseCaseAccessor_CanSpawnSubagent(t *testing.T) {
-	// Arrange
-	cfg := createTestConfigForSubagent(t)
-	createTestSubagent(t, cfg.WorkingDir, "test-spawner")
-
-	container, err := NewContainer(cfg)
-	if err != nil {
-		t.Fatalf("NewContainer() error = %v", err)
-	}
-
-	uc := container.SubagentUseCase()
-	if uc == nil {
-		t.Skip("SubagentUseCase() returned nil")
-	}
-
-	// Act
-	ctx := context.Background()
-	result, err := uc.SpawnSubagent(ctx, "test-spawner", "Hello from test")
-	// Assert: We expect this to work (or at least not panic)
-	// The exact behavior depends on the AI provider mock, but we should get
-	// either a result or a well-defined error, not a panic
-	if err != nil {
-		// This is acceptable - the test is about wiring, not full integration
-		t.Logf("SpawnSubagent returned error (expected in container test): %v", err)
-	}
-	if result != nil {
-		t.Logf("SpawnSubagent returned result: %+v", result)
-	}
-}
-
 // =============================================================================
 // Task Tool Integration Tests
 // =============================================================================
@@ -435,7 +396,9 @@ func TestContainer_TaskToolIntegration_TaskToolInAvailableTools(t *testing.T) {
 }
 
 // TestContainer_TaskToolIntegration_TaskToolCanExecute verifies that the
-// task tool can actually execute (attempt to spawn a subagent) when wired correctly.
+// task tool is properly registered and can be retrieved.
+// NOTE: This test verifies WIRING only, not actual execution (which would hit real APIs).
+// Actual task tool execution is tested in subagent_runner_test.go with mocks.
 func TestContainer_TaskToolIntegration_TaskToolCanExecute(t *testing.T) {
 	// Arrange
 	cfg := createTestConfigForSubagent(t)
@@ -451,106 +414,13 @@ func TestContainer_TaskToolIntegration_TaskToolCanExecute(t *testing.T) {
 		t.Fatal("ToolExecutor() returned nil")
 	}
 
-	// Act
-	ctx := context.Background()
-	input := map[string]interface{}{
-		"agent_name": "test-executor",
-		"prompt":     "Test task execution",
+	// Assert: task tool is registered and can be retrieved (wiring check, no API call)
+	tool, found := toolExecutor.GetTool("task")
+	if !found {
+		t.Fatal("task tool should be registered")
 	}
-
-	result, err := toolExecutor.ExecuteTool(ctx, "task", input)
-	// Assert: We expect the tool to execute without panicking
-	// The exact result depends on the AI provider, but we should get either
-	// a result or a well-defined error, not a panic
-	if err != nil {
-		t.Logf("task tool execution returned error (expected in container test): %v", err)
-	}
-	if result != "" {
-		t.Logf("task tool execution returned result: %s", result)
-	}
-
-	// The key test is that we got here without panicking
-	// This proves SetSubagentUseCase() was called
-}
-
-// =============================================================================
-// SubagentRunner Wiring Tests
-// =============================================================================
-
-// TestContainer_SubagentRunner_CreatedWithCorrectDependencies verifies that
-// the SubagentRunner is created with the correct dependencies wired from the container.
-func TestContainer_SubagentRunner_CreatedWithCorrectDependencies(t *testing.T) {
-	// Arrange
-	cfg := createTestConfigForSubagent(t)
-	createTestSubagent(t, cfg.WorkingDir, "dependency-test")
-
-	container, err := NewContainer(cfg)
-	if err != nil {
-		t.Fatalf("NewContainer() error = %v", err)
-	}
-
-	// Act: Verify the SubagentUseCase works, which implies SubagentRunner
-	// was created with correct dependencies
-	uc := container.SubagentUseCase()
-	if uc == nil {
-		t.Fatal("SubagentUseCase() returned nil")
-	}
-
-	// Attempt to spawn - this will use the SubagentRunner internally
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	result, err := uc.SpawnSubagent(ctx, "dependency-test", "Test dependencies")
-	// Assert: We should get either a result or an error, not a panic
-	// Panics would indicate nil dependencies in SubagentRunner
-	if err != nil {
-		t.Logf("SpawnSubagent returned error (acceptable for wiring test): %v", err)
-	}
-	if result != nil {
-		t.Logf("SpawnSubagent returned result: %+v", result)
-	}
-
-	// If we got here without panicking, SubagentRunner has valid dependencies
-}
-
-// TestContainer_SubagentRunner_ConfigIsProperlySet verifies that the
-// SubagentRunner is created with a properly configured SubagentConfig.
-func TestContainer_SubagentRunner_ConfigIsProperlySet(t *testing.T) {
-	// Arrange
-	cfg := createTestConfigForSubagent(t)
-	createTestSubagent(t, cfg.WorkingDir, "config-test")
-
-	container, err := NewContainer(cfg)
-	if err != nil {
-		t.Fatalf("NewContainer() error = %v", err)
-	}
-
-	uc := container.SubagentUseCase()
-	if uc == nil {
-		t.Fatal("SubagentUseCase() returned nil")
-	}
-
-	// Act: Spawn a subagent and verify it respects the config
-	ctx := context.Background()
-	result, err := uc.SpawnSubagent(ctx, "config-test", "Test config")
-	// Assert: Check that the result has expected config-related fields
-	// (This is indirect verification that SubagentRunner was configured)
-	if err != nil {
-		t.Logf("SpawnSubagent returned error: %v", err)
-	}
-
-	if result != nil {
-		// Verify result has expected fields from SubagentConfig
-		if result.SubagentID == "" {
-			t.Error("SubagentResult should have a SubagentID (config-driven)")
-		}
-		if result.AgentName == "" {
-			t.Error("SubagentResult should have an AgentName")
-		}
-		// Duration and ActionsTaken are set by SubagentRunner based on config
-		if result.Duration < 0 {
-			t.Error("SubagentResult Duration should be non-negative")
-		}
+	if tool.InputSchema == nil {
+		t.Error("task tool should have input schema")
 	}
 }
 
@@ -588,7 +458,9 @@ func TestContainer_SubagentComponents_AllWiredTogether(t *testing.T) {
 }
 
 // TestContainer_SubagentComponents_EndToEndFlow verifies the end-to-end
-// subagent spawning flow through the container-wired components.
+// subagent wiring through the container-wired components.
+// NOTE: This test verifies WIRING only, not actual execution (which would hit real APIs).
+// Actual SpawnSubagent execution is tested in subagent_runner_test.go with mocks.
 func TestContainer_SubagentComponents_EndToEndFlow(t *testing.T) {
 	// Arrange
 	cfg := createTestConfigForSubagent(t)
@@ -599,10 +471,9 @@ func TestContainer_SubagentComponents_EndToEndFlow(t *testing.T) {
 		t.Fatalf("NewContainer() error = %v", err)
 	}
 
-	// Act: Full flow from discovery to execution
 	ctx := context.Background()
 
-	// Step 1: Discover agents via SubagentManager
+	// Step 1: Verify discovery works (no API call)
 	manager := container.SubagentManager()
 	if manager == nil {
 		t.Fatal("SubagentManager() returned nil")
@@ -612,44 +483,25 @@ func TestContainer_SubagentComponents_EndToEndFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DiscoverAgents() error = %v", err)
 	}
-
 	if discoveryResult.TotalCount < 1 {
 		t.Fatal("Should discover at least 1 agent")
 	}
 
-	// Step 2: Spawn subagent via SubagentUseCase
+	// Step 2: Verify SubagentUseCase is wired (no API call)
 	useCase := container.SubagentUseCase()
 	if useCase == nil {
 		t.Fatal("SubagentUseCase() returned nil")
 	}
 
-	spawnResult, err := useCase.SpawnSubagent(ctx, "e2e-test", "End-to-end test task")
-	// Assert: Flow should complete without panics
-	if err != nil {
-		t.Logf("SpawnSubagent error (expected in container test): %v", err)
-	}
-	if spawnResult != nil {
-		t.Logf("SpawnSubagent result: Status=%s, AgentName=%s, Duration=%v",
-			spawnResult.Status, spawnResult.AgentName, spawnResult.Duration)
-	}
-
-	// Step 3: Verify task tool can also execute the same flow
+	// Step 3: Verify task tool is registered (no API call)
 	toolExecutor := container.ToolExecutor()
 	if toolExecutor == nil {
 		t.Fatal("ToolExecutor() returned nil")
 	}
 
-	taskInput := map[string]interface{}{
-		"agent_name": "e2e-test",
-		"prompt":     "Task tool end-to-end test",
-	}
-
-	taskResult, taskErr := toolExecutor.ExecuteTool(ctx, "task", taskInput)
-	if taskErr != nil {
-		t.Logf("task tool error (expected in container test): %v", taskErr)
-	}
-	if taskResult != "" {
-		t.Logf("task tool result: %s", taskResult)
+	_, found := toolExecutor.GetTool("task")
+	if !found {
+		t.Fatal("task tool should be registered")
 	}
 }
 
