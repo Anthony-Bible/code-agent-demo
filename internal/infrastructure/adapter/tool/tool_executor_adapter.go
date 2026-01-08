@@ -665,7 +665,6 @@ func (a *ExecutorAdapter) buildActivateSkillDescription() string {
 	return sb.String()
 }
 
-
 // executeByName executes the appropriate tool function based on the tool name.
 func (a *ExecutorAdapter) executeByName(ctx context.Context, name string, input json.RawMessage) (string, error) {
 	switch name {
