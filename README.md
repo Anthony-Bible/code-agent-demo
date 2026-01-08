@@ -1,21 +1,47 @@
 # Code Editing Agent
 
-A sophisticated AI-powered command-line coding assistant built with Go using hexagonal (clean) architecture principles. The agent provides an interactive chat interface for code exploration, editing, and analysis with integrated tool capabilities.
+[![Go Version](https://img.shields.io/badge/Go-1.24+-blue.svg)](https://go.dev/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Build Status](https://github.com/yourusername/code-editing-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/yourusername/code-editing-agent/actions)
 
-## Overview
+A sophisticated AI-powered command-line coding assistant built with Go using hexagonal (clean) architecture principles. The agent provides an interactive chat interface for code exploration, editing, and analysis with integrated tool capabilities and advanced AI features.
 
-Code Editing Agent is an intelligent CLI tool that combines conversational AI with file system operations to assist developers with their coding tasks. Built using Clean Architecture principles, it provides a robust, testable, and extensible foundation for AI-assisted development.
+## 🌟 Key Features
 
-### Key Features
+- **🤖 Interactive CLI Chat** - Terminal-based conversation with AI assistant
+- **🧠 Extended Thinking** - Claude's internal reasoning process with configurable token budgets
+- **📁 File System Tools** - Read, list, and edit files directly from chat
+- **🔄 Subagent System** - Spawn specialized AI assistants for delegated tasks
+- **📋 Plan Mode** - Propose changes for review before applying them
+- **🏗️ Hexagonal Architecture** - Clean separation of concerns with ports and adapters
+- **🔧 Modular Tool System** - Extensible architecture for adding custom tools with JSON schema validation
+- **🎯 Skill System** - Project-specific and global AI capabilities following agentskills.io
+- **🔍 Investigation System** - Structured problem analysis with confidence tracking and escalation
 
-- **Interactive CLI Chat** - Terminal-based conversation with AI assistant
-- **Extended Thinking** - Claude's internal reasoning process with configurable token budgets
-- **File System Tools** - Read, list, and edit files directly from chat
-- **Subagent System** - Spawn specialized AI assistants for delegated tasks
-- **Plan Mode** - Propose changes for review before applying them
-- **Hexagonal Architecture** - Clean separation of concerns with ports and adapters
-- **Tool System** - Modular architecture for adding custom tools with JSON schema validation
-- **Skill System** - Project-specific and global AI capabilities following agentskills.io
+## 📋 Table of Contents
+
+- [Quick Start](#quick-start)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Architecture](#architecture)
+- [Configuration](#configuration)
+- [Development](#development)
+- [Contributing](#contributing)
+- [License](#license)
+
+## 🚀 Quick Start
+
+```bash
+# Set your Anthropic API key
+export ANTHROPIC_API_KEY=your-api-key-here
+
+# Build and run the agent
+go build -o agent ./cmd/cli
+./agent chat
+
+# Or run directly with Go
+go run ./cmd/cli main.go chat
+```
 
 ## Architecture
 
@@ -136,51 +162,152 @@ code-editing-agent/
 └── go.sum                       # Dependency checksums
 ```
 
-## Getting Started
+## 📦 Installation
 
 ### Prerequisites
 
 - **Go 1.24 or later** - [Install Go](https://go.dev/doc/install)
 - **Anthropic API Key** - Get one from [console.anthropic.com](https://console.anthropic.com/)
-- Set the `ANTHROPIC_API_KEY` environment variable
 
-### Installation
+### Installation Methods
+
+#### Method 1: Build from Source (Recommended)
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/yourusername/code-editing-agent.git
    cd code-editing-agent
    ```
 
-2. **Install dependencies**
-   ```bash
-   go mod download
-   ```
+### Extended Thinking Mode 🧠
 
-3. **Build the application**
-   ```bash
-   go build -o agent ./cmd/cli
-   ```
+Extended thinking allows Claude to show its internal reasoning process before generating responses. This feature helps you understand how the AI approaches problems and can improve response quality for complex tasks.
 
-4. **Run the application**
-   ```bash
-   ./agent chat
-   ```
+#### Enabling Extended Thinking
 
-### Quick Start
-
+**Via CLI flags:**
 ```bash
-# Set your API key
-export ANTHROPIC_API_KEY=your-api-key-here
+# Enable with defaults (10,000 token budget, thinking hidden)
+./agent chat --thinking
 
-# Start the agent
-./agent chat
-
-# Or run directly
-go run ./cmd/cli main.go chat
+# Enable with custom budget and show thinking
+./agent chat --thinking --thinking-budget 15000 --show-thinking
 ```
 
-## Usage
+**Via environment variables:**
+```bash
+export AGENT_THINKING_ENABLED=true
+export AGENT_THINKING_BUDGET=10000
+export AGENT_SHOW_THINKING=true
+./agent chat
+```
+
+**Via runtime commands:**
+```
+> :thinking on         # Enable thinking mode
+Extended thinking enabled (budget: 10000 tokens)
+
+> :thinking off        # Disable thinking mode
+Extended thinking disabled
+
+> :thinking budget 15000  # Set custom budget
+Thinking budget set to 15000 tokens
+```
+
+#### Extended Thinking Configuration
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--thinking` | `false` | Enable extended thinking mode |
+| `--thinking-budget` | `10000` | Token budget for thinking (min 1024) |
+| `--show-thinking` | `false` | Display AI's reasoning process |
+| `--max-tokens` | `20000` | Maximum tokens for responses |
+
+**Notes:**
+- Extended thinking requires Claude Sonnet 3.5+ models
+- The thinking budget is separate from but counted within `max-tokens`
+- By default, thinking is processed but not displayed (hidden from output)
+- Use `--show-thinking` to see the AI's reasoning in terminal
+
+### Available Tools 🛠️
+go install github.com/yourusername/code-editing-agent/cmd/cli@latest
+```
+
+### Verify Installation
+
+```bash
+# Check the agent is working
+./agent --version
+
+# Test with a simple command
+./agent chat --help
+```
+
+### Extended Thinking Mode 🧠
+
+Extended thinking allows Claude to show its internal reasoning process before generating responses. This feature helps you understand how the AI approaches problems and can improve response quality for complex tasks.
+
+#### Enabling Extended Thinking
+
+**Via CLI flags:**
+```bash
+# Enable with defaults (10,000 token budget, thinking hidden)
+./agent chat --thinking
+
+# Enable with custom budget and show thinking
+./agent chat --thinking --thinking-budget 15000 --show-thinking
+```
+
+**Via environment variables:**
+```bash
+export AGENT_THINKING_ENABLED=true
+export AGENT_THINKING_BUDGET=10000
+export AGENT_SHOW_THINKING=true
+./agent chat
+```
+
+**Via runtime commands:**
+```
+> :thinking on         # Enable thinking mode
+Extended thinking enabled (budget: 10000 tokens)
+
+> :thinking off        # Disable thinking mode
+Extended thinking disabled
+
+> :thinking budget 15000  # Set custom budget
+Thinking budget set to 15000 tokens
+```
+
+#### Extended Thinking Configuration
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--thinking` | `false` | Enable extended thinking mode |
+| `--thinking-budget` | `10000` | Token budget for thinking (min 1024) |
+| `--show-thinking` | `false` | Display AI's reasoning process |
+| `--max-tokens` | `20000` | Maximum tokens for responses |
+
+**Notes:**
+- Extended thinking requires Claude Sonnet 3.5+ models
+- The thinking budget is separate from but counted within `max-tokens`
+- By default, thinking is processed but not displayed (hidden from output)
+- Use `--show-thinking` to see the AI's reasoning in terminal
+
+### Available Tools 🛠️
+go install github.com/yourusername/code-editing-agent/cmd/cli@latest
+```
+
+### Verify Installation
+
+```bash
+# Check the agent is working
+./agent --version
+
+# Test with a simple command
+./agent chat --help
+```
+
+## 🎯 Usage
 
 ### Basic Chat
 

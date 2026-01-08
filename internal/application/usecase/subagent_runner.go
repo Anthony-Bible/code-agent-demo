@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -111,16 +112,17 @@ type SubagentRunner struct {
 
 // subagentRunContext holds state for a subagent execution run.
 type subagentRunContext struct {
-	ctx          context.Context
-	agent        *entity.Subagent
-	taskPrompt   string
-	subagentID   string
-	sessionID    string
-	startTime    time.Time
-	actionsTaken int
-	maxActions   int
-	lastMessage  *entity.Message
-	runner       *SubagentRunner // Reference to runner for UI display
+	ctx           context.Context
+	agent         *entity.Subagent
+	taskPrompt    string
+	subagentID    string
+	sessionID     string
+	startTime     time.Time
+	actionsTaken  int
+	maxActions    int
+	lastMessage   *entity.Message
+	runner        *SubagentRunner // Reference to runner for UI display
+	originalModel string          // Original model before any switching
 }
 
 // NewSubagentRunner creates a new SubagentRunner with dependency validation.
@@ -183,10 +185,12 @@ func (r *SubagentRunner) Run(
 		return r.validationFailedResult(subagentID, agent, err), err
 	}
 
+	// Store original model before any switching
+	originalModel := r.aiProvider.GetModel()
+
 	// Model switching: Resolve shorthand and set agent model if specified
 	resolvedModel := resolveModelShorthand(agent.Model)
 	if resolvedModel != "" {
-		originalModel := r.aiProvider.GetModel()
 		if err := r.aiProvider.SetModel(resolvedModel); err != nil {
 			return r.validationFailedResult(subagentID, agent, err), err
 		}
@@ -202,13 +206,14 @@ func (r *SubagentRunner) Run(
 	})
 
 	rc := &subagentRunContext{
-		ctx:        ctx,
-		agent:      agent,
-		taskPrompt: taskPrompt,
-		subagentID: subagentID,
-		startTime:  time.Now(),
-		maxActions: r.config.MaxActions,
-		runner:     r,
+		ctx:           ctx,
+		agent:         agent,
+		taskPrompt:    taskPrompt,
+		subagentID:    subagentID,
+		startTime:     time.Now(),
+		maxActions:    r.config.MaxActions,
+		runner:        r,
+		originalModel: originalModel,
 	}
 	if rc.maxActions == 0 {
 		rc.maxActions = 20
@@ -365,7 +370,30 @@ func (r *SubagentRunner) runExecutionLoop(rc *subagentRunContext) (*SubagentResu
 		// Process assistant response
 		msg, toolCalls, err := r.convService.ProcessAssistantResponse(ctx, rc.sessionID)
 		if err != nil {
-			return rc.failedResult(err), err
+			// Check if this is a model-related 400 error and we tried to switch models
+			if r.isModelError(err) && r.aiProvider.GetModel() != "" && r.aiProvider.GetModel() != rc.originalModel {
+				// Log warning and fall back to parent model
+				fallbackMsg := fmt.Sprintf(
+					"Model '%s' not available for subagent, falling back to parent model '%s': %v",
+					r.aiProvider.GetModel(),
+					rc.originalModel,
+					err,
+				)
+				if r.userInterface != nil {
+					_ = r.userInterface.DisplaySubagentStatus(rc.agent.Name, "Model fallback", fallbackMsg)
+				}
+				// Restore original model and retry
+				if modelErr := r.aiProvider.SetModel(rc.originalModel); modelErr != nil {
+					return rc.failedResult(
+						fmt.Errorf("failed to restore original model: %w (original error: %v)", modelErr, err),
+					), err
+				}
+				// Retry with parent model
+				msg, toolCalls, err = r.convService.ProcessAssistantResponse(ctx, rc.sessionID)
+			}
+			if err != nil {
+				return rc.failedResult(err), err
+			}
 		}
 
 		rc.lastMessage = msg
@@ -507,4 +535,15 @@ func (r *SubagentRunner) injectTurnWarningIfNeeded(rc *subagentRunContext) {
 			fmt.Fprintf(os.Stderr, "[SubagentRunner] Failed to inject turn warning: %v\n", err)
 		}
 	}
+}
+
+// isModelError checks if an error is a model-related API error (400 status)
+func (r *SubagentRunner) isModelError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// Check for 400 Bad Request and model-related error messages
+	return strings.Contains(errStr, "400") &&
+		(strings.Contains(errStr, "model") || strings.Contains(errStr, "Bad Request"))
 }

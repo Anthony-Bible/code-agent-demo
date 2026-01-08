@@ -660,8 +660,20 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 		content = string(response.StopReason)
 	}
 
-	// Create the message
-	msg, err := entity.NewMessage(entity.RoleAssistant, content)
+	// If we still have no content but have thinking blocks, use a placeholder
+	// This allows messages with only thinking content to pass validation
+	if content == "" && len(thinkingBlocks) > 0 {
+		content = "[AI internal reasoning completed]"
+	}
+
+	// Final safety net - if we still have no content, use a generic placeholder
+	if content == "" {
+		content = "[No content received from AI]"
+	}
+
+	// Create the message with thinking blocks (if any)
+	// This properly handles the case where content is empty but thinking blocks are present
+	msg, err := entity.NewMessageWithThinkingBlocks(entity.RoleAssistant, content, thinkingBlocks)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create message: %w", err)
 	}
@@ -669,11 +681,6 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 	// Store tool calls in the message entity so they persist in conversation history
 	if len(entityToolCalls) > 0 {
 		msg.ToolCalls = entityToolCalls
-	}
-
-	// Store thinking blocks in the message entity (CRITICAL: signatures preserved exactly)
-	if len(thinkingBlocks) > 0 {
-		msg.ThinkingBlocks = thinkingBlocks
 	}
 
 	return msg, toolCalls, nil
