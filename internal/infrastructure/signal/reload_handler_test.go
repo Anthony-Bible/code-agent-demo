@@ -88,9 +88,9 @@ func TestReloadHandler_CallbackInvoked(t *testing.T) {
 	})
 
 	t.Run("should pass valid context to callback", func(t *testing.T) {
-		var receivedCtx context.Context
+		var receivedCtx atomic.Value
 		onReload := func(ctx context.Context) {
-			receivedCtx = ctx
+			receivedCtx.Store(ctx)
 		}
 
 		handler := NewReloadHandler(onReload)
@@ -103,15 +103,15 @@ func TestReloadHandler_CallbackInvoked(t *testing.T) {
 		handler.SimulateReload()
 		time.Sleep(50 * time.Millisecond)
 
-		if receivedCtx == nil {
+		if receivedCtx.Load() == nil {
 			t.Error("callback received nil context, expected a valid context")
 		}
 	})
 
 	t.Run("should pass handler's context to callback", func(t *testing.T) {
-		var receivedCtx context.Context
+		var receivedCtx atomic.Value
 		onReload := func(ctx context.Context) {
-			receivedCtx = ctx
+			receivedCtx.Store(ctx)
 		}
 
 		handler := NewReloadHandler(onReload)
@@ -125,7 +125,7 @@ func TestReloadHandler_CallbackInvoked(t *testing.T) {
 		handler.SimulateReload()
 		time.Sleep(50 * time.Millisecond)
 
-		if receivedCtx != handlerCtx {
+		if receivedCtx.Load() != handlerCtx {
 			t.Error("callback received different context than handler's context")
 		}
 	})
