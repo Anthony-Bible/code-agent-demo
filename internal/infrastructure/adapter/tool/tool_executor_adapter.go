@@ -140,12 +140,11 @@ func NewExecutorAdapter(fileManager port.FileManager) *ExecutorAdapter {
 // This method is thread-safe but blocks tool operations momentarily while updating.
 // Call once during initialization before starting the main execution loop.
 func (a *ExecutorAdapter) SetSkillManager(sm port.SkillManager) {
-	// Acquire lock to safely set skillManager field
 	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.skillManager = sm
-	a.mu.Unlock()
 	// Rebuild activate_skill tool with skill manager for dynamic description
-	a.rebuildActivateSkillTool()
+	a.rebuildActivateSkillToolLocked()
 }
 
 // SetSubagentManager sets the subagent manager for agent discovery functionality.
@@ -609,12 +608,9 @@ Output format: [expected structure]"`,
 	a.registerInvestigationTools()
 }
 
-// rebuildActivateSkillTool rebuilds the activate_skill tool with available skills in its description.
-// This is called when SetSkillManager is invoked to dynamically update the tool description.
-func (a *ExecutorAdapter) rebuildActivateSkillTool() {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
+// rebuildActivateSkillToolLocked updates the activate_skill tool definition.
+// REQUIRES: a.mu must be held by the caller.
+func (a *ExecutorAdapter) rebuildActivateSkillToolLocked() {
 	// Build description with available skills
 	description := a.buildActivateSkillDescription()
 
