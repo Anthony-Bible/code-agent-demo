@@ -366,7 +366,7 @@ func TestAlert_WithLabels(t *testing.T) {
 
 		// Should not panic, labels might be nil or empty map
 		labels := alert.Labels()
-		if labels != nil && len(labels) != 0 {
+		if len(labels) != 0 {
 			t.Errorf("Labels() should be nil or empty after setting nil, got %v", labels)
 		}
 	})

@@ -1752,7 +1752,7 @@ func TestProcessAssistantResponse_WithThinkingBlocks(t *testing.T) {
 		}
 
 		// Empty slice should be converted (may be nil or empty slice, both acceptable)
-		if foundUserMessage.ThinkingBlocks != nil && len(foundUserMessage.ThinkingBlocks) != 0 {
+		if len(foundUserMessage.ThinkingBlocks) != 0 {
 			t.Errorf("Expected empty or nil thinking blocks for empty slice, got %d blocks",
 				len(foundUserMessage.ThinkingBlocks))
 		}

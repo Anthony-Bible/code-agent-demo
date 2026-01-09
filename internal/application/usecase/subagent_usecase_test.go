@@ -196,7 +196,7 @@ func TestSpawnSubagent_LoadAgentMetadataError(t *testing.T) {
 	if result != nil {
 		t.Error("SpawnSubagent() should return nil result on LoadAgentMetadata error")
 	}
-	if !errors.Is(err, expectedErr) && !errors.Is(err, expectedErr) {
+	if !errors.Is(err, expectedErr) {
 		t.Errorf("Expected error to be or wrap %v, got: %v", expectedErr, err)
 	}
 }
