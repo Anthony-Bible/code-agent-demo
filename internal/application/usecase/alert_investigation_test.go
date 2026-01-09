@@ -1804,7 +1804,11 @@ func (m *mockConversationServiceWithThinking) AddUserMessage(
 	ctx context.Context,
 	sessionID, content string,
 ) (*entity.Message, error) {
-	return nil, nil
+	return &entity.Message{
+		Role:      entity.RoleUser,
+		Content:   content,
+		Timestamp: time.Now(),
+	}, nil
 }
 
 func (m *mockConversationServiceWithThinking) ProcessAssistantResponse(

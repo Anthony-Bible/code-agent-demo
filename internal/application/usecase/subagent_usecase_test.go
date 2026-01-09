@@ -27,14 +27,14 @@ func (m *MockSubagentManager) DiscoverAgents(ctx context.Context) (*port.Subagen
 	if m.DiscoverAgentsFunc != nil {
 		return m.DiscoverAgentsFunc(ctx)
 	}
-	return nil, nil
+	return &port.SubagentDiscoveryResult{}, nil
 }
 
 func (m *MockSubagentManager) LoadAgentMetadata(ctx context.Context, agentName string) (*entity.Subagent, error) {
 	if m.LoadAgentMetadataFunc != nil {
 		return m.LoadAgentMetadataFunc(ctx, agentName)
 	}
-	return nil, nil
+	return nil, errors.New("agent not found")
 }
 
 func (m *MockSubagentManager) RegisterAgent(ctx context.Context, agent *entity.Subagent) error {
@@ -55,7 +55,7 @@ func (m *MockSubagentManager) GetAgentByName(ctx context.Context, agentName stri
 	if m.GetAgentByNameFunc != nil {
 		return m.GetAgentByNameFunc(ctx, agentName)
 	}
-	return nil, nil
+	return nil, errors.New("agent not found")
 }
 
 func (m *MockSubagentManager) ListAgents(ctx context.Context) ([]port.SubagentInfo, error) {
@@ -79,7 +79,7 @@ func (m *MockSubagentRunner) Run(
 	if m.RunFunc != nil {
 		return m.RunFunc(ctx, agent, taskPrompt, subagentID)
 	}
-	return nil, nil
+	return nil, errors.New("not implemented")
 }
 
 // ==================== Constructor Tests ====================

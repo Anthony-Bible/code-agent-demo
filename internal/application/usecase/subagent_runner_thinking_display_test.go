@@ -352,6 +352,72 @@ func TestSubagentRunner_ThinkingStatusDisplay_BeforeProcessAssistantResponse(t *
 	_ = processResponseCalledAfterThinking
 }
 
+// TestSubagentRunner_ThinkingStatusDisplay_MultipleStatusTypes tests that getStatusCallsForType works with different status types.
+func TestSubagentRunner_ThinkingStatusDisplay_MultipleStatusTypes(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	uiMock := newThinkingDisplayUIMock()
+	convMock := newThinkingDisplayConvServiceMock()
+	toolMock := newSubagentRunnerToolExecutorMock()
+	aiMock := newSubagentRunnerAIProviderMock()
+
+	// Enable thinking mode
+	convMock.thinkingModeEnabled = true
+
+	// Configure for 1 tool call + completion (to generate different status types)
+	msg1, _ := entity.NewMessage(entity.RoleAssistant, "Running tool")
+	msg2, _ := entity.NewMessage(entity.RoleAssistant, "Task complete")
+
+	toolCall := port.ToolCallInfo{
+		ToolID:   "call1",
+		ToolName: "read_file",
+		Input:    map[string]interface{}{"path": "/test.go"},
+	}
+
+	convMock.processResponseMessages = []*entity.Message{msg1, msg2}
+	convMock.processResponseToolCalls = [][]port.ToolCallInfo{
+		{toolCall}, // First iteration: 1 tool call
+		{},         // Second iteration: completion
+	}
+
+	config := SubagentConfig{MaxActions: 10}
+	runner := NewSubagentRunner(convMock, toolMock, aiMock, uiMock, config)
+
+	agent := &entity.Subagent{
+		Name:        "multi-status-agent",
+		Description: "Test agent with multiple status types",
+	}
+
+	// Act
+	_, err := runner.Run(ctx, agent, "Test multiple status types", "subagent-009")
+	// Assert
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	// Verify different status types can be counted
+	startingCalls := uiMock.getStatusCallsForType("Starting")
+	if startingCalls != 1 {
+		t.Errorf("Expected 1 'Starting' status call, got %d", startingCalls)
+	}
+
+	thinkingCalls := uiMock.getStatusCallsForType("Thinking")
+	if thinkingCalls != 2 {
+		t.Errorf("Expected 2 'Thinking' status calls (one per iteration), got %d", thinkingCalls)
+	}
+
+	completedCalls := uiMock.getStatusCallsForType("Completed")
+	if completedCalls != 1 {
+		t.Errorf("Expected 1 'Completed' status call, got %d", completedCalls)
+	}
+
+	// Verify a status type that was never called returns 0
+	unknownCalls := uiMock.getStatusCallsForType("UnknownStatus")
+	if unknownCalls != 0 {
+		t.Errorf("Expected 0 calls for unknown status type, got %d", unknownCalls)
+	}
+}
+
 // TestSubagentRunner_ThinkingStatusDisplay_OnEveryLoopIteration tests that thinking status is shown on EVERY loop iteration.
 func TestSubagentRunner_ThinkingStatusDisplay_OnEveryLoopIteration(t *testing.T) {
 	// Arrange

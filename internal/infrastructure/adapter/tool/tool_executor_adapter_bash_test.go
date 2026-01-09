@@ -145,7 +145,7 @@ func TestBashTool_DangerousCommandDenied(t *testing.T) {
 		return false
 	})
 
-	input := `{"command": "sudo ls"}`
+	input := `{"command": "sudo -n ls"}`
 	_, err := adapter.ExecuteTool(context.Background(), "bash", input)
 	if err == nil {
 		t.Fatal("Expected error for denied dangerous command, got nil")
