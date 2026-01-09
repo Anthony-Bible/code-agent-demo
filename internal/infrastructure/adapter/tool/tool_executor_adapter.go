@@ -135,8 +135,16 @@ func NewExecutorAdapter(fileManager port.FileManager) *ExecutorAdapter {
 
 // SetSkillManager sets the skill manager for skill-related functionality.
 // This should be called after creation to enable skill activation features.
+// It also rebuilds the activate_skill tool to include available skills in its description.
+//
+// This method is thread-safe but blocks tool operations momentarily while updating.
+// Call once during initialization before starting the main execution loop.
 func (a *ExecutorAdapter) SetSkillManager(sm port.SkillManager) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.skillManager = sm
+	// Rebuild activate_skill tool with skill manager for dynamic description
+	a.rebuildActivateSkillToolLocked()
 }
 
 // SetSubagentManager sets the subagent manager for agent discovery functionality.
@@ -404,17 +412,17 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 	}
 	a.tools[fetchTool.Name] = fetchTool
 
-	// Register activate_skill tool
+	// Register activate_skill tool (will be rebuilt with dynamic description if SetSkillManager is called)
 	activateSkillTool := entity.Tool{
 		ID:          "activate_skill",
 		Name:        "activate_skill",
-		Description: "Activates a skill by name and returns its full content. Use this to load detailed instructions for specific capabilities like code review, testing, migrations, etc.",
+		Description: "Activates a skill by name and returns its full content. Use this to load detailed instructions for specific capabilities.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"skill_name": map[string]interface{}{
 					"type":        "string",
-					"description": "The name of the skill to activate (e.g., code-review, test-skill)",
+					"description": "The name of the skill to activate",
 				},
 			},
 			"required": []string{"skill_name"},
@@ -598,6 +606,72 @@ Output format: [expected structure]"`,
 
 	// Register investigation tools
 	a.registerInvestigationTools()
+}
+
+// rebuildActivateSkillToolLocked updates the activate_skill tool definition.
+// REQUIRES: a.mu must be held by the caller.
+func (a *ExecutorAdapter) rebuildActivateSkillToolLocked() {
+	// Build description with available skills
+	description := a.buildActivateSkillDescription()
+
+	// Update the activate_skill tool with new description
+	activateSkillTool := entity.Tool{
+		ID:          "activate_skill",
+		Name:        "activate_skill",
+		Description: description,
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"skill_name": map[string]interface{}{
+					"type":        "string",
+					"description": "The name of the skill to activate",
+				},
+			},
+			"required": []string{"skill_name"},
+		},
+		RequiredFields: []string{"skill_name"},
+	}
+	a.tools[activateSkillTool.Name] = activateSkillTool
+}
+
+// buildActivateSkillDescription builds the description for the activate_skill tool.
+// If a skill manager is available, it includes available skills in the description.
+func (a *ExecutorAdapter) buildActivateSkillDescription() string {
+	baseDescription := "Execute a skill within the main conversation\n\n" +
+		"When users ask you to perform tasks, check if any of the available skills below can help complete the task more effectively. " +
+		"Skills provide specialized capabilities and domain knowledge.\n\n" +
+		"Use this tool to load the full content of a skill when its capabilities are needed for the task at hand."
+
+	// If no skill manager, return base description
+	if a.skillManager == nil {
+		return baseDescription
+	}
+
+	// Try to discover skills with timeout to prevent blocking indefinitely
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	skills, err := a.skillManager.DiscoverSkills(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to discover skills for tool description: %v\n", err)
+		return baseDescription
+	}
+	if len(skills.Skills) == 0 {
+		return baseDescription
+	}
+
+	// Build skills section following the example format
+	var sb strings.Builder
+	sb.WriteString(baseDescription)
+	sb.WriteString("\n\n## Available Skills\n\n")
+
+	for _, skill := range skills.Skills {
+		sb.WriteString(fmt.Sprintf("- **%s**: %s\n", skill.Name, skill.Description))
+	}
+
+	sb.WriteString("\nActivate a skill by providing its name to load detailed instructions and capabilities.")
+
+	return sb.String()
 }
 
 // executeByName executes the appropriate tool function based on the tool name.
