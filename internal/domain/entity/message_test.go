@@ -80,22 +80,26 @@ func TestMessage_NewMessage(t *testing.T) {
 				t.Errorf("NewMessage() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !tt.wantErr {
-				if got == nil {
-					t.Error("NewMessage() returned nil message")
-					return
+
+			if tt.wantErr {
+				if got != nil {
+					t.Errorf("NewMessage() returned non-nil message on error: %+v", got)
 				}
-				if got.Role != tt.role {
-					t.Errorf("NewMessage() role = %v, want %v", got.Role, tt.role)
-				}
-				if got.Content != tt.content {
-					t.Errorf("NewMessage() content = %v, want %v", got.Content, tt.content)
-				}
-				if got.Timestamp.IsZero() {
-					t.Error("NewMessage() timestamp should not be zero")
-				}
-			} else if got != nil {
-				t.Errorf("NewMessage() returned non-nil message on error: %+v", got)
+				return
+			}
+
+			if got == nil {
+				t.Error("NewMessage() returned nil message")
+				return
+			}
+			if got.Role != tt.role {
+				t.Errorf("NewMessage() role = %v, want %v", got.Role, tt.role)
+			}
+			if got.Content != tt.content {
+				t.Errorf("NewMessage() content = %v, want %v", got.Content, tt.content)
+			}
+			if got.Timestamp.IsZero() {
+				t.Error("NewMessage() timestamp should not be zero")
 			}
 		})
 	}

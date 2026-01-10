@@ -1617,15 +1617,20 @@ func TestInvestigationRunner_SafetyEnforcerBlocksCommand(t *testing.T) {
 	// Assert
 	// The dangerous command should not be executed
 	for _, name := range toolExecutor.executeToolName {
-		if name == "bash" {
-			for _, input := range toolExecutor.executeToolInput {
-				if inputMap, ok := input.(map[string]interface{}); ok {
-					if cmd, ok := inputMap["command"].(string); ok {
-						if strings.Contains(cmd, "rm -rf") {
-							t.Error("Dangerous command 'rm -rf' should have been blocked")
-						}
-					}
-				}
+		if name != "bash" {
+			continue
+		}
+		for _, input := range toolExecutor.executeToolInput {
+			inputMap, ok := input.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			cmd, ok := inputMap["command"].(string)
+			if !ok {
+				continue
+			}
+			if strings.Contains(cmd, "rm -rf") {
+				t.Error("Dangerous command 'rm -rf' should have been blocked")
 			}
 		}
 	}

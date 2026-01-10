@@ -58,28 +58,29 @@ func TestNewConversationService(t *testing.T) {
 				} else if err.Error() != tt.errorMsg {
 					t.Errorf("expected error message '%s' but got '%s'", tt.errorMsg, err.Error())
 				}
-			} else {
-				if err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
-				if service == nil {
-					t.Fatal("expected service instance but got nil")
-				}
-				if service.aiProvider != tt.aiProvider {
-					t.Errorf("AI provider not set correctly")
-				}
-				if service.toolExecutor != tt.toolExecutor {
-					t.Errorf("Tool executor not set correctly")
-				}
-				if service.conversations == nil {
-					t.Errorf("Conversations map not initialized")
-				}
-				if len(service.conversations) != 0 {
-					t.Errorf("Expected empty conversations map but got %d items", len(service.conversations))
-				}
-				if service.currentSession != "" {
-					t.Errorf("Expected empty current session but got '%s'", service.currentSession)
-				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if service == nil {
+				t.Fatal("expected service instance but got nil")
+			}
+			if service.aiProvider != tt.aiProvider {
+				t.Errorf("AI provider not set correctly")
+			}
+			if service.toolExecutor != tt.toolExecutor {
+				t.Errorf("Tool executor not set correctly")
+			}
+			if service.conversations == nil {
+				t.Errorf("Conversations map not initialized")
+			}
+			if len(service.conversations) != 0 {
+				t.Errorf("Expected empty conversations map but got %d items", len(service.conversations))
+			}
+			if service.currentSession != "" {
+				t.Errorf("Expected empty current session but got '%s'", service.currentSession)
 			}
 		})
 	}
@@ -1517,23 +1518,24 @@ func (m *contextVerifyingMockAIProvider) SendMessage(
 			return nil, nil, fmt.Errorf("expected no custom system prompt in context, but found: %+v", customPromptInfo)
 		}
 		m.contextWasVerified = true
-	} else {
-		// Verify custom prompt EXISTS and matches expectations
-		if !exists {
-			return nil, nil, errors.New("expected custom system prompt in context, but not found")
-		}
-		if customPromptInfo.SessionID != m.expectedSessionID {
-			return nil, nil, fmt.Errorf(
-				"expected session ID '%s', got '%s'",
-				m.expectedSessionID,
-				customPromptInfo.SessionID,
-			)
-		}
-		if customPromptInfo.Prompt != m.expectedPrompt {
-			return nil, nil, fmt.Errorf("expected prompt '%s', got '%s'", m.expectedPrompt, customPromptInfo.Prompt)
-		}
-		m.contextWasVerified = true
+		return m.mockAIProvider.SendMessage(ctx, messages, tools)
 	}
+
+	// Verify custom prompt EXISTS and matches expectations
+	if !exists {
+		return nil, nil, errors.New("expected custom system prompt in context, but not found")
+	}
+	if customPromptInfo.SessionID != m.expectedSessionID {
+		return nil, nil, fmt.Errorf(
+			"expected session ID '%s', got '%s'",
+			m.expectedSessionID,
+			customPromptInfo.SessionID,
+		)
+	}
+	if customPromptInfo.Prompt != m.expectedPrompt {
+		return nil, nil, fmt.Errorf("expected prompt '%s', got '%s'", m.expectedPrompt, customPromptInfo.Prompt)
+	}
+	m.contextWasVerified = true
 
 	// Delegate to base mock
 	return m.mockAIProvider.SendMessage(ctx, messages, tools)

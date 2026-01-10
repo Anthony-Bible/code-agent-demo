@@ -122,10 +122,11 @@ func TestNewPrometheusSource_Validation(t *testing.T) {
 						t.Errorf("NewPrometheusSource() error = %v, should contain %q", err, tt.errContains)
 					}
 				}
-			} else {
-				if source == nil {
-					t.Error("NewPrometheusSource() returned nil source without error")
-				}
+				return
+			}
+
+			if source == nil {
+				t.Error("NewPrometheusSource() returned nil source without error")
 			}
 		})
 	}
