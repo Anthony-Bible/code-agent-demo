@@ -170,9 +170,36 @@ Detailed instructions, patterns, and examples for using the skill.
 ### How Skills Work
 
 1. **Discovery**: Skills are automatically discovered from `./skills` at startup
-2. **Metadata**: Skill name and description are added to the AI's system prompt
+2. **Metadata**: Skill name, description, and source type are shown in the `activate_skill` tool description
 3. **Activation**: Use the `activate_skill` tool to load full skill content on demand
 4. **Scripts**: Skills can reference scripts in a `scripts/` subdirectory (executed via bash tool)
+
+### Skill Activation
+
+When a skill is activated via the `activate_skill` tool, it returns the skill content with additional metadata:
+
+- `source_type`: Indicates where the skill is located ("project", "project-claude", or "user")
+- `directory_path`: The path to the skill directory for script execution
+
+Example activation output:
+```yaml
+---
+name: my-skill
+description: A skill description
+source_type: project
+directory_path: skills/my-skill
+---
+# Skill Content
+
+To run a script: `bash {directory_path}/scripts/setup.sh`
+```
+
+The `source_type` helps the AI understand the correct context:
+- `project` - Skills from `./skills/` (highest priority)
+- `project-claude` - Skills from `./.claude/skills/`
+- `user` - Skills from `~/.claude/skills/` (user global)
+
+This is crucial when skills reference scripts, as the AI needs to know the full path to execute them correctly.
 
 ### Adding a New Skill
 
