@@ -354,6 +354,7 @@ func TestInvestigationRunner_CreatesSession(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:    20,
 			MaxDuration:   15 * time.Minute,
@@ -395,6 +396,7 @@ func TestInvestigationRunner_EndsSessionOnCompletion(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -436,6 +438,7 @@ func TestInvestigationRunner_EndsSessionOnError(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -475,6 +478,7 @@ func TestInvestigationRunner_StartConversationError(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
 
@@ -516,6 +520,7 @@ func TestInvestigationRunner_SendsAlertContext(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -577,6 +582,7 @@ func TestInvestigationRunner_UsesPromptBuilder(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -627,6 +633,7 @@ func TestInvestigationRunner_PromptBuilderError(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
 
@@ -685,6 +692,7 @@ func TestInvestigationRunner_ExecutesToolCalls(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -745,6 +753,7 @@ func TestInvestigationRunner_FeedsResultsBack(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -821,6 +830,7 @@ func TestInvestigationRunner_MultipleIterations(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -888,6 +898,7 @@ func TestInvestigationRunner_StopsAtMaxActions(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   3, // Limit to 3 actions
 			MaxDuration:  15 * time.Minute,
@@ -947,6 +958,7 @@ func TestInvestigationRunner_ToolExecutionError(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -1003,6 +1015,7 @@ func TestInvestigationRunner_BlockedToolByEnforcer(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -1069,6 +1082,7 @@ func TestInvestigationRunner_MultipleToolsInSingleIteration(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -1134,6 +1148,7 @@ func TestInvestigationRunner_RespectsContextCancellation(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -1174,6 +1189,7 @@ func TestInvestigationRunner_RespectsTimeout(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  50 * time.Millisecond, // Very short timeout
@@ -1218,6 +1234,7 @@ func TestInvestigationRunner_ReturnsCorrectResultStructure(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -1265,6 +1282,7 @@ func TestInvestigationRunner_NilAlertReturnsError(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
 
@@ -1403,6 +1421,7 @@ func TestInvestigationRunner_Run_TableDriven(t *testing.T) {
 				safetyEnforcer,
 				promptBuilder,
 				nil, // skillManager
+		nil, // uiAdapter
 				tt.config,
 			)
 
@@ -1467,6 +1486,7 @@ func TestNewInvestigationRunner_NotNil(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		config,
 	)
 
@@ -1498,6 +1518,7 @@ func TestInvestigationRunner_EmptyInvestigationID(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -1534,6 +1555,7 @@ func TestInvestigationRunner_WhitespaceInvestigationID(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
 
@@ -1565,6 +1587,7 @@ func TestInvestigationRunner_AlertWithEmptyID(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -1629,6 +1652,7 @@ func TestInvestigationRunner_SafetyEnforcerBlocksCommand(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -1693,6 +1717,7 @@ func TestInvestigationRunner_SafetyEnforcerActionBudgetExceeded(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20, // Config allows 20, but enforcer limits to 2
 			MaxDuration:  15 * time.Minute,
@@ -1739,6 +1764,7 @@ func TestInvestigationRunner_SafetyEnforcerTimeout(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -1782,6 +1808,7 @@ func TestInvestigationRunner_EscalatesOnLowConfidence(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:           20,
 			MaxDuration:          15 * time.Minute,
@@ -1834,6 +1861,7 @@ func TestInvestigationRunner_EscalatesOnConsecutiveErrors(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:       20,
 			MaxDuration:      15 * time.Minute,
@@ -1874,6 +1902,7 @@ func TestInvestigationRunner_EscalatesForCriticalAlert(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:           20,
 			MaxDuration:          15 * time.Minute,
@@ -1914,6 +1943,7 @@ func TestInvestigationRunner_DoesNotEscalateOnHighConfidence(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:           20,
 			MaxDuration:          15 * time.Minute,
@@ -1967,6 +1997,7 @@ func TestInvestigationRunner_FiltersToolsByAllowedList(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -2013,6 +2044,7 @@ func TestInvestigationRunner_EmptyAllowedToolsBlocksAll(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -2060,6 +2092,7 @@ func TestInvestigationRunner_EmptyAssistantResponse(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -2111,6 +2144,7 @@ func TestInvestigationRunner_MalformedToolInput(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -2150,6 +2184,7 @@ func TestInvestigationRunner_NilToolCallInfo(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -2194,6 +2229,7 @@ func TestInvestigationRunner_PersistsToStore(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		store,
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
@@ -2244,6 +2280,7 @@ func TestInvestigationRunner_UpdatesStoreOnCompletion(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		store,
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
@@ -2284,6 +2321,7 @@ func TestInvestigationRunner_UpdatesStoreOnError(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		store,
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
@@ -2338,6 +2376,7 @@ func TestInvestigationRunner_CollectsFindings(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -2383,6 +2422,7 @@ func TestInvestigationRunner_ResultContainsSummary(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -2428,6 +2468,7 @@ func TestInvestigationRunner_ConcurrentRuns(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:    20,
 			MaxDuration:   15 * time.Minute,
@@ -2511,6 +2552,7 @@ func TestInvestigationRunner_TracksDuration(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -2563,6 +2605,7 @@ func TestInvestigationRunner_ErrorContainsContext(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
 
@@ -2602,6 +2645,7 @@ func TestInvestigationRunner_AddUserMessageError(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -2654,6 +2698,7 @@ func TestInvestigationRunner_AddToolResultMessageError(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -2709,6 +2754,7 @@ func TestInvestigationRunner_HandlesLongToolOutput(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -2751,6 +2797,7 @@ func TestInvestigationRunner_HandlesSpecialCharactersInAlert(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -2849,6 +2896,7 @@ func TestNewInvestigationRunner_WithNilDependencies(t *testing.T) {
 				tt.safetyEnforcer,
 				tt.promptBuilder,
 				nil, // skillManager
+		nil, // uiAdapter
 				AlertInvestigationUseCaseConfig{},
 			)
 		})
@@ -2869,6 +2917,7 @@ func TestNewInvestigationRunnerWithStore_NotNil(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		store,
 		config,
 	)
@@ -2905,6 +2954,7 @@ func TestInvestigationRunner_ZeroMaxActions(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   0, // Zero means unlimited or immediate stop?
 			MaxDuration:  15 * time.Minute,
@@ -2945,6 +2995,7 @@ func TestInvestigationRunner_ZeroDuration(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  0, // Zero duration
@@ -2983,6 +3034,7 @@ func TestInvestigationRunner_NegativeValues(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   -1, // Negative values
 			MaxDuration:  -time.Minute,
@@ -3044,6 +3096,7 @@ func TestInvestigationRunner_DetectsCompleteInvestigation(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -3113,6 +3166,7 @@ func TestInvestigationRunner_ExtractsCompletionData(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -3190,6 +3244,7 @@ func TestInvestigationRunner_DetectsEscalateInvestigation(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -3260,6 +3315,7 @@ func TestInvestigationRunner_ExtractsEscalationData(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -3345,6 +3401,7 @@ func TestInvestigationRunner_CompletionStopsLoop(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -3417,6 +3474,7 @@ func TestInvestigationRunner_EscalationStopsLoop(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -3499,6 +3557,7 @@ func TestInvestigationRunner_MixedToolCallsWithCompletion(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxActions:   20,
 			MaxDuration:  15 * time.Minute,
@@ -3589,6 +3648,7 @@ func TestInvestigationRunner_Run_CallsSetCustomSystemPrompt(t *testing.T) {
 		nil,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{MaxActions: 20},
 	)
 
@@ -3659,6 +3719,7 @@ func TestInvestigationRunner_Run_SetCustomSystemPromptCalledBeforeAddUserMessage
 		nil,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{MaxActions: 20},
 	)
 
@@ -3717,6 +3778,7 @@ func TestInvestigationRunner_Run_AddUserMessageContainsMinimalAlertOnly(t *testi
 		nil,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{MaxActions: 20},
 	)
 
@@ -3794,6 +3856,7 @@ func TestInvestigationRunner_Run_SetCustomSystemPromptErrorPropagated(t *testing
 		nil,
 		promptBuilder,
 		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{MaxActions: 20},
 	)
 
@@ -3909,9 +3972,10 @@ Please prioritize your remaining actions carefully. Consider using the batch_too
 			runner := NewInvestigationRunner(
 				convService,
 				toolExecutor,
-				nil,
+				nil, // safetyEnforcer
 				promptBuilder,
-				nil,
+				nil, // skillManager
+				nil, // uiAdapter
 				AlertInvestigationUseCaseConfig{MaxActions: 20},
 			)
 
@@ -3977,7 +4041,8 @@ func TestInvestigationRunner_InjectsWarningAtMaxActionsMinus5(t *testing.T) {
 		toolExecutor,
 		nil,
 		promptBuilder,
-		nil,
+		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{MaxActions: maxActions},
 	)
 
@@ -4102,9 +4167,10 @@ func TestInvestigationRunner_InjectsCountdownWarnings(t *testing.T) {
 			runner := NewInvestigationRunner(
 				convService,
 				toolExecutor,
-				nil,
+				nil, // safetyEnforcer
 				promptBuilder,
-				nil,
+				nil, // skillManager
+				nil, // uiAdapter
 				AlertInvestigationUseCaseConfig{MaxActions: tt.maxActions},
 			)
 
@@ -4172,7 +4238,8 @@ func TestInvestigationRunner_SendsSummaryRequestAtMaxActions(t *testing.T) {
 		toolExecutor,
 		nil,
 		promptBuilder,
-		nil,
+		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{MaxActions: maxActions},
 	)
 
@@ -4267,7 +4334,8 @@ func TestInvestigationRunner_WarningMessageOrdering(t *testing.T) {
 		toolExecutor,
 		nil,
 		promptBuilder,
-		nil,
+		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{MaxActions: maxActions},
 	)
 
@@ -4356,7 +4424,8 @@ func TestInvestigationRunner_NoWarningsWhenNotReachingLimit(t *testing.T) {
 		toolExecutor,
 		nil,
 		promptBuilder,
-		nil,
+		nil, // skillManager
+		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{MaxActions: 20},
 	)
 
@@ -4422,6 +4491,7 @@ func TestInvestigationRunner_Run_ThinkingModeEnabled(t *testing.T) {
 		nil, // no safety enforcer
 		promptBuilder,
 		nil, // no skill manager
+		nil, // uiAdapter
 		config,
 	)
 
@@ -4483,7 +4553,8 @@ func TestInvestigationRunner_Run_ThinkingModeDisabled(t *testing.T) {
 		toolExecutor,
 		nil,
 		promptBuilder,
-		nil,
+		nil, // skillManager
+		nil, // uiAdapter
 		config,
 	)
 
@@ -4530,7 +4601,8 @@ func TestInvestigationRunner_Run_ThinkingModeDefaultBudget(t *testing.T) {
 		toolExecutor,
 		nil,
 		promptBuilder,
-		nil,
+		nil, // skillManager
+		nil, // uiAdapter
 		config,
 	)
 
