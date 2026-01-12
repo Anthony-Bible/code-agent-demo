@@ -141,11 +141,11 @@ func TestBashTool_DangerousCommandDenied(t *testing.T) {
 	adapter := NewExecutorAdapter(fileManager)
 
 	// Set callback that returns false
-	adapter.SetDangerousCommandCallback(func(command, reason string) bool {
+	adapter.SetDangerousCommandCallback(func(_, _ string) bool {
 		return false
 	})
 
-	input := `{"command": "sudo ls"}`
+	input := `{"command": "sudo -n ls"}`
 	_, err := adapter.ExecuteTool(context.Background(), "bash", input)
 	if err == nil {
 		t.Fatal("Expected error for denied dangerous command, got nil")
@@ -161,12 +161,13 @@ func TestBashTool_DangerousCommandAllowed(t *testing.T) {
 	adapter := NewExecutorAdapter(fileManager)
 
 	// Set callback that returns true (user confirmed)
-	adapter.SetDangerousCommandCallback(func(command, reason string) bool {
+	adapter.SetDangerousCommandCallback(func(_, _ string) bool {
 		return true
 	})
 
 	// Use a "dangerous" command that's actually safe to run
-	input := `{"command": "sudo echo allowed"}`
+	// Use -n flag to prevent blocking on password prompt
+	input := `{"command": "sudo -n echo allowed"}`
 	result, err := adapter.ExecuteTool(context.Background(), "bash", input)
 	// The command may fail due to no sudo access, but it should attempt execution
 	// (not be blocked by the dangerous command check)
@@ -419,7 +420,7 @@ func TestBashTool_AllCommandsConfirmation_NonDangerousDenied(t *testing.T) {
 	adapter := NewExecutorAdapter(fileManager)
 
 	// Set CommandConfirmationCallback that denies all commands
-	adapter.SetCommandConfirmationCallback(func(command string, isDangerous bool, reason, description string) bool {
+	adapter.SetCommandConfirmationCallback(func(_ string, _ bool, _, _ string) bool {
 		return false
 	})
 

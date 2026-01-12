@@ -1205,27 +1205,28 @@ func validateURL(rawURL string) error {
 				hostIP.String(),
 			)
 		}
-	} else {
-		// Hostname - resolve to IPs and check each one
-		ips, err := net.LookupIP(host)
-		if err != nil {
-			return fmt.Errorf("failed to resolve hostname %s: %w", host, err)
-		}
+		return nil
+	}
 
-		// Check all resolved IP addresses
-		for _, ip := range ips {
-			if isPrivateIP(ip) {
-				return fmt.Errorf(
-					"hostname %s resolves to private IP address %s and is blocked for security",
-					host,
-					ip.String(),
-				)
-			}
-		}
+	// Hostname - resolve to IPs and check each one
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("failed to resolve hostname %s: %w", host, err)
+	}
 
-		// If no IPs resolve, block the request
-		if len(ips) == 0 {
-			return fmt.Errorf("hostname %s does not resolve to any IP address", host)
+	// If no IPs resolve, block the request
+	if len(ips) == 0 {
+		return fmt.Errorf("hostname %s does not resolve to any IP address", host)
+	}
+
+	// Check all resolved IP addresses
+	for _, ip := range ips {
+		if isPrivateIP(ip) {
+			return fmt.Errorf(
+				"hostname %s resolves to private IP address %s and is blocked for security",
+				host,
+				ip.String(),
+			)
 		}
 	}
 

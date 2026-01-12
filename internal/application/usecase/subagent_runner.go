@@ -368,32 +368,9 @@ func (r *SubagentRunner) runExecutionLoop(rc *subagentRunContext) (*SubagentResu
 		}
 
 		// Process assistant response
-		msg, toolCalls, err := r.convService.ProcessAssistantResponse(ctx, rc.sessionID)
+		msg, toolCalls, err := r.processAssistantResponseWithFallback(ctx, rc)
 		if err != nil {
-			// Check if this is a model-related 400 error and we tried to switch models
-			if r.isModelError(err) && r.aiProvider.GetModel() != "" && r.aiProvider.GetModel() != rc.originalModel {
-				// Log warning and fall back to parent model
-				fallbackMsg := fmt.Sprintf(
-					"Model '%s' not available for subagent, falling back to parent model '%s': %v",
-					r.aiProvider.GetModel(),
-					rc.originalModel,
-					err,
-				)
-				if r.userInterface != nil {
-					_ = r.userInterface.DisplaySubagentStatus(rc.agent.Name, "Model fallback", fallbackMsg)
-				}
-				// Restore original model and retry
-				if modelErr := r.aiProvider.SetModel(rc.originalModel); modelErr != nil {
-					return rc.failedResult(
-						fmt.Errorf("failed to restore original model: %w (original error: %w)", modelErr, err),
-					), err
-				}
-				// Retry with parent model
-				msg, toolCalls, err = r.convService.ProcessAssistantResponse(ctx, rc.sessionID)
-			}
-			if err != nil {
-				return rc.failedResult(err), err
-			}
+			return rc.failedResult(err), err
 		}
 
 		rc.lastMessage = msg
@@ -418,6 +395,41 @@ func (r *SubagentRunner) runExecutionLoop(rc *subagentRunContext) (*SubagentResu
 	}
 
 	return rc.completedResult(), nil
+}
+
+// processAssistantResponseWithFallback processes the assistant response with model fallback handling.
+func (r *SubagentRunner) processAssistantResponseWithFallback(
+	ctx context.Context,
+	rc *subagentRunContext,
+) (*entity.Message, []port.ToolCallInfo, error) {
+	msg, toolCalls, err := r.convService.ProcessAssistantResponse(ctx, rc.sessionID)
+	if err == nil {
+		return msg, toolCalls, nil
+	}
+
+	// Check if this is a model-related 400 error and we tried to switch models
+	if !r.isModelError(err) || r.aiProvider.GetModel() == "" || r.aiProvider.GetModel() == rc.originalModel {
+		return nil, nil, err
+	}
+
+	// Log warning and fall back to parent model
+	fallbackMsg := fmt.Sprintf(
+		"Model '%s' not available for subagent, falling back to parent model '%s': %v",
+		r.aiProvider.GetModel(),
+		rc.originalModel,
+		err,
+	)
+	if r.userInterface != nil {
+		_ = r.userInterface.DisplaySubagentStatus(rc.agent.Name, "Model fallback", fallbackMsg)
+	}
+
+	// Restore original model and retry
+	if modelErr := r.aiProvider.SetModel(rc.originalModel); modelErr != nil {
+		return nil, nil, fmt.Errorf("failed to restore original model: %w (original error: %w)", modelErr, err)
+	}
+
+	// Retry with parent model
+	return r.convService.ProcessAssistantResponse(ctx, rc.sessionID)
 }
 
 // processToolCalls executes tool calls and feeds results back to the conversation.

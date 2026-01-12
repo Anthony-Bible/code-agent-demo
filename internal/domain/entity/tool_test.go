@@ -91,22 +91,26 @@ func TestTool_NewTool(t *testing.T) {
 				t.Errorf("NewTool() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !tt.wantErr {
-				if got == nil {
-					t.Error("NewTool() returned nil tool")
-					return
+
+			if tt.wantErr {
+				if got != nil {
+					t.Errorf("NewTool() returned non-nil tool on error: %+v", got)
 				}
-				if got.ID != tt.id {
-					t.Errorf("NewTool() ID = %v, want %v", got.ID, tt.id)
-				}
-				if got.Name != tt.toolName {
-					t.Errorf("NewTool() name = %v, want %v", got.Name, tt.toolName)
-				}
-				if got.Description != tt.description {
-					t.Errorf("NewTool() description = %v, want %v", got.Description, tt.description)
-				}
-			} else if got != nil {
-				t.Errorf("NewTool() returned non-nil tool on error: %+v", got)
+				return
+			}
+
+			if got == nil {
+				t.Error("NewTool() returned nil tool")
+				return
+			}
+			if got.ID != tt.id {
+				t.Errorf("NewTool() ID = %v, want %v", got.ID, tt.id)
+			}
+			if got.Name != tt.toolName {
+				t.Errorf("NewTool() name = %v, want %v", got.Name, tt.toolName)
+			}
+			if got.Description != tt.description {
+				t.Errorf("NewTool() description = %v, want %v", got.Description, tt.description)
 			}
 		})
 	}

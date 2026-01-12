@@ -283,7 +283,7 @@ func EditFile(input json.RawMessage) (string, error) {
 	if oldContent == newContent && editFileInput.OldStr != "" {
 		return "", errors.New("old string not found in file")
 	}
-	err = os.WriteFile(editFileInput.Path, []byte(newContent), 0o644)
+	err = os.WriteFile(editFileInput.Path, []byte(newContent), 0o600)
 	if err != nil {
 		return "", err
 	}
@@ -293,12 +293,12 @@ func EditFile(input json.RawMessage) (string, error) {
 func createNewFile(filePath string, content string) (string, error) {
 	dir := path.Dir(filePath)
 	if dir != "." {
-		err := os.MkdirAll(dir, 0o755)
+		err := os.MkdirAll(dir, 0o750)
 		if err != nil {
 			return "", fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
 	}
-	err := os.WriteFile(filePath, []byte(content), 0o644)
+	err := os.WriteFile(filePath, []byte(content), 0o600)
 	if err != nil {
 		return "", fmt.Errorf("failed to create file %s: %w", filePath, err)
 	}
