@@ -666,10 +666,24 @@ func (a *ExecutorAdapter) buildActivateSkillDescription() string {
 	sb.WriteString("\n\n## Available Skills\n\n")
 
 	for _, skill := range skills.Skills {
-		sb.WriteString(fmt.Sprintf("- **%s**: %s\n", skill.Name, skill.Description))
+		// Include source type to help AI understand where skill scripts are located
+		sourceLabel := ""
+		switch skill.SourceType {
+		case entity.SkillSourceUser:
+			sourceLabel = " (user)"
+		case entity.SkillSourceProject:
+			sourceLabel = " (project)"
+		case entity.SkillSourceProjectClaude:
+			sourceLabel = " (project-claude)"
+		}
+		sb.WriteString(fmt.Sprintf("- **%s**%s: %s\n", skill.Name, sourceLabel, skill.Description))
 	}
 
 	sb.WriteString("\nActivate a skill by providing its name to load detailed instructions and capabilities.")
+	sb.WriteString("\n\nSkill source types indicate where scripts are located:")
+	sb.WriteString("\n- (project): ./skills/skill-name/ - highest priority")
+	sb.WriteString("\n- (project-claude): ./.claude/skills/skill-name/")
+	sb.WriteString("\n- (user): ~/.claude/skills/skill-name/ - user global skills")
 
 	return sb.String()
 }
@@ -1477,6 +1491,10 @@ func (a *ExecutorAdapter) executeActivateSkill(ctx context.Context, input json.R
 	if len(skill.AllowedTools) > 0 {
 		result.WriteString(fmt.Sprintf("\nallowed-tools: %s", strings.Join(skill.AllowedTools, " ")))
 	}
+	// Include source_type to indicate if skill is user, project, or project-claude
+	result.WriteString(fmt.Sprintf("\nsource_type: %s", skill.SourceType))
+	// Include directory_path for script execution context
+	result.WriteString(fmt.Sprintf("\ndirectory_path: %s", skill.OriginalPath))
 	if len(skill.Metadata) > 0 {
 		result.WriteString("\nmetadata:")
 		for key, value := range skill.Metadata {
