@@ -257,6 +257,20 @@ func (r *InvestigationRunner) Run(
 	rc.sessionID = sessionID
 	defer func() { _ = r.convService.EndConversation(ctx, sessionID) }()
 
+	// Configure extended thinking mode if enabled
+	if r.config.ExtendedThinking {
+		thinkingBudget := r.config.ThinkingBudget
+		if thinkingBudget == 0 {
+			thinkingBudget = 10000 // Default budget
+		}
+		thinkingInfo := port.ThinkingModeInfo{
+			Enabled:      true,
+			BudgetTokens: thinkingBudget,
+			ShowThinking: r.config.ShowThinking,
+		}
+		_ = r.convService.SetThinkingMode(rc.sessionID, thinkingInfo)
+	}
+
 	if err := r.sendInitialPrompt(rc); err != nil {
 		return rc.failedResult(err), err
 	}
@@ -686,8 +700,34 @@ func (r *InvestigationRunner) handleMaxActionsReached(rc *runContext) error {
 
 // getNextToolCalls retrieves and limits the next batch of tool calls.
 // Also returns the AI message for confidence analysis.
+// When ShowThinking is enabled, uses streaming to display thinking output.
 func (r *InvestigationRunner) getNextToolCalls(rc *runContext) (*entity.Message, []port.ToolCallInfo, error) {
-	msg, toolCalls, err := r.convService.ProcessAssistantResponse(rc.ctx, rc.sessionID)
+	var msg *entity.Message
+	var toolCalls []port.ToolCallInfo
+	var err error
+
+	if r.config.ShowThinking {
+		// Use streaming to display thinking output
+		thinkingHeaderDisplayed := false
+		thinkingCallback := func(thinking string) error {
+			if !thinkingHeaderDisplayed {
+				thinkingHeaderDisplayed = true
+				fmt.Fprintf(os.Stderr, "\x1b[95m[THINKING]\x1b[0m ")
+			}
+			fmt.Fprintf(os.Stderr, "%s", thinking)
+			return nil
+		}
+		msg, toolCalls, err = r.convService.ProcessAssistantResponseStreaming(
+			rc.ctx, rc.sessionID, nil, thinkingCallback,
+		)
+		// Add newline after thinking block if we displayed one
+		if thinkingHeaderDisplayed {
+			fmt.Fprintf(os.Stderr, "\n")
+		}
+	} else {
+		msg, toolCalls, err = r.convService.ProcessAssistantResponse(rc.ctx, rc.sessionID)
+	}
+
 	if err != nil {
 		return nil, nil, err
 	}

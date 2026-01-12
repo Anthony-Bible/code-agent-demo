@@ -58,6 +58,16 @@ type investigationRunnerConvServiceMock struct {
 	setCustomSystemPromptError   error
 	setCustomSystemPromptContent []string
 	onSetCustomSystemPrompt      func() // Callback for tracking call order
+
+	// SetThinkingMode tracking
+	setThinkingModeCalls   int
+	setThinkingModeSession string
+	setThinkingModeInfo    port.ThinkingModeInfo
+	setThinkingModeError   error
+
+	// GetThinkingMode tracking
+	getThinkingModeInfo  port.ThinkingModeInfo
+	getThinkingModeError error
 }
 
 func newInvestigationRunnerConvServiceMock() *investigationRunnerConvServiceMock {
@@ -118,6 +128,16 @@ func (m *investigationRunnerConvServiceMock) ProcessAssistantResponse(
 	return msg, toolCalls, nil
 }
 
+func (m *investigationRunnerConvServiceMock) ProcessAssistantResponseStreaming(
+	ctx context.Context,
+	sessionID string,
+	_ port.StreamCallback,
+	_ port.ThinkingCallback,
+) (*entity.Message, []port.ToolCallInfo, error) {
+	// Delegate to non-streaming version for testing
+	return m.ProcessAssistantResponse(ctx, sessionID)
+}
+
 func (m *investigationRunnerConvServiceMock) AddToolResultMessage(
 	ctx context.Context,
 	sessionID string,
@@ -153,11 +173,18 @@ func (m *investigationRunnerConvServiceMock) SetCustomSystemPrompt(
 }
 
 func (m *investigationRunnerConvServiceMock) SetThinkingMode(sessionID string, info port.ThinkingModeInfo) error {
-	return nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.setThinkingModeCalls++
+	m.setThinkingModeSession = sessionID
+	m.setThinkingModeInfo = info
+	return m.setThinkingModeError
 }
 
 func (m *investigationRunnerConvServiceMock) GetThinkingMode(sessionID string) (port.ThinkingModeInfo, error) {
-	return port.ThinkingModeInfo{}, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.getThinkingModeInfo, m.getThinkingModeError
 }
 
 // investigationRunnerToolExecutorMock implements port.ToolExecutor for testing.
@@ -4357,5 +4384,173 @@ func TestInvestigationRunner_NoWarningsWhenNotReachingLimit(t *testing.T) {
 	// Should only have the initial trigger message
 	if convService.addUserMessageCalls != 1 {
 		t.Errorf("AddUserMessage called %d times, expected 1 (only initial message)", convService.addUserMessageCalls)
+	}
+}
+
+// =============================================================================
+// Thinking Mode Tests
+// =============================================================================
+
+func TestInvestigationRunner_Run_ThinkingModeEnabled(t *testing.T) {
+	// Setup mocks
+	convService := newInvestigationRunnerConvServiceMock()
+	toolExecutor := newInvestigationRunnerToolExecutorMock()
+	promptBuilder := newInvestigationRunnerPromptBuilderMock()
+
+	// Configure AI to complete immediately
+	convService.processResponseMessages = []*entity.Message{
+		{Role: entity.RoleAssistant, Content: "Investigation complete"},
+	}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{
+		{{ToolID: "1", ToolName: "complete_investigation", Input: map[string]any{
+			"findings":   []any{"test finding"},
+			"confidence": 0.9,
+		}}},
+	}
+
+	// Enable extended thinking in config
+	config := AlertInvestigationUseCaseConfig{
+		MaxActions:       20,
+		ExtendedThinking: true,
+		ThinkingBudget:   8000,
+		ShowThinking:     true,
+	}
+
+	runner := NewInvestigationRunner(
+		convService,
+		toolExecutor,
+		nil, // no safety enforcer
+		promptBuilder,
+		nil, // no skill manager
+		config,
+	)
+
+	alert := createTestAlert("alert-1", "warning", "Test Alert")
+
+	// Run investigation
+	_, err := runner.Run(context.Background(), alert, "inv-thinking-test")
+	if err != nil {
+		t.Fatalf("Run() returned unexpected error: %v", err)
+	}
+
+	// Verify SetThinkingMode was called with correct values
+	if convService.setThinkingModeCalls != 1 {
+		t.Errorf("SetThinkingMode called %d times, expected 1", convService.setThinkingModeCalls)
+	}
+
+	if convService.setThinkingModeSession != "test-session-123" {
+		t.Errorf("SetThinkingMode session = %q, want %q", convService.setThinkingModeSession, "test-session-123")
+	}
+
+	if !convService.setThinkingModeInfo.Enabled {
+		t.Error("SetThinkingMode info.Enabled = false, want true")
+	}
+
+	if convService.setThinkingModeInfo.BudgetTokens != 8000 {
+		t.Errorf("SetThinkingMode info.BudgetTokens = %d, want 8000", convService.setThinkingModeInfo.BudgetTokens)
+	}
+
+	if !convService.setThinkingModeInfo.ShowThinking {
+		t.Error("SetThinkingMode info.ShowThinking = false, want true")
+	}
+}
+
+func TestInvestigationRunner_Run_ThinkingModeDisabled(t *testing.T) {
+	// Setup mocks
+	convService := newInvestigationRunnerConvServiceMock()
+	toolExecutor := newInvestigationRunnerToolExecutorMock()
+	promptBuilder := newInvestigationRunnerPromptBuilderMock()
+
+	// Configure AI to complete immediately
+	convService.processResponseMessages = []*entity.Message{
+		{Role: entity.RoleAssistant, Content: "Investigation complete"},
+	}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{
+		{{ToolID: "1", ToolName: "complete_investigation", Input: map[string]any{
+			"findings":   []any{"test finding"},
+			"confidence": 0.9,
+		}}},
+	}
+
+	// Thinking disabled (default)
+	config := AlertInvestigationUseCaseConfig{
+		MaxActions:       20,
+		ExtendedThinking: false,
+	}
+
+	runner := NewInvestigationRunner(
+		convService,
+		toolExecutor,
+		nil,
+		promptBuilder,
+		nil,
+		config,
+	)
+
+	alert := createTestAlert("alert-1", "warning", "Test Alert")
+
+	// Run investigation
+	_, err := runner.Run(context.Background(), alert, "inv-no-thinking")
+	if err != nil {
+		t.Fatalf("Run() returned unexpected error: %v", err)
+	}
+
+	// Verify SetThinkingMode was NOT called when disabled
+	if convService.setThinkingModeCalls != 0 {
+		t.Errorf("SetThinkingMode called %d times, expected 0 when thinking disabled", convService.setThinkingModeCalls)
+	}
+}
+
+func TestInvestigationRunner_Run_ThinkingModeDefaultBudget(t *testing.T) {
+	// Setup mocks
+	convService := newInvestigationRunnerConvServiceMock()
+	toolExecutor := newInvestigationRunnerToolExecutorMock()
+	promptBuilder := newInvestigationRunnerPromptBuilderMock()
+
+	// Configure AI to complete immediately
+	convService.processResponseMessages = []*entity.Message{
+		{Role: entity.RoleAssistant, Content: "Investigation complete"},
+	}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{
+		{{ToolID: "1", ToolName: "complete_investigation", Input: map[string]any{
+			"findings":   []any{"test finding"},
+			"confidence": 0.9,
+		}}},
+	}
+
+	// Enable thinking but with zero budget (should use default)
+	config := AlertInvestigationUseCaseConfig{
+		MaxActions:       20,
+		ExtendedThinking: true,
+		ThinkingBudget:   0, // Should default to 10000
+	}
+
+	runner := NewInvestigationRunner(
+		convService,
+		toolExecutor,
+		nil,
+		promptBuilder,
+		nil,
+		config,
+	)
+
+	alert := createTestAlert("alert-1", "warning", "Test Alert")
+
+	// Run investigation
+	_, err := runner.Run(context.Background(), alert, "inv-default-budget")
+	if err != nil {
+		t.Fatalf("Run() returned unexpected error: %v", err)
+	}
+
+	// Verify SetThinkingMode was called with default budget
+	if convService.setThinkingModeCalls != 1 {
+		t.Errorf("SetThinkingMode called %d times, expected 1", convService.setThinkingModeCalls)
+	}
+
+	if convService.setThinkingModeInfo.BudgetTokens != 10000 {
+		t.Errorf(
+			"SetThinkingMode info.BudgetTokens = %d, want 10000 (default)",
+			convService.setThinkingModeInfo.BudgetTokens,
+		)
 	}
 }
