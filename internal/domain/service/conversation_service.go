@@ -273,6 +273,11 @@ func (cs *ConversationService) prepareAIRequest(
 		})
 	}
 
+	// Add thinking mode info to context if enabled
+	if thinkingInfo, err := cs.GetThinkingMode(sessionID); err == nil && thinkingInfo.Enabled {
+		ctx = port.WithThinkingMode(ctx, thinkingInfo)
+	}
+
 	return conversation, messageParams, toolParams, ctx, nil
 }
 

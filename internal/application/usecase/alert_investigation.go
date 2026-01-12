@@ -18,6 +18,12 @@ type ConversationServiceInterface interface {
 	StartConversation(ctx context.Context) (string, error)
 	AddUserMessage(ctx context.Context, sessionID, content string) (*entity.Message, error)
 	ProcessAssistantResponse(ctx context.Context, sessionID string) (*entity.Message, []port.ToolCallInfo, error)
+	ProcessAssistantResponseStreaming(
+		ctx context.Context,
+		sessionID string,
+		textCallback port.StreamCallback,
+		thinkingCallback port.ThinkingCallback,
+	) (*entity.Message, []port.ToolCallInfo, error)
 	AddToolResultMessage(ctx context.Context, sessionID string, toolResults []entity.ToolResult) error
 	EndConversation(ctx context.Context, sessionID string) error
 	SetCustomSystemPrompt(ctx context.Context, sessionID, prompt string) error
@@ -188,6 +194,9 @@ type AlertInvestigationUseCaseConfig struct {
 	EscalateOnErrors     int           // Escalate after this many consecutive errors
 	AutoStartForCritical bool          // Automatically start investigations for critical alerts
 	EnableSafetyChecks   bool          // Enable command safety validation
+	ExtendedThinking     bool          // Enable extended thinking for investigations
+	ThinkingBudget       int64         // Token budget for thinking (default: 10000)
+	ShowThinking         bool          // Display thinking output in logs
 }
 
 // AlertInvestigationUseCase orchestrates AI-driven alert investigations.

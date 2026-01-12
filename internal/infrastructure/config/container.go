@@ -227,7 +227,10 @@ func createInvestigationComponents(
 			"report_investigation",
 			"task", "delegate",
 		},
-		BlockedCommands: []string{"rm -rf", "dd if=", "mkfs"},
+		BlockedCommands:  []string{"rm -rf", "dd if=", "mkfs"},
+		ExtendedThinking: cfg.ExtendedThinking,
+		ThinkingBudget:   cfg.ThinkingBudget,
+		ShowThinking:     cfg.ShowThinking,
 	}
 	investigationUseCase := usecase.NewAlertInvestigationUseCaseWithConfig(invConfig)
 

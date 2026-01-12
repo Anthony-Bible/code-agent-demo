@@ -1818,6 +1818,15 @@ func (m *mockConversationServiceWithThinking) ProcessAssistantResponse(
 	return nil, nil, nil
 }
 
+func (m *mockConversationServiceWithThinking) ProcessAssistantResponseStreaming(
+	_ context.Context,
+	_ string,
+	_ port.StreamCallback,
+	_ port.ThinkingCallback,
+) (*entity.Message, []port.ToolCallInfo, error) {
+	return nil, nil, nil
+}
+
 func (m *mockConversationServiceWithThinking) AddToolResultMessage(
 	ctx context.Context,
 	sessionID string,

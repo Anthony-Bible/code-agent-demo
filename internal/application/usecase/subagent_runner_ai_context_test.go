@@ -110,6 +110,16 @@ func (m *contextTrackingConvServiceMock) ProcessAssistantResponse(
 	return msg, toolCalls, nil
 }
 
+func (m *contextTrackingConvServiceMock) ProcessAssistantResponseStreaming(
+	ctx context.Context,
+	sessionID string,
+	_ port.StreamCallback,
+	_ port.ThinkingCallback,
+) (*entity.Message, []port.ToolCallInfo, error) {
+	// Delegate to non-streaming version for testing
+	return m.ProcessAssistantResponse(ctx, sessionID)
+}
+
 func (m *contextTrackingConvServiceMock) AddToolResultMessage(
 	_ context.Context,
 	_ string,

@@ -120,6 +120,16 @@ func (m *subagentRunnerConvServiceMock) ProcessAssistantResponse(
 	return msg, toolCalls, nil
 }
 
+func (m *subagentRunnerConvServiceMock) ProcessAssistantResponseStreaming(
+	ctx context.Context,
+	sessionID string,
+	_ port.StreamCallback,
+	_ port.ThinkingCallback,
+) (*entity.Message, []port.ToolCallInfo, error) {
+	// Delegate to non-streaming version for testing
+	return m.ProcessAssistantResponse(ctx, sessionID)
+}
+
 func (m *subagentRunnerConvServiceMock) AddToolResultMessage(
 	_ context.Context,
 	_ string,
