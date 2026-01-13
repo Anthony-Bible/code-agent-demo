@@ -1355,12 +1355,12 @@ func TestBatchTool_ParallelMode_Defaults(t *testing.T) {
 		{
 			name:            "default (omitted) is sequential",
 			parallelField:   "",
-			minExpectedTime: 500 * time.Millisecond,
+			minExpectedTime: 100 * time.Millisecond,
 		},
 		{
 			name:            "explicit false is sequential",
 			parallelField:   `,"parallel": false`,
-			minExpectedTime: 500 * time.Millisecond,
+			minExpectedTime: 100 * time.Millisecond,
 		},
 	}
 
@@ -1371,9 +1371,9 @@ func TestBatchTool_ParallelMode_Defaults(t *testing.T) {
 
 			input := `{
 				"invocations": [
-					{"tool_name": "bash", "arguments": {"command": "sleep 0.2"}},
-					{"tool_name": "bash", "arguments": {"command": "sleep 0.2"}},
-					{"tool_name": "bash", "arguments": {"command": "sleep 0.2"}}
+					{"tool_name": "bash", "arguments": {"command": "sleep 0.05"}},
+					{"tool_name": "bash", "arguments": {"command": "sleep 0.05"}},
+					{"tool_name": "bash", "arguments": {"command": "sleep 0.05"}}
 				]` + tt.parallelField + `
 			}`
 

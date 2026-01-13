@@ -85,7 +85,8 @@ func TestSkillsInToolDescription(t *testing.T) {
 	}
 
 	// Verify that source type labels are present
-	if !strings.Contains(description, "(project)") && !strings.Contains(description, "(user)") && !strings.Contains(description, "(project-claude)") {
+	if !strings.Contains(description, "(project)") && !strings.Contains(description, "(user)") &&
+		!strings.Contains(description, "(project-claude)") {
 		t.Error("Expected skill description to contain source type labels like (project), (user), or (project-claude)")
 	}
 

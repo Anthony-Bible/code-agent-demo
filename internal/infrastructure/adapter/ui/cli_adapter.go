@@ -274,18 +274,24 @@ func (c *CLIAdapter) DisplayMessage(message string, messageRole string) error {
 		color = c.colors.User
 	}
 
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	_, err := fmt.Fprintf(c.output, "%s%s\x1b[0m\n", color, message)
 	return err
 }
 
 // BeginStreamingResponse starts a streaming response with color setup.
 func (c *CLIAdapter) BeginStreamingResponse() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	_, err := fmt.Fprint(c.output, c.colors.Assistant)
 	return err
 }
 
 // EndStreamingResponse ends a streaming response with color teardown and newline.
 func (c *CLIAdapter) EndStreamingResponse() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	_, err := fmt.Fprint(c.output, "\x1b[0m\n")
 	return err
 }
@@ -294,6 +300,8 @@ func (c *CLIAdapter) EndStreamingResponse() error {
 // This is used to show text as it arrives in real-time from the AI provider.
 // The text is displayed without color codes - the caller should handle color setup/teardown.
 func (c *CLIAdapter) DisplayStreamingText(text string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	// Use direct write to avoid any potential buffering from fmt package
 	_, err := c.output.Write([]byte(text))
 	if err != nil {
@@ -330,6 +338,8 @@ func (c *CLIAdapter) DisplayError(err error) error {
 		return nil
 	}
 
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	_, writeErr := fmt.Fprintf(c.output, "%sError: %s\x1b[0m\n", c.colors.Error, err.Error())
 	if writeErr != nil {
 		return writeErr
@@ -347,12 +357,14 @@ func (c *CLIAdapter) DisplayError(err error) error {
 // File read operations (read_file, list_files) display compact indicators like
 // read(path) or list(path) instead of full contents to keep the screen clean.
 func (c *CLIAdapter) DisplayToolResult(toolName string, input string, result string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	// Compact display for file/directory read operations
 	switch toolName {
 	case "read_file":
-		return c.displayCompactFileRead(input)
+		return c.displayCompactFileReadLocked(input)
 	case "list_files":
-		return c.displayCompactListFiles(input)
+		return c.displayCompactListFilesLocked(input)
 	}
 
 	// Default behavior for other tools
@@ -364,6 +376,8 @@ func (c *CLIAdapter) DisplayToolResult(toolName string, input string, result str
 
 // DisplaySystemMessage displays a system message.
 func (c *CLIAdapter) DisplaySystemMessage(message string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	_, err := fmt.Fprintf(c.output, "%sSystem: %s\x1b[0m\n", c.colors.System, message)
 	return err
 }
@@ -371,6 +385,8 @@ func (c *CLIAdapter) DisplaySystemMessage(message string) error {
 // DisplayThinking displays extended thinking content from the AI.
 // Uses thinking color from the color scheme to distinguish from regular responses.
 func (c *CLIAdapter) DisplayThinking(content string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	// Use the thinking color from the color scheme and format with clear separation
 	_, err := fmt.Fprintf(c.output, "%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n", c.colors.Thinking)
 	if err != nil {
@@ -404,6 +420,8 @@ func (c *CLIAdapter) DisplaySubagentStatus(agentName string, status string, deta
 	if details != "" {
 		msg += " - " + details
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	// Magenta color for subagent status
 	_, err := fmt.Fprintf(c.output, "\x1b[35m%s\x1b[0m\n", msg)
 	return err
@@ -470,9 +488,10 @@ func (c *CLIAdapter) truncateToolOutput(toolName, result string) string {
 	return truncated
 }
 
-// displayCompactFileRead displays a compact indicator for file read operations.
+// displayCompactFileReadLocked displays a compact indicator for file read operations.
 // Shows "read(path)" or "read(path:start-end)" for line ranges.
-func (c *CLIAdapter) displayCompactFileRead(input string) error {
+// Must be called with c.mu held.
+func (c *CLIAdapter) displayCompactFileReadLocked(input string) error {
 	var readInput struct {
 		Path      string `json:"path"`
 		StartLine *int   `json:"start_line,omitempty"`
@@ -501,9 +520,10 @@ func (c *CLIAdapter) displayCompactFileRead(input string) error {
 	return err
 }
 
-// displayCompactListFiles displays a compact indicator for directory listing operations.
+// displayCompactListFilesLocked displays a compact indicator for directory listing operations.
 // Shows "list(path)" instead of the full directory contents.
-func (c *CLIAdapter) displayCompactListFiles(input string) error {
+// Must be called with c.mu held.
+func (c *CLIAdapter) displayCompactListFilesLocked(input string) error {
 	var listInput struct {
 		Path string `json:"path"`
 	}

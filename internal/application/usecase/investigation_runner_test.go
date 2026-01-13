@@ -1428,7 +1428,7 @@ func TestInvestigationRunner_Run_TableDriven(t *testing.T) {
 				safetyEnforcer,
 				promptBuilder,
 				nil, // skillManager
-			nil, // uiAdapter
+				nil, // uiAdapter
 				tt.config,
 			)
 
@@ -2903,7 +2903,7 @@ func TestNewInvestigationRunner_WithNilDependencies(t *testing.T) {
 				tt.safetyEnforcer,
 				tt.promptBuilder,
 				nil, // skillManager
-			nil, // uiAdapter
+				nil, // uiAdapter
 				AlertInvestigationUseCaseConfig{},
 			)
 		})
@@ -3982,7 +3982,7 @@ Please prioritize your remaining actions carefully. Consider using the batch_too
 				nil, // safetyEnforcer
 				promptBuilder,
 				nil, // skillManager
-			nil, // uiAdapter
+				nil, // uiAdapter
 				AlertInvestigationUseCaseConfig{MaxActions: 20},
 			)
 
@@ -4177,7 +4177,7 @@ func TestInvestigationRunner_InjectsCountdownWarnings(t *testing.T) {
 				nil, // safetyEnforcer
 				promptBuilder,
 				nil, // skillManager
-			nil, // uiAdapter
+				nil, // uiAdapter
 				AlertInvestigationUseCaseConfig{MaxActions: tt.maxActions},
 			)
 
@@ -4637,94 +4637,94 @@ func TestInvestigationRunner_Run_ThinkingModeDefaultBudget(t *testing.T) {
 // TestInvestigationRunner_DisplayThinkingViaUIAdapter verifies that thinking content
 // is displayed through the UI adapter's DisplayThinking method when ShowThinking is enabled.
 func TestInvestigationRunner_DisplayThinkingViaUIAdapter(t *testing.T) {
-// Arrange
-convService := newInvestigationRunnerConvServiceMock()
-convService.startConversationSession = "test-session"
-convService.thinkingContent = "Test thinking: analyzing the alert..."
-convService.processResponseMessages = []*entity.Message{createAssistantMessage("Done.")}
-convService.processResponseToolCalls = [][]port.ToolCallInfo{{
-{ToolID: "1", ToolName: "complete_investigation", Input: map[string]interface{}{
-"findings":   []interface{}{"Test"},
-"confidence": 0.9,
-}},
-}}
+	// Arrange
+	convService := newInvestigationRunnerConvServiceMock()
+	convService.startConversationSession = "test-session"
+	convService.thinkingContent = "Test thinking: analyzing the alert..."
+	convService.processResponseMessages = []*entity.Message{createAssistantMessage("Done.")}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{{
+		{ToolID: "1", ToolName: "complete_investigation", Input: map[string]interface{}{
+			"findings":   []interface{}{"Test"},
+			"confidence": 0.9,
+		}},
+	}}
 
-toolExecutor := newInvestigationRunnerToolExecutorMock()
-promptBuilder := newInvestigationRunnerPromptBuilderMock()
+	toolExecutor := newInvestigationRunnerToolExecutorMock()
+	promptBuilder := newInvestigationRunnerPromptBuilderMock()
 
-// Track DisplayThinking calls
-thinkingCalled := false
-var capturedContent string
-uiAdapter := &testUIAdapter{
-displayThinkingFunc: func(content string) error {
-thinkingCalled = true
-capturedContent = content
-return nil
-},
+	// Track DisplayThinking calls
+	thinkingCalled := false
+	var capturedContent string
+	uiAdapter := &testUIAdapter{
+		displayThinkingFunc: func(content string) error {
+			thinkingCalled = true
+			capturedContent = content
+			return nil
+		},
+	}
+
+	config := AlertInvestigationUseCaseConfig{
+		MaxActions:       20,
+		AllowedTools:     []string{"complete_investigation"},
+		ExtendedThinking: true,
+		ShowThinking:     true,
+	}
+
+	runner := NewInvestigationRunner(
+		convService,
+		toolExecutor,
+		nil, // safetyEnforcer
+		promptBuilder,
+		nil, // skillManager
+		uiAdapter,
+		config,
+	)
+
+	alert := createTestAlert("alert-1", "critical", "Test")
+
+	// Act
+	_, err := runner.Run(context.Background(), alert, "inv-test")
+	// Assert
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if !thinkingCalled {
+		t.Error("DisplayThinking() was not called on UI adapter when ShowThinking is true")
+	}
+	if capturedContent != "Test thinking: analyzing the alert..." {
+		t.Errorf("Captured thinking content = %q, want %q",
+			capturedContent, "Test thinking: analyzing the alert...")
+	}
 }
 
-config := AlertInvestigationUseCaseConfig{
-MaxActions:       20,
-AllowedTools:     []string{"complete_investigation"},
-ExtendedThinking: true,
-ShowThinking:     true,
-}
-
-runner := NewInvestigationRunner(
-convService,
-toolExecutor,
-nil, // safetyEnforcer
-promptBuilder,
-nil, // skillManager
-uiAdapter,
-config,
-)
-
-alert := createTestAlert("alert-1", "critical", "Test")
-
-// Act
-_, err := runner.Run(context.Background(), alert, "inv-test")
-
-// Assert
-if err != nil {
-t.Fatalf("Run() error: %v", err)
-}
-if !thinkingCalled {
-t.Error("DisplayThinking() was not called on UI adapter when ShowThinking is true")
-}
-if capturedContent != "Test thinking: analyzing the alert..." {
-t.Errorf("Captured thinking content = %q, want %q",
-capturedContent, "Test thinking: analyzing the alert...")
-}
-}
-
-// testUIAdapter is a minimal test adapter for testing DisplayThinking
+// testUIAdapter is a minimal test adapter for testing DisplayThinking.
 type testUIAdapter struct {
-displayThinkingFunc func(content string) error
+	displayThinkingFunc func(content string) error
 }
 
-func (t *testUIAdapter) GetUserInput(ctx context.Context) (string, bool)     { return "", false }
+func (t *testUIAdapter) GetUserInput(ctx context.Context) (string, bool)         { return "", false }
 func (t *testUIAdapter) DisplayMessage(message string, messageRole string) error { return nil }
-func (t *testUIAdapter) BeginStreamingResponse() error                       { return nil }
-func (t *testUIAdapter) EndStreamingResponse() error                         { return nil }
-func (t *testUIAdapter) DisplayStreamingText(text string) error              { return nil }
-func (t *testUIAdapter) DisplayError(err error) error                        { return nil }
+func (t *testUIAdapter) BeginStreamingResponse() error                           { return nil }
+func (t *testUIAdapter) EndStreamingResponse() error                             { return nil }
+func (t *testUIAdapter) DisplayStreamingText(text string) error                  { return nil }
+func (t *testUIAdapter) DisplayError(err error) error                            { return nil }
 func (t *testUIAdapter) DisplayToolResult(toolName string, input string, result string) error {
-return nil
+	return nil
 }
 func (t *testUIAdapter) DisplaySystemMessage(message string) error { return nil }
 func (t *testUIAdapter) DisplayThinking(content string) error {
-if t.displayThinkingFunc != nil {
-return t.displayThinkingFunc(content)
+	if t.displayThinkingFunc != nil {
+		return t.displayThinkingFunc(content)
+	}
+	return nil
 }
-return nil
-}
+
 func (t *testUIAdapter) DisplaySubagentStatus(agentName string, status string, details string) error {
-return nil
+	return nil
 }
-func (t *testUIAdapter) SetPrompt(prompt string) error                              { return nil }
-func (t *testUIAdapter) ClearScreen() error                                          { return nil }
-func (t *testUIAdapter) SetColorScheme(scheme port.ColorScheme) error               { return nil }
+func (t *testUIAdapter) SetPrompt(prompt string) error                { return nil }
+func (t *testUIAdapter) ClearScreen() error                           { return nil }
+func (t *testUIAdapter) SetColorScheme(scheme port.ColorScheme) error { return nil }
 func (t *testUIAdapter) ConfirmBashCommand(command string, isDangerous bool, reason string, description string) bool {
-return true
+	return true
 }

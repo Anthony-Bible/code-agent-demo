@@ -56,12 +56,16 @@ func (h *ReloadHandler) Start() {
 
 	signal.Notify(h.sigCh, syscall.SIGHUP)
 
+	// Capture channel references to avoid race with Stop() setting them to nil
+	sigCh := h.sigCh
+	stopCh := h.stopCh
+
 	go func() {
 		for {
 			select {
-			case <-h.stopCh:
+			case <-stopCh:
 				return
-			case <-h.sigCh:
+			case <-sigCh:
 				h.handleReload()
 			}
 		}
