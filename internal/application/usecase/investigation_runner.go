@@ -30,6 +30,7 @@ type InvestigationRunner struct {
 	promptBuilder  PromptBuilderRegistry
 	skillManager   port.SkillManager
 	store          InvestigationStoreWriter
+	uiAdapter      port.UserInterface
 	config         AlertInvestigationUseCaseConfig
 }
 
@@ -41,6 +42,7 @@ type InvestigationRunner struct {
 //   - safetyEnforcer: Enforcer for safety policies during investigation (optional, can be nil)
 //   - promptBuilder: Registry for building investigation prompts
 //   - skillManager: Manager for discovering and loading skills (optional, can be nil)
+//   - uiAdapter: User interface for displaying thinking and messages (optional, can be nil)
 //   - config: Configuration for investigation limits and behavior
 //
 // Panics if required dependencies (convService, toolExecutor, promptBuilder) are nil.
@@ -50,6 +52,7 @@ func NewInvestigationRunner(
 	safetyEnforcer SafetyEnforcer,
 	promptBuilder PromptBuilderRegistry,
 	skillManager port.SkillManager,
+	uiAdapter port.UserInterface,
 	config AlertInvestigationUseCaseConfig,
 ) *InvestigationRunner {
 	if convService == nil {
@@ -61,7 +64,7 @@ func NewInvestigationRunner(
 	if promptBuilder == nil {
 		panic("promptBuilder cannot be nil")
 	}
-	// safetyEnforcer and skillManager are optional and can be nil
+	// safetyEnforcer, skillManager, and uiAdapter are optional and can be nil
 
 	return &InvestigationRunner{
 		convService:    convService,
@@ -69,6 +72,7 @@ func NewInvestigationRunner(
 		safetyEnforcer: safetyEnforcer,
 		promptBuilder:  promptBuilder,
 		skillManager:   skillManager,
+		uiAdapter:      uiAdapter,
 		config:         config,
 	}
 }
@@ -81,6 +85,7 @@ func NewInvestigationRunner(
 //   - safetyEnforcer: Enforcer for safety policies during investigation (optional, can be nil)
 //   - promptBuilder: Registry for building investigation prompts
 //   - skillManager: Manager for discovering and loading skills (optional, can be nil)
+//   - uiAdapter: User interface for displaying thinking and messages (optional, can be nil)
 //   - store: Store for persisting investigation state
 //   - config: Configuration for investigation limits and behavior
 //
@@ -91,6 +96,7 @@ func NewInvestigationRunnerWithStore(
 	safetyEnforcer SafetyEnforcer,
 	promptBuilder PromptBuilderRegistry,
 	skillManager port.SkillManager,
+	uiAdapter port.UserInterface,
 	store InvestigationStoreWriter,
 	config AlertInvestigationUseCaseConfig,
 ) *InvestigationRunner {
@@ -103,7 +109,7 @@ func NewInvestigationRunnerWithStore(
 	if promptBuilder == nil {
 		panic("promptBuilder cannot be nil")
 	}
-	// safetyEnforcer and skillManager are optional and can be nil
+	// safetyEnforcer, skillManager, and uiAdapter are optional and can be nil
 
 	return &InvestigationRunner{
 		convService:    convService,
@@ -111,6 +117,7 @@ func NewInvestigationRunnerWithStore(
 		safetyEnforcer: safetyEnforcer,
 		promptBuilder:  promptBuilder,
 		skillManager:   skillManager,
+		uiAdapter:      uiAdapter,
 		store:          store,
 		config:         config,
 	}
@@ -707,22 +714,23 @@ func (r *InvestigationRunner) getNextToolCalls(rc *runContext) (*entity.Message,
 	var err error
 
 	if r.config.ShowThinking {
-		// Use streaming to display thinking output
-		thinkingHeaderDisplayed := false
+		// Accumulate thinking content to display with proper formatting
+		var thinkingContent strings.Builder
 		thinkingCallback := func(thinking string) error {
-			if !thinkingHeaderDisplayed {
-				thinkingHeaderDisplayed = true
-				fmt.Fprintf(os.Stderr, "\x1b[95m[THINKING]\x1b[0m ")
-			}
-			fmt.Fprintf(os.Stderr, "%s", thinking)
+			thinkingContent.WriteString(thinking)
 			return nil
 		}
 		msg, toolCalls, err = r.convService.ProcessAssistantResponseStreaming(
 			rc.ctx, rc.sessionID, nil, thinkingCallback,
 		)
-		// Add newline after thinking block if we displayed one
-		if thinkingHeaderDisplayed {
-			fmt.Fprintf(os.Stderr, "\n")
+		// Display accumulated thinking with proper separation if UI adapter is available
+		if thinkingContent.Len() > 0 {
+			if r.uiAdapter != nil {
+				_ = r.uiAdapter.DisplayThinking(thinkingContent.String())
+			} else {
+				// Fallback to stderr if no UI adapter (for backward compatibility)
+				fmt.Fprintf(os.Stderr, "\x1b[95m[THINKING]\x1b[0m %s\n", thinkingContent.String())
+			}
 		}
 	} else {
 		msg, toolCalls, err = r.convService.ProcessAssistantResponse(rc.ctx, rc.sessionID)

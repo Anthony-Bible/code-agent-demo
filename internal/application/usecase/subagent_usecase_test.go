@@ -964,12 +964,12 @@ func TestSpawnSubagentAsync_MultipleSpawnsDontInterfere(t *testing.T) {
 		},
 	}
 
-	var callCount int
+	var callCount atomic.Int32
 	runner := &MockSubagentRunner{
 		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			callCount++
+			count := callCount.Add(1)
 			// Different delays to ensure they execute concurrently
-			delay := time.Duration(callCount*10) * time.Millisecond
+			delay := time.Duration(count*10) * time.Millisecond
 			time.Sleep(delay)
 			return &SubagentResult{
 				Status: "completed",

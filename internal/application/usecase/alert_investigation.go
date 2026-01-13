@@ -215,6 +215,7 @@ type AlertInvestigationUseCase struct {
 	convService           ConversationServiceInterface    // Conversation service for AI interaction
 	toolExecutor          port.ToolExecutor               // Tool executor for running tools
 	skillManager          port.SkillManager               // Skill manager for discovering skills
+	uiAdapter             port.UserInterface              // User interface for displaying output
 	shutdown              bool                            // True after Shutdown is called
 	idCounter             int64                           // Counter for generating unique IDs
 }
@@ -346,6 +347,7 @@ func (uc *AlertInvestigationUseCase) RunInvestigation(
 	toolExecutor := uc.toolExecutor
 	promptBuilder := uc.promptBuilderRegistry
 	skillManager := uc.skillManager
+	uiAdapter := uc.uiAdapter
 	config := uc.config
 	store := uc.investigationStore
 	uc.mu.RUnlock()
@@ -362,6 +364,7 @@ func (uc *AlertInvestigationUseCase) RunInvestigation(
 		enforcer,
 		promptBuilder,
 		skillManager,
+		uiAdapter,
 		config,
 	)
 	result, err := runner.Run(ctx, alert, invID)
@@ -579,6 +582,13 @@ func (uc *AlertInvestigationUseCase) SetSkillManager(sm port.SkillManager) {
 	uc.mu.Lock()
 	defer uc.mu.Unlock()
 	uc.skillManager = sm
+}
+
+// SetUIAdapter configures the user interface adapter for displaying output.
+func (uc *AlertInvestigationUseCase) SetUIAdapter(ui port.UserInterface) {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
+	uc.uiAdapter = ui
 }
 
 // IsToolAllowed checks if a tool name is in the allowed list.

@@ -33,7 +33,7 @@ func TestSkillActivationShowsCorrectSourceType(t *testing.T) {
 
 	// Create project skill (./skills)
 	projectSkillDir := filepath.Join(tempDir, "skills", "project-skill")
-	if err := os.MkdirAll(projectSkillDir, 0755); err != nil {
+	if err := os.MkdirAll(projectSkillDir, 0o755); err != nil {
 		t.Fatalf("Failed to create project skill directory: %v", err)
 	}
 	projectSkillContent := `---
@@ -44,13 +44,13 @@ description: A project-level skill
 
 This skill is from ./skills directory.
 `
-	if err := os.WriteFile(filepath.Join(projectSkillDir, "SKILL.md"), []byte(projectSkillContent), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectSkillDir, "SKILL.md"), []byte(projectSkillContent), 0o644); err != nil {
 		t.Fatalf("Failed to write project skill: %v", err)
 	}
 
 	// Create project-claude skill (./.claude/skills)
 	claudeSkillDir := filepath.Join(tempDir, ".claude", "skills", "claude-skill")
-	if err := os.MkdirAll(claudeSkillDir, 0755); err != nil {
+	if err := os.MkdirAll(claudeSkillDir, 0o755); err != nil {
 		t.Fatalf("Failed to create claude skill directory: %v", err)
 	}
 	claudeSkillContent := `---
@@ -61,14 +61,14 @@ description: A project-claude-level skill
 
 This skill is from ./.claude/skills directory.
 `
-	if err := os.WriteFile(filepath.Join(claudeSkillDir, "SKILL.md"), []byte(claudeSkillContent), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(claudeSkillDir, "SKILL.md"), []byte(claudeSkillContent), 0o644); err != nil {
 		t.Fatalf("Failed to write claude skill: %v", err)
 	}
 
 	// Create user skill (using temp dir as user home for testing)
 	userHomeDir := filepath.Join(tempDir, "user-home")
 	userSkillDir := filepath.Join(userHomeDir, ".claude", "skills", "user-skill")
-	if err := os.MkdirAll(userSkillDir, 0755); err != nil {
+	if err := os.MkdirAll(userSkillDir, 0o755); err != nil {
 		t.Fatalf("Failed to create user skill directory: %v", err)
 	}
 	userSkillContent := `---
@@ -79,7 +79,7 @@ description: A user-level skill
 
 This skill is from ~/.claude/skills directory.
 `
-	if err := os.WriteFile(filepath.Join(userSkillDir, "SKILL.md"), []byte(userSkillContent), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(userSkillDir, "SKILL.md"), []byte(userSkillContent), 0o644); err != nil {
 		t.Fatalf("Failed to write user skill: %v", err)
 	}
 
@@ -166,7 +166,7 @@ func TestSkillDescriptionShowsSourceType(t *testing.T) {
 
 	// Create one skill of each type
 	projectSkillDir := filepath.Join(tempDir, "skills", "project-skill")
-	if err := os.MkdirAll(projectSkillDir, 0755); err != nil {
+	if err := os.MkdirAll(projectSkillDir, 0o755); err != nil {
 		t.Fatalf("Failed to create project skill directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(projectSkillDir, "SKILL.md"), []byte(`---
@@ -174,12 +174,12 @@ name: project-skill
 description: Project skill
 ---
 # Project Skill
-`), 0644); err != nil {
+`), 0o644); err != nil {
 		t.Fatalf("Failed to write project skill: %v", err)
 	}
 
 	claudeSkillDir := filepath.Join(tempDir, ".claude", "skills", "claude-skill")
-	if err := os.MkdirAll(claudeSkillDir, 0755); err != nil {
+	if err := os.MkdirAll(claudeSkillDir, 0o755); err != nil {
 		t.Fatalf("Failed to create claude skill directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(claudeSkillDir, "SKILL.md"), []byte(`---
@@ -187,13 +187,13 @@ name: claude-skill
 description: Claude skill
 ---
 # Claude Skill
-`), 0644); err != nil {
+`), 0o644); err != nil {
 		t.Fatalf("Failed to write claude skill: %v", err)
 	}
 
 	userHomeDir := filepath.Join(tempDir, "user-home")
 	userSkillDir := filepath.Join(userHomeDir, ".claude", "skills", "user-skill")
-	if err := os.MkdirAll(userSkillDir, 0755); err != nil {
+	if err := os.MkdirAll(userSkillDir, 0o755); err != nil {
 		t.Fatalf("Failed to create user skill directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(userSkillDir, "SKILL.md"), []byte(`---
@@ -201,7 +201,7 @@ name: user-skill
 description: User skill
 ---
 # User Skill
-`), 0644); err != nil {
+`), 0o644); err != nil {
 		t.Fatalf("Failed to write user skill: %v", err)
 	}
 
