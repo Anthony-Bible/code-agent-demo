@@ -357,20 +357,27 @@ func (c *CLIAdapter) DisplayError(err error) error {
 // File read operations (read_file, list_files) display compact indicators like
 // read(path) or list(path) instead of full contents to keep the screen clean.
 func (c *CLIAdapter) DisplayToolResult(toolName string, input string, result string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	// Build output string before acquiring lock to minimize lock hold time.
+	// c.colors is safe to read without lock - it's set during initialization and never modified.
+	var output string
+
 	// Compact display for file/directory read operations
 	switch toolName {
 	case "read_file":
-		return c.displayCompactFileReadLocked(input)
+		output = c.buildCompactFileReadOutput(input)
 	case "list_files":
-		return c.displayCompactListFilesLocked(input)
+		output = c.buildCompactListFilesOutput(input)
+	default:
+		// Default behavior for other tools
+		truncatedResult := c.truncateToolOutput(toolName, result)
+		output = fmt.Sprintf("%sTool [%s] on %s\x1b[0m\n%s\x1b[0m\n",
+			c.colors.Tool, toolName, input, truncatedResult)
 	}
 
-	// Default behavior for other tools
-	truncatedResult := c.truncateToolOutput(toolName, result)
-	_, err := fmt.Fprintf(c.output, "%sTool [%s] on %s\x1b[0m\n%s\x1b[0m\n",
-		c.colors.Tool, toolName, input, truncatedResult)
+	// Lock only for single atomic write
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, err := c.output.Write([]byte(output))
 	return err
 }
 
@@ -385,30 +392,23 @@ func (c *CLIAdapter) DisplaySystemMessage(message string) error {
 // DisplayThinking displays extended thinking content from the AI.
 // Uses thinking color from the color scheme to distinguish from regular responses.
 func (c *CLIAdapter) DisplayThinking(content string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	// Use the thinking color from the color scheme and format with clear separation
-	_, err := fmt.Fprintf(c.output, "%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n", c.colors.Thinking)
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(c.output, "%sClaude is thinking...\x1b[0m\n", c.colors.Thinking)
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(c.output, "%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n", c.colors.Thinking)
-	if err != nil {
-		return err
-	}
+	// Build output string before acquiring lock to minimize lock hold time.
+	// c.colors is safe to read without lock - it's set during initialization and never modified.
+	var buf strings.Builder
+	buf.WriteString(c.colors.Thinking + "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n")
+	buf.WriteString(c.colors.Thinking + "Claude is thinking...\x1b[0m\n")
+	buf.WriteString(c.colors.Thinking + "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n")
 	// Indent the thinking content for better visual separation
 	lines := strings.Split(content, "\n")
 	for _, line := range lines {
-		_, err = fmt.Fprintf(c.output, "%s  %s\x1b[0m\n", c.colors.Thinking, line)
-		if err != nil {
-			return err
-		}
+		buf.WriteString(c.colors.Thinking + "  " + line + "\x1b[0m\n")
 	}
-	_, err = fmt.Fprintf(c.output, "%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n\n", c.colors.Thinking)
+	buf.WriteString(c.colors.Thinking + "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n\n")
+
+	// Lock only for single atomic write
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, err := c.output.Write([]byte(buf.String()))
 	return err
 }
 
@@ -488,10 +488,10 @@ func (c *CLIAdapter) truncateToolOutput(toolName, result string) string {
 	return truncated
 }
 
-// displayCompactFileReadLocked displays a compact indicator for file read operations.
+// buildCompactFileReadOutput builds a compact indicator string for file read operations.
 // Shows "read(path)" or "read(path:start-end)" for line ranges.
-// Must be called with c.mu held.
-func (c *CLIAdapter) displayCompactFileReadLocked(input string) error {
+// Does not acquire any locks - safe to call before locking for output.
+func (c *CLIAdapter) buildCompactFileReadOutput(input string) string {
 	var readInput struct {
 		Path      string `json:"path"`
 		StartLine *int   `json:"start_line,omitempty"`
@@ -499,8 +499,7 @@ func (c *CLIAdapter) displayCompactFileReadLocked(input string) error {
 	}
 
 	if err := json.Unmarshal([]byte(input), &readInput); err != nil {
-		_, err := fmt.Fprintf(c.output, "%sread(%s)\x1b[0m\n", c.colors.Tool, input)
-		return err
+		return fmt.Sprintf("%sread(%s)\x1b[0m\n", c.colors.Tool, input)
 	}
 
 	display := readInput.Path
@@ -516,25 +515,22 @@ func (c *CLIAdapter) displayCompactFileReadLocked(input string) error {
 		display = fmt.Sprintf("%s:%d-%s", readInput.Path, start, end)
 	}
 
-	_, err := fmt.Fprintf(c.output, "%sread(%s)\x1b[0m\n", c.colors.Tool, display)
-	return err
+	return fmt.Sprintf("%sread(%s)\x1b[0m\n", c.colors.Tool, display)
 }
 
-// displayCompactListFilesLocked displays a compact indicator for directory listing operations.
+// buildCompactListFilesOutput builds a compact indicator string for directory listing operations.
 // Shows "list(path)" instead of the full directory contents.
-// Must be called with c.mu held.
-func (c *CLIAdapter) displayCompactListFilesLocked(input string) error {
+// Does not acquire any locks - safe to call before locking for output.
+func (c *CLIAdapter) buildCompactListFilesOutput(input string) string {
 	var listInput struct {
 		Path string `json:"path"`
 	}
 
 	if err := json.Unmarshal([]byte(input), &listInput); err != nil {
-		_, err := fmt.Fprintf(c.output, "%slist(%s)\x1b[0m\n", c.colors.Tool, input)
-		return err
+		return fmt.Sprintf("%slist(%s)\x1b[0m\n", c.colors.Tool, input)
 	}
 
-	_, err := fmt.Fprintf(c.output, "%slist(%s)\x1b[0m\n", c.colors.Tool, listInput.Path)
-	return err
+	return fmt.Sprintf("%slist(%s)\x1b[0m\n", c.colors.Tool, listInput.Path)
 }
 
 // SetTruncationConfig sets the truncation configuration for tool output display.
