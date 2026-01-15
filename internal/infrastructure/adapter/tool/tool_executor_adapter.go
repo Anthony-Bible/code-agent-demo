@@ -5,6 +5,7 @@ import (
 	"code-editing-agent/internal/application/usecase"
 	"code-editing-agent/internal/domain/entity"
 	"code-editing-agent/internal/domain/port"
+	"code-editing-agent/internal/domain/safety"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,7 +17,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -981,38 +981,11 @@ const defaultBashTimeout = 30 * time.Second
 // maxBatchInvocations is the maximum number of tool invocations allowed in a single batch.
 const maxBatchInvocations = 20
 
-// dangerousPattern represents a pattern that indicates a dangerous command.
-type dangerousPattern struct {
-	pattern *regexp.Regexp
-	reason  string
-}
-
-// dangerousPatterns contains patterns for detecting dangerous commands.
-//
-//nolint:gochecknoglobals // This is intentionally a package-level constant for dangerous command detection
-var dangerousPatterns = []dangerousPattern{
-	// Matches rm with any flags followed by dangerous paths (/, ~, *)
-	{regexp.MustCompile(`rm\s+(-\w+\s+)*[/~*]`), "destructive rm command"},
-	{regexp.MustCompile(`sudo\s+`), "sudo command"},
-	{regexp.MustCompile(`chmod\s+777`), "insecure chmod"},
-	{regexp.MustCompile(`mkfs\.`), "filesystem format"},
-	{regexp.MustCompile(`dd\s+if=`), "low-level disk operation"},
-	{regexp.MustCompile(`>\s*/dev/`), "write to device"},
-}
-
 // isDangerousCommand checks if a command matches any dangerous patterns.
+// Uses the shared safety package for pattern detection.
 // Special case: writing to /dev/null is allowed.
 func isDangerousCommand(cmd string) (bool, string) {
-	for _, dp := range dangerousPatterns {
-		if dp.pattern.MatchString(cmd) {
-			// Allow writes to /dev/null (common pattern for suppressing output)
-			if dp.reason == "write to device" && strings.Contains(cmd, "/dev/null") {
-				continue
-			}
-			return true, dp.reason
-		}
-	}
-	return false, ""
+	return safety.IsDangerousCommand(cmd)
 }
 
 // checkCommandConfirmation checks if a command should be allowed to execute.

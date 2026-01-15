@@ -2,6 +2,7 @@
 package config
 
 import (
+	"code-editing-agent/internal/domain/safety"
 	"errors"
 	"strings"
 	"time"
@@ -57,23 +58,16 @@ func NewInvestigationConfig() *InvestigationConfig {
 //   - maxDuration: 15 minutes (reasonable timeout)
 //   - maxConcurrent: 5 (balances throughput and resource usage)
 //   - allowedTools: bash, read_file, list_files, batch_tool (safe investigation tools)
-//   - blockedCommands: common destructive patterns (rm -rf, dd, mkfs, etc.)
+//   - blockedCommands: common destructive patterns from shared safety package
 //   - escalateOnConfidenceBelow: 0.5 (escalate when uncertain)
 //   - escalateOnMultipleErrors: 3 (escalate after repeated failures)
 func DefaultInvestigationConfig() *InvestigationConfig {
 	return &InvestigationConfig{
-		maxActions:    20,
-		maxDuration:   15 * time.Minute,
-		maxConcurrent: 5,
-		allowedTools:  []string{"bash", "read_file", "list_files", "batch_tool"},
-		blockedCommands: []string{
-			"rm -rf",
-			"dd if=",
-			"mkfs",
-			":(){:|:&};:",
-			"> /dev/sda",
-			"chmod -R 777 /",
-		},
+		maxActions:                   20,
+		maxDuration:                  15 * time.Minute,
+		maxConcurrent:                5,
+		allowedTools:                 []string{"bash", "read_file", "list_files", "batch_tool"},
+		blockedCommands:              safety.DefaultBlockedCommandStrings(),
 		allowedDirectories:           nil,
 		requireHumanApprovalPatterns: []string{"restart", "kill", "delete"},
 		confirmBeforeRestart:         true,
@@ -249,13 +243,15 @@ func (c *InvestigationConfig) IsToolAllowed(tool string) bool {
 
 // IsCommandBlocked checks if a command contains any blocked pattern.
 // Uses substring matching - any command containing a blocked pattern is rejected.
+// Also checks against regex-based dangerous patterns from the safety package.
 func (c *InvestigationConfig) IsCommandBlocked(cmd string) bool {
-	for _, blocked := range c.blockedCommands {
-		if strings.Contains(cmd, blocked) {
-			return true
-		}
+	// Check substring-based blocked commands first
+	if safety.IsCommandBlocked(cmd, c.blockedCommands) {
+		return true
 	}
-	return false
+	// Also check regex-based dangerous patterns
+	isDangerous, _ := safety.IsDangerousCommand(cmd)
+	return isDangerous
 }
 
 // IsDirectoryAllowed checks if a directory is in the allowed list.
