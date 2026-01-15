@@ -29,9 +29,10 @@ var DangerousPatterns = []DangerousPattern{
 	{regexp.MustCompile(`su\s+-`), "switch user command"},
 	{regexp.MustCompile(`doas\s+`), "doas privilege escalation"},
 
-	// Insecure permissions
+	// Insecure permissions and ownership
 	{regexp.MustCompile(`chmod\s+(-R\s+)?777`), "insecure chmod"},
-	{regexp.MustCompile(`chmod\s+-R\s+777\s*/`), "recursive insecure chmod on root"},
+	{regexp.MustCompile(`chown\s+(-R\s+)?root`), "change ownership to root"},
+	{regexp.MustCompile(`chown\s+-R\s+\S+\s+/`), "recursive ownership change on root"},
 
 	// Filesystem operations
 	{regexp.MustCompile(`mkfs\.`), "filesystem format"},
@@ -71,6 +72,21 @@ var DangerousPatterns = []DangerousPattern{
 	// Boot/system damage
 	{regexp.MustCompile(`>\s*/boot/`), "modify boot files"},
 	{regexp.MustCompile(`rm\s+.*(/boot/|/vmlinuz)`), "delete kernel files"},
+
+	// Service manipulation
+	{regexp.MustCompile(`systemctl\s+(stop|disable|mask)\s+`), "stop/disable system service"},
+	{regexp.MustCompile(`service\s+\S+\s+stop`), "stop system service"},
+
+	// Firewall manipulation
+	{regexp.MustCompile(`iptables\s+(-F|--flush)`), "flush firewall rules"},
+	{regexp.MustCompile(`ufw\s+disable`), "disable firewall"},
+	{regexp.MustCompile(`firewall-cmd\s+.*--remove`), "remove firewall rules"},
+
+	// Crontab manipulation
+	{regexp.MustCompile(`crontab\s+-r`), "remove crontab"},
+	{regexp.MustCompile(`crontab\s+-e`), "edit crontab"},
+	{regexp.MustCompile(`>\s*/etc/cron`), "modify cron files"},
+	{regexp.MustCompile(`>\s*/var/spool/cron`), "modify cron spool"},
 }
 
 // IsDangerousCommand checks if a command matches any dangerous patterns.
@@ -121,6 +137,7 @@ func DefaultBlockedCommandStrings() []string {
 		":(){:|:&};:",
 		"> /dev/sda",
 		"chmod -R 777 /",
+		"chown -R",
 		"sudo ",
 		"curl | sh",
 		"wget | sh",
@@ -128,6 +145,11 @@ func DefaultBlockedCommandStrings() []string {
 		"> /etc/shadow",
 		"kill -9 -1",
 		"history -c",
+		"systemctl stop",
+		"systemctl disable",
+		"iptables -F",
+		"ufw disable",
+		"crontab -r",
 	}
 }
 

@@ -181,6 +181,77 @@ func TestIsDangerousCommand(t *testing.T) {
 			description: "should detect kill all processes",
 		},
 
+		// Ownership changes
+		{
+			name:        "chown to root",
+			cmd:         "chown root:root /etc/important",
+			wantDanger:  true,
+			wantReason:  "change ownership to root",
+			description: "should detect chown to root",
+		},
+		{
+			name:        "recursive chown on root",
+			cmd:         "chown -R user:user /",
+			wantDanger:  true,
+			wantReason:  "recursive ownership change on root",
+			description: "should detect recursive chown on root",
+		},
+
+		// Service manipulation
+		{
+			name:        "systemctl stop",
+			cmd:         "systemctl stop nginx",
+			wantDanger:  true,
+			wantReason:  "stop/disable system service",
+			description: "should detect systemctl stop",
+		},
+		{
+			name:        "systemctl disable",
+			cmd:         "systemctl disable sshd",
+			wantDanger:  true,
+			wantReason:  "stop/disable system service",
+			description: "should detect systemctl disable",
+		},
+		{
+			name:        "service stop",
+			cmd:         "service apache2 stop",
+			wantDanger:  true,
+			wantReason:  "stop system service",
+			description: "should detect service stop",
+		},
+
+		// Firewall manipulation
+		{
+			name:        "iptables flush",
+			cmd:         "iptables -F",
+			wantDanger:  true,
+			wantReason:  "flush firewall rules",
+			description: "should detect iptables flush",
+		},
+		{
+			name:        "ufw disable",
+			cmd:         "ufw disable",
+			wantDanger:  true,
+			wantReason:  "disable firewall",
+			description: "should detect ufw disable",
+		},
+
+		// Crontab manipulation
+		{
+			name:        "crontab remove",
+			cmd:         "crontab -r",
+			wantDanger:  true,
+			wantReason:  "remove crontab",
+			description: "should detect crontab removal",
+		},
+		{
+			name:        "crontab edit",
+			cmd:         "crontab -e",
+			wantDanger:  true,
+			wantReason:  "edit crontab",
+			description: "should detect crontab edit",
+		},
+
 		// Safe commands
 		{
 			name:        "safe ls command",
