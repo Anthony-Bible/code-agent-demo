@@ -43,7 +43,7 @@ func TestBashTool_BasicExecution(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
 	adapter := NewExecutorAdapter(fileManager)
 
-	input := `{"command": "echo hello"}`
+	input := `{"command": "echo hello", "dangerous": false}`
 	result, err := adapter.ExecuteTool(context.Background(), "bash", input)
 	if err != nil {
 		t.Fatalf("ExecuteTool failed: %v", err)
@@ -69,7 +69,7 @@ func TestBashTool_StderrCapture(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
 	adapter := NewExecutorAdapter(fileManager)
 
-	input := `{"command": "echo error >&2"}`
+	input := `{"command": "echo error >&2", "dangerous": false}`
 	result, err := adapter.ExecuteTool(context.Background(), "bash", input)
 	if err != nil {
 		t.Fatalf("ExecuteTool failed: %v", err)
@@ -89,7 +89,7 @@ func TestBashTool_ExitCode(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
 	adapter := NewExecutorAdapter(fileManager)
 
-	input := `{"command": "exit 42"}`
+	input := `{"command": "exit 42", "dangerous": false}`
 	result, err := adapter.ExecuteTool(context.Background(), "bash", input)
 	if err != nil {
 		t.Fatalf("ExecuteTool failed: %v", err)
@@ -109,7 +109,7 @@ func TestBashTool_Timeout(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
 	adapter := NewExecutorAdapter(fileManager)
 
-	input := `{"command": "sleep 5", "timeout_ms": 100}`
+	input := `{"command": "sleep 5", "timeout_ms": 100, "dangerous": false}`
 	_, err := adapter.ExecuteTool(context.Background(), "bash", input)
 	if err == nil {
 		t.Fatal("Expected timeout error, got nil")
@@ -125,7 +125,8 @@ func TestBashTool_DangerousCommandBlocked(t *testing.T) {
 	adapter := NewExecutorAdapter(fileManager)
 	// No callback set - dangerous commands should be blocked
 
-	input := `{"command": "rm -rf /"}`
+	// LLM incorrectly marks as safe, but patterns detect dangerous
+	input := `{"command": "rm -rf /", "dangerous": false}`
 	_, err := adapter.ExecuteTool(context.Background(), "bash", input)
 	if err == nil {
 		t.Fatal("Expected error for dangerous command, got nil")
@@ -145,7 +146,7 @@ func TestBashTool_DangerousCommandDenied(t *testing.T) {
 		return false
 	})
 
-	input := `{"command": "sudo -n ls"}`
+	input := `{"command": "sudo -n ls", "dangerous": true}`
 	_, err := adapter.ExecuteTool(context.Background(), "bash", input)
 	if err == nil {
 		t.Fatal("Expected error for denied dangerous command, got nil")
@@ -167,7 +168,7 @@ func TestBashTool_DangerousCommandAllowed(t *testing.T) {
 
 	// Use a "dangerous" command that's actually safe to run
 	// Use -n flag to prevent blocking on password prompt
-	input := `{"command": "sudo -n echo allowed"}`
+	input := `{"command": "sudo -n echo allowed", "dangerous": true}`
 	result, err := adapter.ExecuteTool(context.Background(), "bash", input)
 	// The command may fail due to no sudo access, but it should attempt execution
 	// (not be blocked by the dangerous command check)
@@ -212,7 +213,7 @@ func TestBashTool_DangerousPatterns(t *testing.T) {
 
 	for _, tc := range dangerousCases {
 		t.Run(tc.name, func(t *testing.T) {
-			input, _ := json.Marshal(map[string]string{"command": tc.command})
+			input, _ := json.Marshal(map[string]interface{}{"command": tc.command, "dangerous": false})
 			_, err := adapter.ExecuteTool(context.Background(), "bash", string(input))
 			if err == nil {
 				t.Errorf("Expected error for dangerous command %q, got nil", tc.command)
@@ -225,7 +226,7 @@ func TestBashTool_EmptyCommand(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
 	adapter := NewExecutorAdapter(fileManager)
 
-	input := `{"command": ""}`
+	input := `{"command": "", "dangerous": false}`
 	_, err := adapter.ExecuteTool(context.Background(), "bash", input)
 	if err == nil {
 		t.Fatal("Expected error for empty command, got nil")
@@ -236,7 +237,7 @@ func TestBashTool_MixedOutput(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
 	adapter := NewExecutorAdapter(fileManager)
 
-	input := `{"command": "echo stdout; echo stderr >&2"}`
+	input := `{"command": "echo stdout; echo stderr >&2", "dangerous": false}`
 	result, err := adapter.ExecuteTool(context.Background(), "bash", input)
 	if err != nil {
 		t.Fatalf("ExecuteTool failed: %v", err)
@@ -259,7 +260,7 @@ func TestBashTool_CommandNotFound(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
 	adapter := NewExecutorAdapter(fileManager)
 
-	input := `{"command": "nonexistent_command_xyz123"}`
+	input := `{"command": "nonexistent_command_xyz123", "dangerous": false}`
 	result, err := adapter.ExecuteTool(context.Background(), "bash", input)
 	if err != nil {
 		t.Fatalf("ExecuteTool failed: %v", err)
@@ -297,7 +298,7 @@ func TestBashTool_DangerousPatternVariations(t *testing.T) {
 
 	for _, tc := range dangerousCases {
 		t.Run(tc.name, func(t *testing.T) {
-			input, _ := json.Marshal(map[string]string{"command": tc.command})
+			input, _ := json.Marshal(map[string]interface{}{"command": tc.command, "dangerous": false})
 			_, err := adapter.ExecuteTool(context.Background(), "bash", string(input))
 			if err == nil {
 				t.Errorf("Expected error for dangerous command %q, got nil", tc.command)
@@ -336,7 +337,7 @@ func TestBashTool_AllCommandsConfirmation_CallbackCalledForNonDangerous(t *testi
 		return true
 	})
 
-	input := `{"command": "echo hello"}`
+	input := `{"command": "echo hello", "dangerous": false}`
 	result, err := adapter.ExecuteTool(context.Background(), "bash", input)
 	if err != nil {
 		t.Fatalf("ExecuteTool failed: %v", err)
@@ -386,7 +387,7 @@ func TestBashTool_AllCommandsConfirmation_CallbackCalledForDangerous(t *testing.
 		return true
 	})
 
-	input := `{"command": "sudo ls"}`
+	input := `{"command": "sudo ls", "dangerous": true}`
 	_, err := adapter.ExecuteTool(context.Background(), "bash", input)
 	// The command may fail due to sudo requiring password, but we should not get
 	// a "dangerous command blocked" error since callback returned true
@@ -424,7 +425,7 @@ func TestBashTool_AllCommandsConfirmation_NonDangerousDenied(t *testing.T) {
 		return false
 	})
 
-	input := `{"command": "echo hello"}`
+	input := `{"command": "echo hello", "dangerous": false}`
 	_, err := adapter.ExecuteTool(context.Background(), "bash", input)
 
 	// Command should be denied even though it's not dangerous
@@ -444,7 +445,7 @@ func TestBashTool_AllCommandsConfirmation_NoCallbackNonDangerousProceeds(t *test
 	// Explicitly do NOT set any callback - backward compatible behavior
 	// Non-dangerous commands should proceed without requiring confirmation
 
-	input := `{"command": "echo backward_compat"}`
+	input := `{"command": "echo backward_compat", "dangerous": false}`
 	result, err := adapter.ExecuteTool(context.Background(), "bash", input)
 	if err != nil {
 		t.Fatalf("Expected non-dangerous command to succeed without callback, got error: %v", err)
@@ -482,7 +483,7 @@ func TestBashTool_BackwardCompat_DangerousCallbackStillWorks(t *testing.T) {
 	})
 
 	// First, execute a non-dangerous command - old callback should NOT be triggered
-	nonDangerousInput := `{"command": "echo safe"}`
+	nonDangerousInput := `{"command": "echo safe", "dangerous": false}`
 	_, err := adapter.ExecuteTool(context.Background(), "bash", nonDangerousInput)
 	if err != nil {
 		t.Fatalf("Non-dangerous command failed: %v", err)
@@ -497,7 +498,7 @@ func TestBashTool_BackwardCompat_DangerousCallbackStillWorks(t *testing.T) {
 	}
 
 	// Now execute a dangerous command - old callback SHOULD be triggered
-	dangerousInput := `{"command": "sudo echo test"}`
+	dangerousInput := `{"command": "sudo echo test", "dangerous": true}`
 	_, err = adapter.ExecuteTool(context.Background(), "bash", dangerousInput)
 	// Command may fail due to sudo, but should not be blocked
 	if err != nil {
@@ -606,6 +607,54 @@ func TestBashTool_LLMSpecifiedDangerous_CombinesWithPatternDetection(t *testing.
 	// Pattern detection reason should be used when patterns match
 	if !strings.Contains(inv.reason, "sudo") {
 		t.Errorf("Expected pattern-detected reason to contain 'sudo', got %q", inv.reason)
+	}
+}
+
+func TestBashTool_LLMFailedToIdentifyDangerous(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	var invocations []callbackInvocation
+
+	// Set CommandConfirmationCallback
+	adapter.SetCommandConfirmationCallback(func(command string, isDangerous bool, reason, description string) bool {
+		invocations = append(invocations, callbackInvocation{
+			command:     command,
+			isDangerous: isDangerous,
+			reason:      reason,
+			description: description,
+		})
+		return true
+	})
+
+	// Execute a dangerous command but LLM incorrectly marks it as safe
+	// This should still be detected as dangerous with a warning in the reason
+	input := `{"command": "sudo ls", "dangerous": false}`
+	_, err := adapter.ExecuteTool(context.Background(), "bash", input)
+	// sudo may fail but should not be blocked since callback returns true
+	if err != nil {
+		if strings.Contains(err.Error(), "blocked") {
+			t.Fatalf("Command should not be blocked when callback returns true: %v", err)
+		}
+	}
+
+	if len(invocations) != 1 {
+		t.Fatalf("Expected callback to be called 1 time, got %d", len(invocations))
+	}
+
+	inv := invocations[0]
+	if !inv.isDangerous {
+		t.Errorf("Expected isDangerous=true even when LLM says false (patterns should override)")
+	}
+	// Reason should contain both the pattern reason AND a warning about LLM failure
+	if !strings.Contains(inv.reason, "sudo") {
+		t.Errorf("Expected reason to contain 'sudo', got %q", inv.reason)
+	}
+	if !strings.Contains(inv.reason, "WARNING") {
+		t.Errorf("Expected reason to contain WARNING about LLM failure, got %q", inv.reason)
+	}
+	if !strings.Contains(inv.reason, "LLM failed to identify") {
+		t.Errorf("Expected reason to mention LLM failed to identify, got %q", inv.reason)
 	}
 }
 

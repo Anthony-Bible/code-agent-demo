@@ -362,7 +362,7 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 	bashTool := entity.Tool{
 		ID:          "bash",
 		Name:        "bash",
-		Description: "Executes shell commands and returns stdout, stderr, and exit code. Dangerous commands require user confirmation.",
+		Description: "Executes shell commands and returns stdout, stderr, and exit code. You MUST assess whether each command is dangerous and set the dangerous field accordingly. Dangerous commands require user confirmation.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -380,12 +380,12 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 				},
 				"dangerous": map[string]interface{}{
 					"type":        "boolean",
-					"description": "Whether this command is potentially dangerous",
+					"description": "REQUIRED: You must assess if this command is potentially dangerous. Set to true for commands that: delete/modify files (rm, mv), use elevated privileges (sudo, su), modify system config, execute untrusted input, or could cause data loss. Set to false for safe read-only commands (ls, cat, grep, echo).",
 				},
 			},
-			"required": []string{"command"},
+			"required": []string{"command", "dangerous"},
 		},
-		RequiredFields: []string{"command"},
+		RequiredFields: []string{"command", "dangerous"},
 	}
 	a.tools[bashTool.Name] = bashTool
 
@@ -989,11 +989,20 @@ func isDangerousCommand(cmd string) (bool, string) {
 }
 
 // checkCommandConfirmation checks if a command should be allowed to execute.
+// The llmDangerous parameter indicates whether the LLM assessed the command as dangerous.
+// Commands are considered dangerous if EITHER the pattern detection OR the LLM says so.
+// If the LLM incorrectly marks a dangerous command as safe, the discrepancy is noted.
 func (a *ExecutorAdapter) checkCommandConfirmation(command string, description string, llmDangerous bool) error {
-	isDangerous, reason := isDangerousCommand(command)
+	patternDangerous, patternReason := isDangerousCommand(command)
+	isDangerous := patternDangerous
+	reason := patternReason
 
-	// Combine: dangerous if either patterns match OR LLM says so
-	if llmDangerous && !isDangerous {
+	// Check for LLM assessment discrepancy
+	if patternDangerous && !llmDangerous {
+		// LLM incorrectly marked a dangerous command as safe
+		reason = fmt.Sprintf("%s (WARNING: LLM failed to identify this as dangerous)", patternReason)
+	} else if llmDangerous && !patternDangerous {
+		// LLM correctly identified something we didn't catch
 		isDangerous = true
 		reason = "marked dangerous by AI"
 	}
