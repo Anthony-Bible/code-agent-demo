@@ -1739,111 +1739,72 @@ func TestSubagentRunner_RecursionPrevention_IsSubagentContextDetection(t *testin
 // Model Switching Tests
 // =============================================================================
 
-func TestSubagentRunner_ModelSwitch_SetsModelHaiku(t *testing.T) {
-	// Arrange
-	convService := newSubagentRunnerConvServiceMock()
-	convService.startConversationSession = "subagent-session-haiku-001"
-	convService.processResponseMessages = []*entity.Message{
-		createSubagentAssistantMessage("Done"),
+func TestSubagentRunner_ModelSwitch_SetsModel(t *testing.T) {
+	tests := []struct {
+		name          string
+		modelAlias    string
+		expectedModel string
+		agentName     string
+		sessionSuffix string
+	}{
+		{
+			name:          "haiku model",
+			modelAlias:    "haiku",
+			expectedModel: "claude-3-5-haiku-20241022",
+			agentName:     "agent-haiku",
+			sessionSuffix: "haiku-001",
+		},
+		{
+			name:          "sonnet model",
+			modelAlias:    "sonnet",
+			expectedModel: "claude-sonnet-4-5-20250929",
+			agentName:     "agent-sonnet",
+			sessionSuffix: "sonnet-001",
+		},
+		{
+			name:          "opus model",
+			modelAlias:    "opus",
+			expectedModel: "claude-opus-4-5-20250514",
+			agentName:     "agent-opus",
+			sessionSuffix: "opus-001",
+		},
 	}
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
 
-	toolExecutor := newSubagentRunnerToolExecutorMock()
-	aiProvider := newSubagentRunnerAIProviderMock()
-	config := SubagentConfig{MaxActions: 10}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			convService := newSubagentRunnerConvServiceMock()
+			convService.startConversationSession = "subagent-session-" + tt.sessionSuffix
+			convService.processResponseMessages = []*entity.Message{
+				createSubagentAssistantMessage("Done"),
+			}
+			convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
-	agent := createTestAgent("agent-haiku", "Haiku Agent")
-	agent.Model = "haiku"
+			toolExecutor := newSubagentRunnerToolExecutorMock()
+			aiProvider := newSubagentRunnerAIProviderMock()
+			config := SubagentConfig{MaxActions: 10}
 
-	// Act
-	result, err := runner.Run(context.Background(), agent, "Task", "subagent-haiku-001")
-	// Assert
-	if err != nil {
-		t.Errorf("Run() error = %v, want nil", err)
-	}
-	if result == nil {
-		t.Fatal("Run() returned nil result")
-	}
-	// AIProvider.SetModel("claude-3-5-haiku-20241022") should have been called (resolved from "haiku")
-	if aiProvider.setModelCalls == 0 {
-		t.Error("SetModel() was not called, want it to be called with resolved haiku model ID")
-	}
-	expectedModel := "claude-3-5-haiku-20241022"
-	if len(aiProvider.setModelValues) > 0 && aiProvider.setModelValues[0] != expectedModel {
-		t.Errorf("SetModel() called with %q, want %q", aiProvider.setModelValues[0], expectedModel)
-	}
-}
+			runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+			agent := createTestAgent(tt.agentName, strings.Title(tt.modelAlias)+" Agent")
+			agent.Model = tt.modelAlias
 
-func TestSubagentRunner_ModelSwitch_SetsModelSonnet(t *testing.T) {
-	// Arrange
-	convService := newSubagentRunnerConvServiceMock()
-	convService.startConversationSession = "subagent-session-sonnet-001"
-	convService.processResponseMessages = []*entity.Message{
-		createSubagentAssistantMessage("Done"),
-	}
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
+			// Act
+			result, err := runner.Run(context.Background(), agent, "Task", "subagent-"+tt.sessionSuffix)
 
-	toolExecutor := newSubagentRunnerToolExecutorMock()
-	aiProvider := newSubagentRunnerAIProviderMock()
-	config := SubagentConfig{MaxActions: 10}
-
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
-	agent := createTestAgent("agent-sonnet", "Sonnet Agent")
-	agent.Model = "sonnet"
-
-	// Act
-	result, err := runner.Run(context.Background(), agent, "Task", "subagent-sonnet-001")
-	// Assert
-	if err != nil {
-		t.Errorf("Run() error = %v, want nil", err)
-	}
-	if result == nil {
-		t.Fatal("Run() returned nil result")
-	}
-	// AIProvider.SetModel("claude-sonnet-4-5-20250929") should have been called (resolved from "sonnet")
-	if aiProvider.setModelCalls == 0 {
-		t.Error("SetModel() was not called, want it to be called with resolved sonnet model ID")
-	}
-	expectedModel := "claude-sonnet-4-5-20250929"
-	if len(aiProvider.setModelValues) > 0 && aiProvider.setModelValues[0] != expectedModel {
-		t.Errorf("SetModel() called with %q, want %q", aiProvider.setModelValues[0], expectedModel)
-	}
-}
-
-func TestSubagentRunner_ModelSwitch_SetsModelOpus(t *testing.T) {
-	// Arrange
-	convService := newSubagentRunnerConvServiceMock()
-	convService.startConversationSession = "subagent-session-opus-001"
-	convService.processResponseMessages = []*entity.Message{
-		createSubagentAssistantMessage("Done"),
-	}
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
-
-	toolExecutor := newSubagentRunnerToolExecutorMock()
-	aiProvider := newSubagentRunnerAIProviderMock()
-	config := SubagentConfig{MaxActions: 10}
-
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
-	agent := createTestAgent("agent-opus", "Opus Agent")
-	agent.Model = "opus"
-
-	// Act
-	result, err := runner.Run(context.Background(), agent, "Task", "subagent-opus-001")
-	// Assert
-	if err != nil {
-		t.Errorf("Run() error = %v, want nil", err)
-	}
-	if result == nil {
-		t.Fatal("Run() returned nil result")
-	}
-	// AIProvider.SetModel("claude-opus-4-5-20250514") should have been called (resolved from "opus")
-	if aiProvider.setModelCalls == 0 {
-		t.Error("SetModel() was not called, want it to be called with resolved opus model ID")
-	}
-	expectedModel := "claude-opus-4-5-20250514"
-	if len(aiProvider.setModelValues) > 0 && aiProvider.setModelValues[0] != expectedModel {
-		t.Errorf("SetModel() called with %q, want %q", aiProvider.setModelValues[0], expectedModel)
+			// Assert
+			if err != nil {
+				t.Errorf("Run() error = %v, want nil", err)
+			}
+			if result == nil {
+				t.Fatal("Run() returned nil result")
+			}
+			if aiProvider.setModelCalls == 0 {
+				t.Errorf("SetModel() was not called, want it to be called with resolved %s model ID", tt.modelAlias)
+			}
+			if len(aiProvider.setModelValues) > 0 && aiProvider.setModelValues[0] != tt.expectedModel {
+				t.Errorf("SetModel() called with %q, want %q", aiProvider.setModelValues[0], tt.expectedModel)
+			}
+		})
 	}
 }
 

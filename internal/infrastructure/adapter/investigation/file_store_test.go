@@ -637,78 +637,68 @@ func TestFileInvestigationStore_Query_EmptyStore(t *testing.T) {
 	}
 }
 
-func TestFileInvestigationStore_Query_ByAlertID(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
-
-	ctx := context.Background()
-
-	// Store investigations for different alerts
-	invs := []struct {
-		id, alertID, sessionID, status string
+func TestFileInvestigationStore_Query_ByAlertIDOrSessionID(t *testing.T) {
+	tests := []struct {
+		name      string
+		invData   []struct{ id, alertID, sessionID, status string }
+		query     service.InvestigationQuery
+		wantLen   int
+		queryDesc string
 	}{
-		{"inv-1", "alert-A", "s1", "started"},
-		{"inv-2", "alert-A", "s2", "running"},
-		{"inv-3", "alert-B", "s3", "started"},
-	}
-	for _, inv := range invs {
-		stub := service.NewInvestigationRecordForTest(inv.id, inv.alertID, inv.sessionID, inv.status)
-		if err := store.Store(ctx, stub); err != nil {
-			t.Fatalf("Store() error = %v", err)
-		}
-	}
-
-	results, err := store.Query(ctx, service.InvestigationQuery{AlertID: "alert-A"})
-	if err != nil {
-		t.Errorf("Query() error = %v", err)
-	}
-	if len(results) != 2 {
-		t.Errorf("Query(AlertID=alert-A) len = %v, want 2", len(results))
-	}
-}
-
-func TestFileInvestigationStore_Query_BySessionID(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
-
-	ctx := context.Background()
-
-	invs := []struct {
-		id, alertID, sessionID, status string
-	}{
-		{"inv-1", "a1", "session-X", "started"},
-		{"inv-2", "a2", "session-X", "running"},
-		{"inv-3", "a3", "session-Y", "started"},
-	}
-	for _, inv := range invs {
-		stub := service.NewInvestigationRecordForTest(inv.id, inv.alertID, inv.sessionID, inv.status)
-		if err := store.Store(ctx, stub); err != nil {
-			t.Fatalf("Store() error = %v", err)
-		}
+		{
+			name: "by AlertID",
+			invData: []struct{ id, alertID, sessionID, status string }{
+				{"inv-1", "alert-A", "s1", "started"},
+				{"inv-2", "alert-A", "s2", "running"},
+				{"inv-3", "alert-B", "s3", "started"},
+			},
+			query:     service.InvestigationQuery{AlertID: "alert-A"},
+			wantLen:   2,
+			queryDesc: "Query(AlertID=alert-A)",
+		},
+		{
+			name: "by SessionID",
+			invData: []struct{ id, alertID, sessionID, status string }{
+				{"inv-1", "a1", "session-X", "started"},
+				{"inv-2", "a2", "session-X", "running"},
+				{"inv-3", "a3", "session-Y", "started"},
+			},
+			query:     service.InvestigationQuery{SessionID: "session-X"},
+			wantLen:   2,
+			queryDesc: "Query(SessionID=session-X)",
+		},
 	}
 
-	results, err := store.Query(ctx, service.InvestigationQuery{SessionID: "session-X"})
-	if err != nil {
-		t.Errorf("Query() error = %v", err)
-	}
-	if len(results) != 2 {
-		t.Errorf("Query(SessionID=session-X) len = %v, want 2", len(results))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			store, err := NewFileInvestigationStore(tmpDir)
+			if err != nil {
+				t.Fatalf("NewFileInvestigationStore() error = %v", err)
+			}
+			defer func() {
+				if store != nil {
+					_ = store.Close()
+				}
+			}()
+
+			ctx := context.Background()
+
+			for _, inv := range tt.invData {
+				stub := service.NewInvestigationRecordForTest(inv.id, inv.alertID, inv.sessionID, inv.status)
+				if err := store.Store(ctx, stub); err != nil {
+					t.Fatalf("Store() error = %v", err)
+				}
+			}
+
+			results, err := store.Query(ctx, tt.query)
+			if err != nil {
+				t.Errorf("Query() error = %v", err)
+			}
+			if len(results) != tt.wantLen {
+				t.Errorf("%s len = %v, want %d", tt.queryDesc, len(results), tt.wantLen)
+			}
+		})
 	}
 }
 
@@ -788,91 +778,77 @@ func TestFileInvestigationStore_Query_ByMultipleStatuses(t *testing.T) {
 	}
 }
 
-func TestFileInvestigationStore_Query_BySince(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
-
-	ctx := context.Background()
-	now := time.Now()
-
-	invs := []struct {
-		id, alertID, sessionID, status string
-		startedAt                      time.Time
+func TestFileInvestigationStore_Query_ByTimeRange(t *testing.T) {
+	tests := []struct {
+		name         string
+		oldStatus    string
+		recentStatus string
+		buildQuery   func(now time.Time) service.InvestigationQuery
+		wantLen      int
+		errMsg       string
 	}{
-		{"inv-old", "a1", "s1", "started", now.Add(-2 * time.Hour)},
-		{"inv-recent", "a2", "s2", "running", now.Add(-30 * time.Minute)},
-	}
-	for _, inv := range invs {
-		stub := service.NewInvestigationRecordForTestWithTime(
-			inv.id,
-			inv.alertID,
-			inv.sessionID,
-			inv.status,
-			inv.startedAt,
-		)
-		if err := store.Store(ctx, stub); err != nil {
-			t.Fatalf("Store() error = %v", err)
-		}
-	}
-
-	results, err := store.Query(ctx, service.InvestigationQuery{Since: now.Add(-1 * time.Hour)})
-	if err != nil {
-		t.Errorf("Query() error = %v", err)
-	}
-	if len(results) != 1 {
-		t.Errorf("Query(Since=1h ago) len = %v, want 1", len(results))
-	}
-}
-
-func TestFileInvestigationStore_Query_ByUntil(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
-
-	ctx := context.Background()
-	now := time.Now()
-
-	invs := []struct {
-		id, alertID, sessionID, status string
-		startedAt                      time.Time
-	}{
-		{"inv-old", "a1", "s1", "completed", now.Add(-2 * time.Hour)},
-		{"inv-recent", "a2", "s2", "running", now.Add(-30 * time.Minute)},
-	}
-	for _, inv := range invs {
-		stub := service.NewInvestigationRecordForTestWithTime(
-			inv.id,
-			inv.alertID,
-			inv.sessionID,
-			inv.status,
-			inv.startedAt,
-		)
-		if err := store.Store(ctx, stub); err != nil {
-			t.Fatalf("Store() error = %v", err)
-		}
+		{
+			name:         "by Since filter",
+			oldStatus:    "started",
+			recentStatus: "running",
+			buildQuery:   func(now time.Time) service.InvestigationQuery { return service.InvestigationQuery{Since: now.Add(-1 * time.Hour)} },
+			wantLen:      1,
+			errMsg:       "Query(Since=1h ago) len = %v, want 1",
+		},
+		{
+			name:         "by Until filter",
+			oldStatus:    "completed",
+			recentStatus: "running",
+			buildQuery:   func(now time.Time) service.InvestigationQuery { return service.InvestigationQuery{Until: now.Add(-1 * time.Hour)} },
+			wantLen:      1,
+			errMsg:       "Query(Until=1h ago) len = %v, want 1",
+		},
 	}
 
-	results, err := store.Query(ctx, service.InvestigationQuery{Until: now.Add(-1 * time.Hour)})
-	if err != nil {
-		t.Errorf("Query() error = %v", err)
-	}
-	if len(results) != 1 {
-		t.Errorf("Query(Until=1h ago) len = %v, want 1", len(results))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			store, err := NewFileInvestigationStore(tmpDir)
+			if err != nil {
+				t.Fatalf("NewFileInvestigationStore() error = %v", err)
+			}
+			defer func() {
+				if store != nil {
+					_ = store.Close()
+				}
+			}()
+
+			ctx := context.Background()
+			now := time.Now()
+
+			invs := []struct {
+				id, alertID, sessionID, status string
+				startedAt                      time.Time
+			}{
+				{"inv-old", "a1", "s1", tt.oldStatus, now.Add(-2 * time.Hour)},
+				{"inv-recent", "a2", "s2", tt.recentStatus, now.Add(-30 * time.Minute)},
+			}
+			for _, inv := range invs {
+				stub := service.NewInvestigationRecordForTestWithTime(
+					inv.id,
+					inv.alertID,
+					inv.sessionID,
+					inv.status,
+					inv.startedAt,
+				)
+				if err := store.Store(ctx, stub); err != nil {
+					t.Fatalf("Store() error = %v", err)
+				}
+			}
+
+			results, err := store.Query(ctx, tt.buildQuery(now))
+			if err != nil {
+				t.Errorf("Query() error = %v", err)
+			}
+			if len(results) != tt.wantLen {
+				t.Errorf(tt.errMsg, len(results))
+			}
+		})
 	}
 }
 
