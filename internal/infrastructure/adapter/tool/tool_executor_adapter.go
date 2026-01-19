@@ -5,6 +5,7 @@ import (
 	"code-editing-agent/internal/application/usecase"
 	"code-editing-agent/internal/domain/entity"
 	"code-editing-agent/internal/domain/port"
+	"code-editing-agent/internal/domain/safety"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,7 +17,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -362,7 +362,7 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 	bashTool := entity.Tool{
 		ID:          "bash",
 		Name:        "bash",
-		Description: "Executes shell commands and returns stdout, stderr, and exit code. Dangerous commands require user confirmation.",
+		Description: "Executes shell commands and returns stdout, stderr, and exit code. You MUST assess whether each command is dangerous and set the dangerous field accordingly. Dangerous commands require user confirmation.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -380,12 +380,12 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 				},
 				"dangerous": map[string]interface{}{
 					"type":        "boolean",
-					"description": "Whether this command is potentially dangerous",
+					"description": "REQUIRED: You must assess if this command is potentially dangerous. Set to true for commands that: delete/modify files (rm, mv), use elevated privileges (sudo, su), modify system config, execute untrusted input, or could cause data loss. Set to false for safe read-only commands (ls, cat, grep, echo).",
 				},
 			},
-			"required": []string{"command"},
+			"required": []string{"command", "dangerous"},
 		},
-		RequiredFields: []string{"command"},
+		RequiredFields: []string{"command", "dangerous"},
 	}
 	a.tools[bashTool.Name] = bashTool
 
@@ -981,46 +981,28 @@ const defaultBashTimeout = 30 * time.Second
 // maxBatchInvocations is the maximum number of tool invocations allowed in a single batch.
 const maxBatchInvocations = 20
 
-// dangerousPattern represents a pattern that indicates a dangerous command.
-type dangerousPattern struct {
-	pattern *regexp.Regexp
-	reason  string
-}
-
-// dangerousPatterns contains patterns for detecting dangerous commands.
-//
-//nolint:gochecknoglobals // This is intentionally a package-level constant for dangerous command detection
-var dangerousPatterns = []dangerousPattern{
-	// Matches rm with any flags followed by dangerous paths (/, ~, *)
-	{regexp.MustCompile(`rm\s+(-\w+\s+)*[/~*]`), "destructive rm command"},
-	{regexp.MustCompile(`sudo\s+`), "sudo command"},
-	{regexp.MustCompile(`chmod\s+777`), "insecure chmod"},
-	{regexp.MustCompile(`mkfs\.`), "filesystem format"},
-	{regexp.MustCompile(`dd\s+if=`), "low-level disk operation"},
-	{regexp.MustCompile(`>\s*/dev/`), "write to device"},
-}
-
 // isDangerousCommand checks if a command matches any dangerous patterns.
+// Uses the shared safety package for pattern detection.
 // Special case: writing to /dev/null is allowed.
 func isDangerousCommand(cmd string) (bool, string) {
-	for _, dp := range dangerousPatterns {
-		if dp.pattern.MatchString(cmd) {
-			// Allow writes to /dev/null (common pattern for suppressing output)
-			if dp.reason == "write to device" && strings.Contains(cmd, "/dev/null") {
-				continue
-			}
-			return true, dp.reason
-		}
-	}
-	return false, ""
+	return safety.IsDangerousCommand(cmd)
 }
 
 // checkCommandConfirmation checks if a command should be allowed to execute.
+// The llmDangerous parameter indicates whether the LLM assessed the command as dangerous.
+// Commands are considered dangerous if EITHER the pattern detection OR the LLM says so.
+// If the LLM incorrectly marks a dangerous command as safe, the discrepancy is noted.
 func (a *ExecutorAdapter) checkCommandConfirmation(command string, description string, llmDangerous bool) error {
-	isDangerous, reason := isDangerousCommand(command)
+	patternDangerous, patternReason := isDangerousCommand(command)
+	isDangerous := patternDangerous
+	reason := patternReason
 
-	// Combine: dangerous if either patterns match OR LLM says so
-	if llmDangerous && !isDangerous {
+	// Check for LLM assessment discrepancy
+	if patternDangerous && !llmDangerous {
+		// LLM incorrectly marked a dangerous command as safe
+		reason = fmt.Sprintf("%s (WARNING: LLM failed to identify this as dangerous)", patternReason)
+	} else if llmDangerous && !patternDangerous {
+		// LLM correctly identified something we didn't catch
 		isDangerous = true
 		reason = "marked dangerous by AI"
 	}
