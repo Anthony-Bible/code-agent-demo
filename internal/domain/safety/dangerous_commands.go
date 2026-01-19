@@ -10,8 +10,9 @@ import (
 
 // DangerousPattern represents a pattern that indicates a dangerous command.
 type DangerousPattern struct {
-	Pattern *regexp.Regexp
-	Reason  string
+	Pattern      *regexp.Regexp
+	Reason       string
+	AllowDevNull bool // If true, writing to /dev/null is permitted for this pattern
 }
 
 // DangerousPatterns contains all patterns for detecting dangerous commands.
@@ -21,83 +22,92 @@ type DangerousPattern struct {
 //nolint:gochecknoglobals // This is intentionally a package-level constant for dangerous command detection
 var DangerousPatterns = []DangerousPattern{
 	// Destructive file operations
-	{regexp.MustCompile(`rm\s+(-\w+\s+)*[/~*]`), "destructive rm command"},
-	{regexp.MustCompile(`rm\s+-rf\b`), "recursive force delete"},
+	{Pattern: regexp.MustCompile(`rm\s+(-\w+\s+)*[/~*]`), Reason: "destructive rm command"},
+	{Pattern: regexp.MustCompile(`rm\s+-rf\b`), Reason: "recursive force delete"},
 
 	// Privilege escalation
-	{regexp.MustCompile(`sudo\s+`), "sudo command"},
-	{regexp.MustCompile(`su\s+-`), "switch user command"},
-	{regexp.MustCompile(`doas\s+`), "doas privilege escalation"},
+	{Pattern: regexp.MustCompile(`sudo\s+`), Reason: "sudo command"},
+	{Pattern: regexp.MustCompile(`su\s+-`), Reason: "switch user command"},
+	{Pattern: regexp.MustCompile(`doas\s+`), Reason: "doas privilege escalation"},
 
 	// Insecure permissions and ownership
-	{regexp.MustCompile(`chmod\s+(-R\s+)?777`), "insecure chmod"},
-	{regexp.MustCompile(`chown\s+(-R\s+)?root`), "change ownership to root"},
-	{regexp.MustCompile(`chown\s+-R\s+\S+\s+/`), "recursive ownership change on root"},
+	{Pattern: regexp.MustCompile(`chmod\s+(-R\s+)?777`), Reason: "insecure chmod"},
+	{Pattern: regexp.MustCompile(`chown\s+(-R\s+)?root`), Reason: "change ownership to root"},
+	{Pattern: regexp.MustCompile(`chown\s+-R\s+\S+\s+/`), Reason: "recursive ownership change on root"},
 
 	// Filesystem operations
-	{regexp.MustCompile(`mkfs\.`), "filesystem format"},
-	{regexp.MustCompile(`fdisk\s+`), "disk partitioning"},
-	{regexp.MustCompile(`parted\s+`), "disk partitioning"},
+	{Pattern: regexp.MustCompile(`mkfs\.`), Reason: "filesystem format"},
+	{Pattern: regexp.MustCompile(`fdisk\s+`), Reason: "disk partitioning"},
+	{Pattern: regexp.MustCompile(`parted\s+`), Reason: "disk partitioning"},
 
 	// Low-level disk operations
-	{regexp.MustCompile(`dd\s+if=`), "low-level disk operation"},
-	{regexp.MustCompile(`>\s*/dev/sd`), "write to disk device"},
-	{regexp.MustCompile(`>\s*/dev/nvme`), "write to nvme device"},
-	{regexp.MustCompile(`>\s*/dev/hd`), "write to disk device"},
+	{Pattern: regexp.MustCompile(`dd\s+if=`), Reason: "low-level disk operation"},
+	{Pattern: regexp.MustCompile(`>\s*/dev/sd`), Reason: "write to disk device", AllowDevNull: true},
+	{Pattern: regexp.MustCompile(`>\s*/dev/nvme`), Reason: "write to nvme device", AllowDevNull: true},
+	{Pattern: regexp.MustCompile(`>\s*/dev/hd`), Reason: "write to disk device", AllowDevNull: true},
 
 	// Fork bomb and resource exhaustion
-	{regexp.MustCompile(`:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;`), "fork bomb"},
-	{regexp.MustCompile(`\$\(:\)\{\s*:\|:&`), "fork bomb variant"},
+	{Pattern: regexp.MustCompile(`:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;`), Reason: "fork bomb"},
+	{Pattern: regexp.MustCompile(`\$\(:\)\{\s*:\|:&`), Reason: "fork bomb variant"},
 
 	// Network attacks
-	{regexp.MustCompile(`curl\s+.*\|\s*(ba)?sh`), "remote code execution"},
-	{regexp.MustCompile(`wget\s+.*\|\s*(ba)?sh`), "remote code execution"},
-	{regexp.MustCompile(`curl\s+.*-o\s*/`), "download to system path"},
+	{Pattern: regexp.MustCompile(`curl\s+.*\|\s*(ba)?sh`), Reason: "remote code execution"},
+	{Pattern: regexp.MustCompile(`wget\s+.*\|\s*(ba)?sh`), Reason: "remote code execution"},
+	{Pattern: regexp.MustCompile(`curl\s+.*-o\s*/`), Reason: "download to system path"},
 
 	// System modification
-	{regexp.MustCompile(`>\s*/etc/passwd`), "modify passwd file"},
-	{regexp.MustCompile(`>\s*/etc/shadow`), "modify shadow file"},
-	{regexp.MustCompile(`>\s*/etc/sudoers`), "modify sudoers file"},
+	{Pattern: regexp.MustCompile(`>\s*/etc/passwd`), Reason: "modify passwd file"},
+	{Pattern: regexp.MustCompile(`>\s*/etc/shadow`), Reason: "modify shadow file"},
+	{Pattern: regexp.MustCompile(`>\s*/etc/sudoers`), Reason: "modify sudoers file"},
 
 	// History manipulation (potential cover-up)
-	{regexp.MustCompile(`history\s+-c`), "clear command history"},
-	{regexp.MustCompile(`>\s*~/\.bash_history`), "clear bash history"},
-	{regexp.MustCompile(`shred\s+.*history`), "shred history file"},
+	{Pattern: regexp.MustCompile(`history\s+-c`), Reason: "clear command history"},
+	{Pattern: regexp.MustCompile(`>\s*~/\.bash_history`), Reason: "clear bash history"},
+	{Pattern: regexp.MustCompile(`shred\s+.*history`), Reason: "shred history file"},
 
 	// Process manipulation
-	{regexp.MustCompile(`kill\s+-9\s+-1`), "kill all processes"},
-	{regexp.MustCompile(`pkill\s+-9\s+-1`), "kill all processes"},
-	{regexp.MustCompile(`killall\s+-9`), "kill all processes by name"},
+	{Pattern: regexp.MustCompile(`kill\s+-9\s+-1`), Reason: "kill all processes"},
+	{Pattern: regexp.MustCompile(`pkill\s+-9\s+-1`), Reason: "kill all processes"},
+	{Pattern: regexp.MustCompile(`killall\s+-9`), Reason: "kill all processes by name"},
 
 	// Boot/system damage
-	{regexp.MustCompile(`>\s*/boot/`), "modify boot files"},
-	{regexp.MustCompile(`rm\s+.*(/boot/|/vmlinuz)`), "delete kernel files"},
+	{Pattern: regexp.MustCompile(`>\s*/boot/`), Reason: "modify boot files"},
+	{Pattern: regexp.MustCompile(`rm\s+.*(/boot/|/vmlinuz)`), Reason: "delete kernel files"},
 
 	// Service manipulation
-	{regexp.MustCompile(`systemctl\s+(stop|disable|mask)\s+`), "stop/disable system service"},
-	{regexp.MustCompile(`service\s+\S+\s+stop`), "stop system service"},
+	{Pattern: regexp.MustCompile(`systemctl\s+(stop|disable|mask)\s+`), Reason: "stop/disable system service"},
+	{Pattern: regexp.MustCompile(`service\s+\S+\s+stop`), Reason: "stop system service"},
 
 	// Firewall manipulation
-	{regexp.MustCompile(`iptables\s+(-F|--flush)`), "flush firewall rules"},
-	{regexp.MustCompile(`ufw\s+disable`), "disable firewall"},
-	{regexp.MustCompile(`firewall-cmd\s+.*--remove`), "remove firewall rules"},
+	{Pattern: regexp.MustCompile(`iptables\s+(-F|--flush)`), Reason: "flush firewall rules"},
+	{Pattern: regexp.MustCompile(`ufw\s+disable`), Reason: "disable firewall"},
+	{Pattern: regexp.MustCompile(`firewall-cmd\s+.*--remove`), Reason: "remove firewall rules"},
 
 	// Crontab manipulation
-	{regexp.MustCompile(`crontab\s+-r`), "remove crontab"},
-	{regexp.MustCompile(`crontab\s+-e`), "edit crontab"},
-	{regexp.MustCompile(`>\s*/etc/cron`), "modify cron files"},
-	{regexp.MustCompile(`>\s*/var/spool/cron`), "modify cron spool"},
+	{Pattern: regexp.MustCompile(`crontab\s+-r`), Reason: "remove crontab"},
+	{Pattern: regexp.MustCompile(`crontab\s+-e`), Reason: "edit crontab"},
+	{Pattern: regexp.MustCompile(`>\s*/etc/cron`), Reason: "modify cron files"},
+	{Pattern: regexp.MustCompile(`>\s*/var/spool/cron`), Reason: "modify cron spool"},
 }
 
+// MaxCommandLength is the maximum length of a command that will be processed.
+// Commands exceeding this length are considered dangerous to prevent ReDoS attacks.
+const MaxCommandLength = 10000
+
 // IsDangerousCommand checks if a command matches any dangerous patterns.
-// Special case: writing to /dev/null is allowed as it's a common pattern
-// for suppressing output.
+// Special case: writing to /dev/null is allowed for patterns with AllowDevNull set.
+// Commands exceeding MaxCommandLength are rejected to prevent ReDoS attacks.
 // Returns (true, reason) if dangerous, (false, "") if safe.
 func IsDangerousCommand(cmd string) (bool, string) {
+	// Prevent ReDoS attacks with overly long input
+	if len(cmd) > MaxCommandLength {
+		return true, "command exceeds maximum safe length"
+	}
+
 	for _, dp := range DangerousPatterns {
 		if dp.Pattern.MatchString(cmd) {
-			// Allow writes to /dev/null (common pattern for suppressing output)
-			if strings.Contains(dp.Reason, "write to") && strings.Contains(cmd, "/dev/null") {
+			// Allow writes to /dev/null for patterns that permit it
+			if dp.AllowDevNull && strings.Contains(cmd, "/dev/null") {
 				continue
 			}
 			return true, dp.Reason

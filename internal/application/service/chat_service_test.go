@@ -336,8 +336,8 @@ func TestChatService_ModeIntegration(t *testing.T) {
 		toolCall := port.ToolCallInfo{
 			ToolID:    "tool_123",
 			ToolName:  "bash",
-			Input:     map[string]interface{}{"command": "ls -la"},
-			InputJSON: `{"command":"ls -la"}`,
+			Input:     map[string]interface{}{"command": "ls -la", "dangerous": false},
+			InputJSON: `{"command":"ls -la","dangerous":false}`,
 		}
 
 		aiProvider := &mockAIProviderForChat{

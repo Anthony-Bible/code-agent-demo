@@ -274,13 +274,35 @@ func TestIsDangerousCommand(t *testing.T) {
 			wantReason:  "",
 			description: "should allow safe git command",
 		},
+
+		// Max length validation (ReDoS protection)
+		{
+			name:        "command exceeds max length",
+			cmd:         "ls " + string(make([]byte, MaxCommandLength)),
+			wantDanger:  true,
+			wantReason:  "command exceeds maximum safe length",
+			description: "should reject commands exceeding max length",
+		},
+		{
+			name:        "command at max length boundary",
+			cmd:         string(make([]byte, MaxCommandLength)),
+			wantDanger:  false,
+			wantReason:  "",
+			description: "should allow commands at exactly max length",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gotDanger, gotReason := IsDangerousCommand(tt.cmd)
 			if gotDanger != tt.wantDanger {
-				t.Errorf("IsDangerousCommand(%q) danger = %v, want %v (%s)", tt.cmd, gotDanger, tt.wantDanger, tt.description)
+				t.Errorf(
+					"IsDangerousCommand(%q) danger = %v, want %v (%s)",
+					tt.cmd,
+					gotDanger,
+					tt.wantDanger,
+					tt.description,
+				)
 			}
 			if tt.wantDanger && gotReason != tt.wantReason {
 				t.Errorf("IsDangerousCommand(%q) reason = %q, want %q", tt.cmd, gotReason, tt.wantReason)
@@ -293,9 +315,9 @@ func TestIsCommandBlocked(t *testing.T) {
 	blockedPatterns := []string{"rm -rf", "dd if=", "mkfs"}
 
 	tests := []struct {
-		name    string
-		cmd     string
-		want    bool
+		name string
+		cmd  string
+		want bool
 	}{
 		{"rm -rf blocked", "rm -rf /", true},
 		{"dd if blocked", "dd if=/dev/zero of=/dev/sda", true},
