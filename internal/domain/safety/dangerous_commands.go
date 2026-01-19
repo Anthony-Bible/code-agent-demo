@@ -47,12 +47,12 @@ var DangerousPatterns = []DangerousPattern{
 	{Pattern: regexp.MustCompile(`>\s*/dev/hd`), Reason: "write to disk device", AllowDevNull: true},
 
 	// Fork bomb and resource exhaustion
-	{Pattern: regexp.MustCompile(`:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;`), Reason: "fork bomb"},
+	{Pattern: regexp.MustCompile(`:\(\)\s*\{[^}]*:\s*\|\s*:[^}]*&[^}]*\}`), Reason: "fork bomb"},
 	{Pattern: regexp.MustCompile(`\$\(:\)\{\s*:\|:&`), Reason: "fork bomb variant"},
 
 	// Network attacks
-	{Pattern: regexp.MustCompile(`curl\s+.*\|\s*(ba)?sh`), Reason: "remote code execution"},
-	{Pattern: regexp.MustCompile(`wget\s+.*\|\s*(ba)?sh`), Reason: "remote code execution"},
+	{Pattern: regexp.MustCompile(`curl\s+.*\|\s*(/usr)?(/bin/)?(ba)?sh`), Reason: "remote code execution"},
+	{Pattern: regexp.MustCompile(`wget\s+.*\|\s*(/usr)?(/bin/)?(ba)?sh`), Reason: "remote code execution"},
 	{Pattern: regexp.MustCompile(`curl\s+.*-o\s*/`), Reason: "download to system path"},
 
 	// System modification
@@ -66,7 +66,7 @@ var DangerousPatterns = []DangerousPattern{
 	{Pattern: regexp.MustCompile(`shred\s+.*history`), Reason: "shred history file"},
 
 	// Process manipulation
-	{Pattern: regexp.MustCompile(`kill\s+-9\s+-1`), Reason: "kill all processes"},
+	{Pattern: regexp.MustCompile(`kill\s+(-9|-KILL|-SIGKILL)\s+(--\s+)?-1`), Reason: "kill all processes"},
 	{Pattern: regexp.MustCompile(`pkill\s+-9\s+-1`), Reason: "kill all processes"},
 	{Pattern: regexp.MustCompile(`killall\s+-9`), Reason: "kill all processes by name"},
 
