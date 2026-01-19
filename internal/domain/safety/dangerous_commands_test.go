@@ -315,6 +315,117 @@ func TestIsDangerousCommand(t *testing.T) {
 			description: "should detect crontab edit",
 		},
 
+		// Environment variable manipulation
+		{
+			name:        "LD_PRELOAD injection",
+			cmd:         "export LD_PRELOAD=/tmp/evil.so",
+			wantDanger:  true,
+			wantReason:  "LD_PRELOAD code injection",
+			description: "should detect LD_PRELOAD code injection",
+		},
+		{
+			name:        "PATH hijacking with tmp",
+			cmd:         "export PATH=/tmp:$PATH",
+			wantDanger:  true,
+			wantReason:  "PATH binary hijacking",
+			description: "should detect PATH hijacking to tmp directory",
+		},
+		{
+			name:        "safe PATH export",
+			cmd:         "export PATH=/usr/local/bin:$PATH",
+			wantDanger:  false,
+			wantReason:  "",
+			description: "should allow safe PATH modifications",
+		},
+
+		// Package manager abuse
+		{
+			name:        "apt-get remove systemd with purge flag",
+			cmd:         "apt-get remove --purge systemd",
+			wantDanger:  true,
+			wantReason:  "destructive package removal",
+			description: "should detect destructive apt-get remove with --purge flag",
+		},
+		{
+			name:        "apt remove glibc",
+			cmd:         "apt remove libc6",
+			wantDanger:  true,
+			wantReason:  "critical package removal",
+			description: "should detect apt remove of critical package",
+		},
+		{
+			name:        "yum erase glibc",
+			cmd:         "yum erase glibc",
+			wantDanger:  true,
+			wantReason:  "critical package removal",
+			description: "should detect yum erase of critical package",
+		},
+		{
+			name:        "dnf remove systemd",
+			cmd:         "dnf remove systemd",
+			wantDanger:  true,
+			wantReason:  "critical package removal",
+			description: "should detect dnf remove of critical package",
+		},
+		{
+			name:        "safe apt install",
+			cmd:         "apt-get install nginx",
+			wantDanger:  false,
+			wantReason:  "",
+			description: "should allow safe apt install",
+		},
+		{
+			name:        "safe yum install",
+			cmd:         "yum install httpd",
+			wantDanger:  false,
+			wantReason:  "",
+			description: "should allow safe yum install",
+		},
+
+		// Container escapes
+		{
+			name:        "docker run privileged",
+			cmd:         "docker run --privileged ubuntu bash",
+			wantDanger:  true,
+			wantReason:  "privileged container (container escape risk)",
+			description: "should detect docker run --privileged",
+		},
+		{
+			name:        "docker run privileged with other flags",
+			cmd:         "docker run -it --privileged --rm alpine",
+			wantDanger:  true,
+			wantReason:  "privileged container (container escape risk)",
+			description: "should detect --privileged anywhere in docker run",
+		},
+		{
+			name:        "nsenter to init",
+			cmd:         "nsenter --target 1 --mount --uts --ipc --net --pid",
+			wantDanger:  true,
+			wantReason:  "nsenter to init process (container escape)",
+			description: "should detect nsenter targeting init process",
+		},
+		{
+			name:        "nsenter short flag to init",
+			cmd:         "nsenter -t 1 -m -u -i -n -p",
+			wantDanger:  true,
+			wantReason:  "nsenter to init process (container escape)",
+			description: "should detect nsenter -t 1 (short flag)",
+		},
+		{
+			name:        "safe docker run",
+			cmd:         "docker run -it ubuntu bash",
+			wantDanger:  false,
+			wantReason:  "",
+			description: "should allow safe docker run without privileged",
+		},
+		{
+			name:        "safe nsenter",
+			cmd:         "nsenter --target 12345 --mount",
+			wantDanger:  false,
+			wantReason:  "",
+			description: "should allow nsenter to non-init processes",
+		},
+
 		// Safe commands
 		{
 			name:        "safe ls command",

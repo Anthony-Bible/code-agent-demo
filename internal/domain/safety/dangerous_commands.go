@@ -88,6 +88,38 @@ var DangerousPatterns = []DangerousPattern{
 	{Pattern: regexp.MustCompile(`crontab\s+-e`), Reason: "edit crontab"},
 	{Pattern: regexp.MustCompile(`>\s*/etc/cron`), Reason: "modify cron files"},
 	{Pattern: regexp.MustCompile(`>\s*/var/spool/cron`), Reason: "modify cron spool"},
+
+	// Environment variable manipulation (code injection / binary hijacking)
+	{Pattern: regexp.MustCompile(`export\s+LD_PRELOAD=`), Reason: "LD_PRELOAD code injection"},
+	{Pattern: regexp.MustCompile(`export\s+PATH=(/tmp|/var/tmp|/dev/shm)`), Reason: "PATH binary hijacking"},
+
+	// Package manager abuse (destructive package operations)
+	{
+		Pattern: regexp.MustCompile(
+			`apt(-get)?\s+(remove|purge)\s+.*--(purge|auto-remove).*\s+(systemd|glibc|libc6|coreutils|bash)`,
+		),
+		Reason: "destructive package removal",
+	},
+	{
+		Pattern: regexp.MustCompile(`apt(-get)?\s+(remove|purge)\s+(systemd|glibc|libc6|coreutils|bash)`),
+		Reason:  "critical package removal",
+	},
+	{
+		Pattern: regexp.MustCompile(`yum\s+(erase|remove)\s+(glibc|systemd|coreutils|bash)`),
+		Reason:  "critical package removal",
+	},
+	{
+		Pattern: regexp.MustCompile(`dnf\s+(erase|remove)\s+(glibc|systemd|coreutils|bash)`),
+		Reason:  "critical package removal",
+	},
+
+	// Container escapes
+	{
+		Pattern: regexp.MustCompile(`docker\s+run\s+.*--privileged`),
+		Reason:  "privileged container (container escape risk)",
+	},
+	{Pattern: regexp.MustCompile(`nsenter\s+.*--target\s+1\s+`), Reason: "nsenter to init process (container escape)"},
+	{Pattern: regexp.MustCompile(`nsenter\s+.*-t\s*1\s+`), Reason: "nsenter to init process (container escape)"},
 }
 
 // MaxCommandLength is the maximum length of a command that will be processed.
@@ -160,6 +192,12 @@ func DefaultBlockedCommandStrings() []string {
 		"iptables -F",
 		"ufw disable",
 		"crontab -r",
+		"export LD_PRELOAD=",
+		"apt remove systemd",
+		"apt-get remove systemd",
+		"yum erase glibc",
+		"docker run --privileged",
+		"nsenter --target 1",
 	}
 }
 
