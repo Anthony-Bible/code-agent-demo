@@ -15,127 +15,291 @@ type DangerousPattern struct {
 	AllowDevNull bool // If true, writing to /dev/null is permitted for this pattern
 }
 
+// MustDangerous creates a DangerousPattern from a regex pattern string.
+// Panics if pattern is invalid (should be caught in tests).
+func MustDangerous(pattern, reason string) DangerousPattern {
+	return DangerousPattern{
+		Pattern: regexp.MustCompile(pattern),
+		Reason:  reason,
+	}
+}
+
+// MustDangerousDevNull creates a DangerousPattern that allows /dev/null.
+// Panics if pattern is invalid (should be caught in tests).
+func MustDangerousDevNull(pattern, reason string) DangerousPattern {
+	return DangerousPattern{
+		Pattern:      regexp.MustCompile(pattern),
+		Reason:       reason,
+		AllowDevNull: true,
+	}
+}
+
+// MustCmdWithFlags creates a DangerousPattern for a command with dangerous flags.
+// Pattern format: `(?i){cmd}\s+.*{flagPattern}`
+// Panics if pattern is invalid (should be caught in tests).
+func MustCmdWithFlags(cmd, flagPattern, reason string) DangerousPattern {
+	pattern := `(?i)` + regexp.QuoteMeta(cmd) + `\s+.*` + flagPattern
+	return DangerousPattern{
+		Pattern: regexp.MustCompile(pattern),
+		Reason:  reason,
+	}
+}
+
 // DangerousPatterns contains all patterns for detecting dangerous commands.
 // This is the single source of truth for dangerous command detection across
 // the investigation agent and interactive mode.
 //
+// Security Context: Each pattern is documented with its attack vector and potential impact.
+// These patterns protect against common attack vectors identified in OWASP, MITRE ATT&CK,
+// and real-world incident reports.
+//
 //nolint:gochecknoglobals // This is intentionally a package-level constant for dangerous command detection
 var DangerousPatterns = []DangerousPattern{
-	// Destructive file operations
-	{Pattern: regexp.MustCompile(`rm\s+(-\w+\s+)*[/~*]`), Reason: "destructive rm command"},
-	{Pattern: regexp.MustCompile(`rm\s+-rf\b`), Reason: "recursive force delete"},
+	// === Destructive file operations ===
+	// Attack: Data destruction, system sabotage
+	// Impact: Permanent data loss, system unusable, potential business continuity disaster
 
-	// Privilege escalation
-	{Pattern: regexp.MustCompile(`sudo\s+`), Reason: "sudo command"},
-	{Pattern: regexp.MustCompile(`su\s+-`), Reason: "switch user command"},
-	{Pattern: regexp.MustCompile(`doas\s+`), Reason: "doas privilege escalation"},
+	// rm with path wildcards can recursively delete critical system or user data
+	MustDangerous(`rm\s+(-\w+\s+)*[/~*]`, "destructive rm command"),
+	// rm -rf bypasses prompts and recursively deletes; common in "rm -rf /" attacks
+	MustDangerous(`rm\s+-rf\b`, "recursive force delete"),
 
-	// Insecure permissions and ownership
-	{Pattern: regexp.MustCompile(`chmod\s+(-R\s+)?777`), Reason: "insecure chmod"},
-	{Pattern: regexp.MustCompile(`chown\s+(-R\s+)?root`), Reason: "change ownership to root"},
-	{Pattern: regexp.MustCompile(`chown\s+-R\s+\S+\s+/`), Reason: "recursive ownership change on root"},
+	// === Privilege escalation ===
+	// Attack: Vertical privilege escalation, bypass access controls
+	// Impact: Full system compromise, ability to execute any command as root
 
-	// Filesystem operations
-	{Pattern: regexp.MustCompile(`mkfs\.`), Reason: "filesystem format"},
-	{Pattern: regexp.MustCompile(`fdisk\s+`), Reason: "disk partitioning"},
-	{Pattern: regexp.MustCompile(`parted\s+`), Reason: "disk partitioning"},
+	// sudo grants temporary root access; attackers use it to escalate from user to root
+	MustDangerous(`sudo\s+`, "sudo command"),
+	// su - opens a root login shell; enables persistent elevated access
+	MustDangerous(`su\s+-`, "switch user command"),
+	// doas is BSD's sudo equivalent; same privilege escalation risks
+	MustDangerous(`doas\s+`, "doas privilege escalation"),
 
-	// Low-level disk operations
-	{Pattern: regexp.MustCompile(`dd\s+if=`), Reason: "low-level disk operation"},
-	{Pattern: regexp.MustCompile(`>\s*/dev/sd`), Reason: "write to disk device", AllowDevNull: true},
-	{Pattern: regexp.MustCompile(`>\s*/dev/nvme`), Reason: "write to nvme device", AllowDevNull: true},
-	{Pattern: regexp.MustCompile(`>\s*/dev/hd`), Reason: "write to disk device", AllowDevNull: true},
+	// === Insecure permissions and ownership ===
+	// Attack: Permission weakening, ownership hijacking
+	// Impact: Any user/process can read/write/execute files, enabling data theft or code injection
 
-	// Fork bomb and resource exhaustion
-	{Pattern: regexp.MustCompile(`:\(\)\s*\{[^}]*:\s*\|\s*:[^}]*&[^}]*\}`), Reason: "fork bomb"},
-	{Pattern: regexp.MustCompile(`\$\(:\)\{\s*:\|:&`), Reason: "fork bomb variant"},
+	// chmod 777 grants all permissions to everyone; exposes files to unauthorized modification
+	MustDangerous(`chmod\s+(-R\s+)?777`, "insecure chmod"),
+	// chown root can transfer ownership to root, potentially locking out legitimate owners
+	MustDangerous(`chown\s+(-R\s+)?root`, "change ownership to root"),
+	// Recursive chown on / can change ownership of all system files
+	MustDangerous(`chown\s+-R\s+\S+\s+/`, "recursive ownership change on root"),
 
-	// Network attacks
-	{Pattern: regexp.MustCompile(`curl\s+.*\|\s*(/usr)?(/bin/)?(ba)?sh`), Reason: "remote code execution"},
-	{Pattern: regexp.MustCompile(`wget\s+.*\|\s*(/usr)?(/bin/)?(ba)?sh`), Reason: "remote code execution"},
-	{Pattern: regexp.MustCompile(`curl\s+.*-o\s*/`), Reason: "download to system path"},
+	// === Filesystem operations ===
+	// Attack: Disk destruction, filesystem corruption
+	// Impact: Complete data loss on target partition, requires full reinstall/restore
 
-	// System modification
-	{Pattern: regexp.MustCompile(`>\s*/etc/passwd`), Reason: "modify passwd file"},
-	{Pattern: regexp.MustCompile(`>\s*/etc/shadow`), Reason: "modify shadow file"},
-	{Pattern: regexp.MustCompile(`>\s*/etc/sudoers`), Reason: "modify sudoers file"},
+	// mkfs creates new filesystem, destroying all existing data on the device
+	MustDangerous(`mkfs\.`, "filesystem format"),
+	// fdisk modifies partition tables; incorrect use destroys partition layout
+	MustDangerous(`fdisk\s+`, "disk partitioning"),
+	// parted can resize/delete partitions; data loss on misconfiguration
+	MustDangerous(`parted\s+`, "disk partitioning"),
 
-	// History manipulation (potential cover-up)
-	{Pattern: regexp.MustCompile(`history\s+-c`), Reason: "clear command history"},
-	{Pattern: regexp.MustCompile(`>\s*~/\.bash_history`), Reason: "clear bash history"},
-	{Pattern: regexp.MustCompile(`shred\s+.*history`), Reason: "shred history file"},
+	// === Low-level disk operations ===
+	// Attack: Direct disk overwrite, data destruction
+	// Impact: Bypasses filesystem protections, can overwrite boot sectors or entire drives
 
-	// Process manipulation
-	{Pattern: regexp.MustCompile(`kill\s+(-9|-KILL|-SIGKILL)\s+(--\s+)?-1`), Reason: "kill all processes"},
-	{Pattern: regexp.MustCompile(`pkill\s+-9\s+-1`), Reason: "kill all processes"},
-	{Pattern: regexp.MustCompile(`killall\s+-9`), Reason: "kill all processes by name"},
+	// dd with if= reads raw data and can overwrite disk blocks directly
+	MustDangerous(`dd\s+if=`, "low-level disk operation"),
+	// Direct writes to /dev/sd* overwrites disk sectors, bypassing filesystem
+	MustDangerousDevNull(`>\s*/dev/sd`, "write to disk device"),
+	// NVMe devices are modern SSDs; direct writes cause same damage as SATA drives
+	MustDangerousDevNull(`>\s*/dev/nvme`, "write to nvme device"),
+	// Legacy /dev/hd* devices (IDE disks); same direct write risks
+	MustDangerousDevNull(`>\s*/dev/hd`, "write to disk device"),
 
-	// Boot/system damage
-	{Pattern: regexp.MustCompile(`>\s*/boot/`), Reason: "modify boot files"},
-	{Pattern: regexp.MustCompile(`rm\s+.*(/boot/|/vmlinuz)`), Reason: "delete kernel files"},
+	// === Fork bomb and resource exhaustion ===
+	// Attack: Denial of Service (DoS), resource exhaustion
+	// Impact: System becomes unresponsive, requires hard reboot, potential data corruption
 
-	// Service manipulation
-	{Pattern: regexp.MustCompile(`systemctl\s+(stop|disable|mask)\s+`), Reason: "stop/disable system service"},
-	{Pattern: regexp.MustCompile(`service\s+\S+\s+stop`), Reason: "stop system service"},
+	// Classic fork bomb :(){ :|:& };: - exponentially spawns processes until system crashes
+	MustDangerous(`:\(\)\s*\{[^}]*:\s*\|\s*:[^}]*&[^}]*\}`, "fork bomb"),
+	// Variant fork bomb using $() syntax; same exponential process spawning
+	MustDangerous(`\$\(:\)\{\s*:\|:&`, "fork bomb variant"),
 
-	// Firewall manipulation
-	{Pattern: regexp.MustCompile(`iptables\s+(-F|--flush)`), Reason: "flush firewall rules"},
-	{Pattern: regexp.MustCompile(`ufw\s+disable`), Reason: "disable firewall"},
-	{Pattern: regexp.MustCompile(`firewall-cmd\s+.*--remove`), Reason: "remove firewall rules"},
+	// === Network attacks ===
+	// Attack: Remote Code Execution (RCE), supply chain attacks
+	// Impact: Arbitrary code execution, malware installation, full system compromise
 
-	// Crontab manipulation
-	{Pattern: regexp.MustCompile(`crontab\s+-r`), Reason: "remove crontab"},
-	{Pattern: regexp.MustCompile(`crontab\s+-e`), Reason: "edit crontab"},
-	{Pattern: regexp.MustCompile(`>\s*/etc/cron`), Reason: "modify cron files"},
-	{Pattern: regexp.MustCompile(`>\s*/var/spool/cron`), Reason: "modify cron spool"},
+	// curl | sh downloads and executes remote code without inspection; classic RCE vector
+	MustDangerous(`curl\s+.*\|\s*(/usr)?(/bin/)?(ba)?sh`, "remote code execution"),
+	// wget | sh same as curl; downloads and executes untrusted remote scripts
+	MustDangerous(`wget\s+.*\|\s*(/usr)?(/bin/)?(ba)?sh`, "remote code execution"),
+	// curl -o to system path can overwrite binaries or config files with malicious content
+	MustDangerous(`curl\s+.*-o\s*/`, "download to system path"),
 
-	// Environment variable manipulation (code injection / binary hijacking)
-	{Pattern: regexp.MustCompile(`export\s+LD_PRELOAD=`), Reason: "LD_PRELOAD code injection"},
-	{Pattern: regexp.MustCompile(`export\s+PATH=(/tmp|/var/tmp|/dev/shm)`), Reason: "PATH binary hijacking"},
+	// === System modification ===
+	// Attack: Authentication bypass, privilege escalation
+	// Impact: Unauthorized user creation, password changes, sudo access modification
 
-	// Package manager abuse (destructive package operations)
-	{
-		Pattern: regexp.MustCompile(
-			`apt(-get)?\s+(remove|purge)\s+.*--(purge|auto-remove).*\s+(systemd|glibc|libc6|coreutils|bash)`,
-		),
-		Reason: "destructive package removal",
-	},
-	{
-		Pattern: regexp.MustCompile(`apt(-get)?\s+(remove|purge)\s+(systemd|glibc|libc6|coreutils|bash)`),
-		Reason:  "critical package removal",
-	},
-	{
-		Pattern: regexp.MustCompile(`yum\s+(erase|remove)\s+(glibc|systemd|coreutils|bash)`),
-		Reason:  "critical package removal",
-	},
-	{
-		Pattern: regexp.MustCompile(`dnf\s+(erase|remove)\s+(glibc|systemd|coreutils|bash)`),
-		Reason:  "critical package removal",
-	},
+	// Writing to /etc/passwd can add users with arbitrary UIDs including root (UID 0)
+	MustDangerous(`>\s*/etc/passwd`, "modify passwd file"),
+	// /etc/shadow contains password hashes; modification enables authentication bypass
+	MustDangerous(`>\s*/etc/shadow`, "modify shadow file"),
+	// /etc/sudoers controls sudo access; modification can grant root to any user
+	MustDangerous(`>\s*/etc/sudoers`, "modify sudoers file"),
 
-	// Container escapes
-	{
-		Pattern: regexp.MustCompile(`docker\s+run\s+.*--privileged`),
-		Reason:  "privileged container (container escape risk)",
-	},
-	{Pattern: regexp.MustCompile(`nsenter\s+.*--target\s+1\s+`), Reason: "nsenter to init process (container escape)"},
-	{Pattern: regexp.MustCompile(`nsenter\s+.*-t\s*1\s+`), Reason: "nsenter to init process (container escape)"},
+	// === History manipulation ===
+	// Attack: Evidence tampering, forensic evasion
+	// Impact: Hides attacker activity, complicates incident response and forensics
+
+	// history -c clears shell command history, hiding evidence of malicious commands
+	MustDangerous(`history\s+-c`, "clear command history"),
+	// Redirecting to .bash_history overwrites/clears persistent command history
+	MustDangerous(`>\s*~/\.bash_history`, "clear bash history"),
+	// shred securely overwrites history files, making forensic recovery impossible
+	MustDangerous(`shred\s+.*history`, "shred history file"),
+
+	// === Process manipulation ===
+	// Attack: Denial of Service, system destabilization
+	// Impact: Kills critical processes, system crash, service outage
+
+	// kill -9 -1 sends SIGKILL to all processes; causes immediate system crash
+	MustDangerous(`kill\s+(-9|-KILL|-SIGKILL)\s+(--\s+)?-1`, "kill all processes"),
+	// pkill -9 -1 same effect using process name matching
+	MustDangerous(`pkill\s+-9\s+-1`, "kill all processes"),
+	// killall -9 kills all processes matching name; dangerous with common names
+	MustDangerous(`killall\s+-9`, "kill all processes by name"),
+
+	// === Boot/system damage ===
+	// Attack: System destruction, permanent boot failure
+	// Impact: System cannot boot, requires recovery media or reinstall
+
+	// Writing to /boot/ can corrupt bootloader, initramfs, or kernel images
+	MustDangerous(`>\s*/boot/`, "modify boot files"),
+	// Deleting kernel (vmlinuz) or boot files renders system unbootable
+	MustDangerous(`rm\s+.*(/boot/|/vmlinuz)`, "delete kernel files"),
+
+	// === Service manipulation ===
+	// Attack: Service disruption, security control bypass
+	// Impact: Critical services stop, security daemons disabled, system vulnerable
+
+	// systemctl stop/disable/mask can halt critical services (sshd, firewall, logging)
+	MustDangerous(`systemctl\s+(stop|disable|mask)\s+`, "stop/disable system service"),
+	// service stop halts services on SysV init systems; same risks as systemctl
+	MustDangerous(`service\s+\S+\s+stop`, "stop system service"),
+
+	// === Firewall manipulation ===
+	// Attack: Security control bypass, network exposure
+	// Impact: Firewall disabled, all ports exposed, network-based attacks enabled
+
+	// iptables -F flushes all rules, leaving system with no firewall protection
+	MustDangerous(`iptables\s+(-F|--flush)`, "flush firewall rules"),
+	// ufw disable turns off the firewall completely on Ubuntu/Debian systems
+	MustDangerous(`ufw\s+disable`, "disable firewall"),
+	// firewall-cmd --remove deletes specific rules, potentially exposing services
+	MustDangerous(`firewall-cmd\s+.*--remove`, "remove firewall rules"),
+
+	// === Crontab manipulation ===
+	// Attack: Persistence, scheduled malicious execution
+	// Impact: Attacker maintains access via scheduled tasks, or removes legitimate jobs
+
+	// crontab -r removes all user's cron jobs; can delete critical scheduled backups
+	MustDangerous(`crontab\s+-r`, "remove crontab"),
+	// crontab -e opens editor; can be used to add malicious scheduled commands
+	MustDangerous(`crontab\s+-e`, "edit crontab"),
+	// Writing to /etc/cron* can add system-wide scheduled malicious jobs
+	MustDangerous(`>\s*/etc/cron`, "modify cron files"),
+	// /var/spool/cron contains user crontabs; modification affects scheduled jobs
+	MustDangerous(`>\s*/var/spool/cron`, "modify cron spool"),
+
+	// === Environment variable manipulation ===
+	// Attack: Code injection, binary hijacking
+	// Impact: Malicious libraries loaded, legitimate commands replaced with trojans
+
+	// LD_PRELOAD loads shared library before others; enables code injection into any process
+	MustDangerous(`export\s+LD_PRELOAD=`, "LD_PRELOAD code injection"),
+	// PATH to /tmp etc. means trojaned binaries in those dirs execute instead of system ones
+	MustDangerous(`export\s+PATH=(/tmp|/var/tmp|/dev/shm)`, "PATH binary hijacking"),
+
+	// === Package manager abuse ===
+	// Attack: System destruction via package removal
+	// Impact: Critical libraries removed, system cannot function, requires reinstall
+
+	// Removing systemd/glibc/coreutils/bash with purge flags destroys the system
+	MustDangerous(
+		`apt(-get)?\s+(remove|purge)\s+.*--(purge|auto-remove).*\s+(systemd|glibc|libc6|coreutils|bash)`,
+		"destructive package removal",
+	),
+	// Direct removal of critical packages breaks nearly all system functionality
+	MustDangerous(`apt(-get)?\s+(remove|purge)\s+(systemd|glibc|libc6|coreutils|bash)`, "critical package removal"),
+	// yum on RHEL/CentOS; removing glibc/systemd bricks the system
+	MustDangerous(`yum\s+(erase|remove)\s+(glibc|systemd|coreutils|bash)`, "critical package removal"),
+	// dnf on Fedora/newer RHEL; same critical package removal risks
+	MustDangerous(`dnf\s+(erase|remove)\s+(glibc|systemd|coreutils|bash)`, "critical package removal"),
+
+	// === Container escapes ===
+	// Attack: Container breakout, host compromise
+	// Impact: Escape container isolation, gain access to host system and other containers
+
+	// --privileged disables container isolation; container has full host access
+	MustDangerous(`docker\s+run\s+.*--privileged`, "privileged container (container escape risk)"),
+	// nsenter to PID 1 enters host's init namespace from container; complete escape
+	MustDangerous(`nsenter\s+.*--target\s+1\s+`, "nsenter to init process (container escape)"),
+	// -t 1 is shorthand for --target 1; same container escape vector
+	MustDangerous(`nsenter\s+.*-t\s*1\s+`, "nsenter to init process (container escape)"),
+
+	// === Dangerous find command options ===
+	// Attack: Arbitrary code execution, uncontrolled file deletion
+	// Impact: -exec runs commands on found files; -delete removes files without confirmation
+
+	// find with -exec/-execdir/-delete/-ok/-okdir can execute or delete files
+	MustCmdWithFlags("find", FindDangerousFlags, "find with dangerous flags (-exec, -execdir, -delete, -ok, -okdir)"),
 }
 
-// MaxCommandLength is the maximum length of a command that will be processed.
-// Commands exceeding this length are considered dangerous to prevent ReDoS attacks.
-const MaxCommandLength = 10000
-
-// IsDangerousCommand checks if a command matches any dangerous patterns.
-// Special case: writing to /dev/null is allowed for patterns with AllowDevNull set.
-// Commands exceeding MaxCommandLength are rejected to prevent ReDoS attacks.
-// Returns (true, reason) if dangerous, (false, "") if safe.
-func IsDangerousCommand(cmd string) (bool, string) {
+// isDangerousCommandWithDepth checks if a command is dangerous with depth tracking.
+// This internal function tracks recursion depth to prevent stack overflow from
+// deeply nested command substitutions.
+func isDangerousCommandWithDepth(cmd string, depth int) (bool, string) {
 	// Prevent ReDoS attacks with overly long input
 	if len(cmd) > MaxCommandLength {
 		return true, "command exceeds maximum safe length"
 	}
 
+	// Check recursion depth
+	if depth >= MaxRecursionDepth {
+		return true, "command substitution nesting exceeds maximum depth"
+	}
+
+	// Check the command itself
+	if dangerous, reason := checkDangerousPatterns(cmd); dangerous {
+		return dangerous, reason
+	}
+
+	// Also check commands inside $() substitutions (depth-aware)
+	subCommands := ExtractDollarParenCommands(cmd)
+	for _, subCmd := range subCommands {
+		if dangerous, reason := isDangerousCommandWithDepth(subCmd, depth+1); dangerous {
+			return dangerous, reason
+		}
+	}
+
+	// Also check commands inside backtick substitutions (depth-aware)
+	backtickCommands := ExtractBacktickCommands(cmd)
+	for _, subCmd := range backtickCommands {
+		if dangerous, reason := isDangerousCommandWithDepth(subCmd, depth+1); dangerous {
+			return dangerous, reason
+		}
+	}
+
+	return false, ""
+}
+
+// IsDangerousCommand checks if a command matches any dangerous patterns.
+// Special case: writing to /dev/null is allowed for patterns with AllowDevNull set.
+// Commands exceeding MaxCommandLength are rejected to prevent ReDoS attacks.
+// Also recursively checks commands inside $() and backtick substitutions.
+// Recursion depth is limited to MaxRecursionDepth to prevent stack overflow.
+// Returns (true, reason) if dangerous, (false, "") if safe.
+func IsDangerousCommand(cmd string) (bool, string) {
+	return isDangerousCommandWithDepth(cmd, 0)
+}
+
+// checkDangerousPatterns checks if a command matches any dangerous patterns.
+// This is the core pattern matching logic used by IsDangerousCommand.
+func checkDangerousPatterns(cmd string) (bool, string) {
 	for _, dp := range DangerousPatterns {
 		if dp.Pattern.MatchString(cmd) {
 			// Allow writes to /dev/null for patterns that permit it
@@ -199,13 +363,4 @@ func DefaultBlockedCommandStrings() []string {
 		"docker run --privileged",
 		"nsenter --target 1",
 	}
-}
-
-// PatternReasons returns a map of pattern reasons for documentation/logging.
-func PatternReasons() map[string]string {
-	reasons := make(map[string]string)
-	for _, p := range DangerousPatterns {
-		reasons[p.Pattern.String()] = p.Reason
-	}
-	return reasons
 }
