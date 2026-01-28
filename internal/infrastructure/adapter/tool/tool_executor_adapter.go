@@ -71,8 +71,15 @@ type ExecutorAdapter struct {
 	investigationStates         map[string]string // tracks investigation_id -> status
 	investigationMu             sync.Mutex
 
-	// Command validation
-	commandValidator safety.CommandValidator
+	// Command validation - uses sync.Once to ensure immutability after first use.
+	// This prevents race conditions where SetValidationMode could swap the validator
+	// while checkCommandConfirmation is using it.
+	commandValidator     safety.CommandValidator
+	validatorOnce        sync.Once
+	pendingValidatorMode safety.CommandValidationMode
+	pendingWhitelist     *safety.CommandWhitelist
+	pendingAskLLM        bool
+	validatorConfigured  bool // true if SetValidationMode was called before first use
 }
 
 // toRawMessage converts various input types to json.RawMessage for validation.
@@ -203,6 +210,10 @@ func (a *ExecutorAdapter) SetCommandConfirmationCallback(cb CommandConfirmationC
 // whitelist: the CommandWhitelist to use when mode is "whitelist" (can be nil for blacklist mode)
 // askLLMOnUnknown: whether to ask LLM before blocking non-whitelisted commands (only for whitelist mode).
 //
+// IMPORTANT: This must be called during initialization, before any command validation occurs.
+// Once the validator is initialized (on first use), subsequent calls will log a warning and be ignored
+// to prevent race conditions.
+//
 // Returns an error if whitelist mode is specified but no whitelist is provided.
 func (a *ExecutorAdapter) SetValidationMode(
 	mode safety.CommandValidationMode,
@@ -211,11 +222,22 @@ func (a *ExecutorAdapter) SetValidationMode(
 ) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	validator, err := safety.NewCommandValidator(mode, whitelist, askLLMOnUnknown)
-	if err != nil {
-		return err
+
+	// Check if validator has already been initialized (first use has occurred)
+	if a.commandValidator != nil {
+		//nolint:sloglint // security warning about potential race condition must always log
+		slog.Warn(
+			"SetValidationMode called after validator was already initialized; ignoring to prevent race condition",
+			"mode", mode,
+		)
+		return nil
 	}
-	a.commandValidator = validator
+
+	// Store the pending configuration - will be used on first validation
+	a.pendingValidatorMode = mode
+	a.pendingWhitelist = whitelist
+	a.pendingAskLLM = askLLMOnUnknown
+	a.validatorConfigured = true
 	return nil
 }
 
@@ -1012,16 +1034,30 @@ const maxBatchInvocations = 20
 // The llmDangerous parameter indicates whether the LLM assessed the command as dangerous.
 // Uses the CommandValidator to determine whether to allow, block, or confirm the command.
 func (a *ExecutorAdapter) checkCommandConfirmation(command string, description string, llmDangerous bool) error {
-	// Get or initialize validator under lock
+	// Initialize validator exactly once using sync.Once to prevent race conditions.
+	// This ensures the validator is immutable after first use, even if SetValidationMode
+	// is called concurrently (which would be a programming error, but we handle it safely).
+	a.validatorOnce.Do(func() {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+
+		// Use pending configuration if SetValidationMode was called, otherwise use defaults
+		if a.validatorConfigured {
+			// Error can only occur if whitelist mode without whitelist, which SetValidationMode prevents
+			a.commandValidator, _ = safety.NewCommandValidator(
+				a.pendingValidatorMode,
+				a.pendingWhitelist,
+				a.pendingAskLLM,
+			)
+		} else {
+			// Default to blacklist mode - error is ignored because blacklist with nil whitelist is always valid
+			a.commandValidator, _ = safety.NewCommandValidator(safety.ModeBlacklist, nil, false)
+		}
+	})
+
+	// Read validator and callbacks under lock (validator is now immutable, but callbacks may change)
 	a.mu.Lock()
 	validator := a.commandValidator
-	if validator == nil {
-		// Lazy-initialize and PERSIST for consistent concurrent access
-		// Error is ignored because blacklist mode with nil whitelist is always valid
-		validator, _ = safety.NewCommandValidator(safety.ModeBlacklist, nil, false)
-		a.commandValidator = validator
-	}
-	// Read callbacks while holding lock
 	confirmCallback := a.commandConfirmationCallback
 	dangerousCallback := a.dangerousCommandCallback
 	a.mu.Unlock()

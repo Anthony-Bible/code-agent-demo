@@ -140,9 +140,10 @@ func (w *CommandWhitelist) IsAllowed(cmd string) (bool, string) {
 	return false, ""
 }
 
-// isAllowedWithPipesDepth is the depth-tracking internal version.
+// isAllowedWithPipesInternal is the depth and segment-tracking internal version.
 // Tracks recursion depth to prevent stack overflow from deeply nested substitutions.
-func (w *CommandWhitelist) isAllowedWithPipesDepth(cmd string, depth int) (bool, string) {
+// Tracks total segments processed to prevent DoS from commands with many segments at each level.
+func (w *CommandWhitelist) isAllowedWithPipesInternal(cmd string, depth int, totalSegments *int) (bool, string) {
 	// Apply same length limit as dangerous command detection for ReDoS protection
 	if len(cmd) > MaxCommandLength {
 		return false, ""
@@ -164,6 +165,12 @@ func (w *CommandWhitelist) isAllowedWithPipesDepth(cmd string, depth int) (bool,
 		return false, ""
 	}
 
+	// Check total segments limit to prevent DoS (e.g., 100 segments × 20 levels)
+	*totalSegments += len(segments)
+	if *totalSegments > MaxTotalSegments {
+		return false, "" // Reject commands with excessive total complexity
+	}
+
 	var descriptions []string
 	matchedCount := 0
 	for _, segment := range segments {
@@ -181,8 +188,8 @@ func (w *CommandWhitelist) isAllowedWithPipesDepth(cmd string, depth int) (bool,
 			descriptions = append(descriptions, desc)
 		}
 
-		// Validate commands inside substitutions ($() and backticks) with depth tracking
-		if !w.validateSubstitutionsWithDepth(segment, depth) {
+		// Validate commands inside substitutions ($() and backticks) with depth and segment tracking
+		if !w.validateSubstitutionsInternal(segment, depth, totalSegments) {
 			return false, ""
 		}
 	}
@@ -199,23 +206,29 @@ func (w *CommandWhitelist) isAllowedWithPipesDepth(cmd string, depth int) (bool,
 // All parts must be whitelisted for the command to be allowed.
 // Also recursively validates commands inside $() and backtick substitutions.
 // Recursion depth is limited to MaxRecursionDepth to prevent stack overflow.
+// Total segments across all levels is limited to MaxTotalSegments to prevent DoS.
 // Returns (true, description) if all parts allowed, (false, "") if any part is not allowed.
 func (w *CommandWhitelist) IsAllowedWithPipes(cmd string) (bool, string) {
-	return w.isAllowedWithPipesDepth(cmd, 0)
+	totalSegments := 0
+	return w.isAllowedWithPipesInternal(cmd, 0, &totalSegments)
 }
 
-// validateSubstitutionsWithDepth checks substitutions with depth tracking.
+// validateSubstitutionsInternal checks substitutions with depth and segment tracking.
 // Returns true if all substituted commands are allowed, false otherwise.
-func (w *CommandWhitelist) validateSubstitutionsWithDepth(segment string, depth int) bool {
+// Uses immediate extraction (non-recursive) to avoid double-counting nested substitutions,
+// since the recursive validation will handle deeper levels.
+func (w *CommandWhitelist) validateSubstitutionsInternal(segment string, depth int, totalSegments *int) bool {
 	if depth >= MaxRecursionDepth {
 		return false // Reject commands with excessive nesting
 	}
 
-	subCommands := ExtractDollarParenCommands(segment)
-	subCommands = append(subCommands, ExtractBacktickCommands(segment)...)
+	// Use immediate extraction to only get top-level substitutions.
+	// The recursive call to isAllowedWithPipesInternal will handle nested ones.
+	subCommands := ExtractImmediateDollarParenCommands(segment)
+	subCommands = append(subCommands, ExtractImmediateBacktickCommands(segment)...)
 
 	for _, subCmd := range subCommands {
-		if allowed, _ := w.isAllowedWithPipesDepth(subCmd, depth+1); !allowed {
+		if allowed, _ := w.isAllowedWithPipesInternal(subCmd, depth+1, totalSegments); !allowed {
 			return false
 		}
 	}

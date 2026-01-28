@@ -80,6 +80,13 @@ const (
 	// MaxRecursionDepth is the maximum nesting depth for command substitutions.
 	// Prevents stack overflow from deeply nested $() or backtick commands.
 	MaxRecursionDepth = 20
+
+	// MaxTotalSegments is the maximum total number of command segments processed
+	// across all recursion levels. This prevents DoS attacks using commands with
+	// many segments at each nesting level (e.g., 100 segments × 20 levels = exponential work).
+	// Set to a reasonable limit that allows legitimate complex commands while
+	// preventing abuse.
+	MaxTotalSegments = 500
 )
 
 // Error format templates for command validation messages.
@@ -193,6 +200,32 @@ func ExtractDollarParenCommands(cmd string) []string {
 	return extractDollarParenCommandsWithDepth(cmd, 0)
 }
 
+// extractImmediateDollarParenAction handles $() extraction without recursion.
+// Only extracts the immediate (top-level) $() substitutions, not nested ones.
+func extractImmediateDollarParenAction(cmd string, pos int, state quoteState, results *[]string) int {
+	if !isDollarParenStart(cmd, pos, state) {
+		return 0
+	}
+
+	// Find the matching closing paren
+	content, endPos := extractSingleDollarParen(cmd, pos+2, state)
+	if content != "" {
+		*results = append(*results, content)
+		// Do NOT recursively extract from nested content
+	}
+	if endPos > pos {
+		return endPos - pos + 1 // Skip past the $() we just processed
+	}
+	return 0
+}
+
+// ExtractImmediateDollarParenCommands extracts only immediate (top-level) $() substitutions.
+// Unlike ExtractDollarParenCommands, this does NOT recursively extract from nested content.
+// Use this when the caller will handle recursive validation separately.
+func ExtractImmediateDollarParenCommands(cmd string) []string {
+	return parseCommandWithQuoteAwareness(cmd, quoteCharsAll, extractImmediateDollarParenAction)
+}
+
 // extractSingleDollarParen extracts the content of a single $() starting at pos.
 // pos should point to the first character after "$(". Returns the content and the
 // position of the closing paren (or -1 if unbalanced).
@@ -281,6 +314,33 @@ func extractBacktickCommandsWithDepth(cmd string, depth int) []string {
 // Recursion depth is limited to MaxRecursionDepth to prevent stack overflow.
 func ExtractBacktickCommands(cmd string) []string {
 	return extractBacktickCommandsWithDepth(cmd, 0)
+}
+
+// extractImmediateBacktickAction handles backtick extraction without recursion.
+// Only extracts the immediate backtick substitutions, not nested $() inside them.
+func extractImmediateBacktickAction(cmd string, pos int, state quoteState, results *[]string) int {
+	c := cmd[pos]
+	// Look for backtick start - only outside single quotes
+	if c != '`' || state == quoteSingle {
+		return 0
+	}
+
+	content, endPos := extractSingleBacktick(cmd, pos+1)
+	if content != "" {
+		*results = append(*results, content)
+		// Do NOT recursively extract $() from inside backticks
+	}
+	if endPos > pos {
+		return endPos - pos + 1 // Skip past the backtick we just processed
+	}
+	return 0
+}
+
+// ExtractImmediateBacktickCommands extracts only immediate backtick substitutions.
+// Unlike ExtractBacktickCommands, this does NOT recursively extract $() from content.
+// Use this when the caller will handle recursive validation separately.
+func ExtractImmediateBacktickCommands(cmd string) []string {
+	return parseCommandWithQuoteAwareness(cmd, quoteCharsNoBacktick, extractImmediateBacktickAction)
 }
 
 // extractSingleBacktick extracts content between backticks.

@@ -125,6 +125,42 @@ func TestCommandWhitelist_IsAllowedWithPipes_ReDoSProtection(t *testing.T) {
 	}
 }
 
+func TestCommandWhitelist_IsAllowedWithPipes_MaxTotalSegments(t *testing.T) {
+	patterns := []WhitelistPattern{
+		{Pattern: regexp.MustCompile(`^ls(\s|$)`), Description: "list directory"},
+		{Pattern: regexp.MustCompile(`^echo(\s|$)`), Description: "echo"},
+	}
+	whitelist := NewCommandWhitelist(patterns)
+
+	// Build a command with more segments than MaxTotalSegments
+	// Using pipes to create many segments: "ls | ls | ls | ..."
+	segments := make([]string, MaxTotalSegments+10)
+	for i := range segments {
+		segments[i] = "ls"
+	}
+	manySegmentsCommand := strings.Join(segments, " | ")
+
+	allowed, desc := whitelist.IsAllowedWithPipes(manySegmentsCommand)
+	if allowed {
+		t.Errorf("expected command exceeding MaxTotalSegments to be rejected")
+	}
+	if desc != "" {
+		t.Errorf("expected empty description for rejected command, got %q", desc)
+	}
+
+	// Verify that a command just under the limit is still allowed
+	segmentsUnderLimit := make([]string, MaxTotalSegments-10)
+	for i := range segmentsUnderLimit {
+		segmentsUnderLimit[i] = "ls"
+	}
+	underLimitCommand := strings.Join(segmentsUnderLimit, " | ")
+
+	allowed, _ = whitelist.IsAllowedWithPipes(underLimitCommand)
+	if !allowed {
+		t.Errorf("expected command under MaxTotalSegments to be allowed")
+	}
+}
+
 func TestCommandWhitelist_IsAllowedWithPipes(t *testing.T) {
 	patterns := []WhitelistPattern{
 		{Pattern: regexp.MustCompile(`^ls(\s|$)`), Description: "list directory"},
