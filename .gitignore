@@ -16,3 +16,6 @@ data/*.db-wal
 # Log files
 *.log
 logs/*.log
+
+# Code review files
+REVIEW-*.md

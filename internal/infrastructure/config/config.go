@@ -65,21 +65,40 @@ type Config struct {
 	// Dangerous commands are still blocked.
 	// Defaults to false (all commands require confirmation).
 	AutoApproveSafeCommands bool
+
+	// CommandValidationMode determines how commands are validated.
+	// "blacklist" (default): blocks dangerous commands, allows everything else
+	// "whitelist": only allows explicitly whitelisted commands
+	CommandValidationMode string
+
+	// CommandWhitelistJSON is a JSON array of whitelist patterns with optional excludes.
+	// Format: [{"pattern": "regex", "exclude": "regex", "description": "text"}]
+	// Each entry must have a "pattern" field; "exclude" and "description" are optional.
+	CommandWhitelistJSON string
+
+	// AskLLMOnUnknown determines whether to ask the LLM to evaluate
+	// non-whitelisted commands before blocking them.
+	// Only applies in whitelist mode.
+	// Defaults to true.
+	AskLLMOnUnknown bool
 }
 
 // Defaults returns a Config struct with all default values set.
 func Defaults() *Config {
 	return &Config{
-		AIModel:           "hf:zai-org/GLM-4.6",
-		MaxTokens:         20000,
-		WorkingDir:        ".",
-		WelcomeMessage:    "Chat with Claude (use 'ctrl+c' to quit)",
-		GoodbyeMessage:    "Bye!",
-		HistoryFile:       "~/.code-editing-agent-history",
-		HistoryMaxEntries: 1000,
-		ExtendedThinking:  false,
-		ThinkingBudget:    10000,
-		ShowThinking:      false,
+		AIModel:               "hf:zai-org/GLM-4.6",
+		MaxTokens:             20000,
+		WorkingDir:            ".",
+		WelcomeMessage:        "Chat with Claude (use 'ctrl+c' to quit)",
+		GoodbyeMessage:        "Bye!",
+		HistoryFile:           "~/.code-editing-agent-history",
+		HistoryMaxEntries:     1000,
+		ExtendedThinking:      false,
+		ThinkingBudget:        10000,
+		ShowThinking:          false,
+		CommandValidationMode: "blacklist",
+		CommandWhitelistJSON:  "",
+		AskLLMOnUnknown:       true,
 	}
 }
 
@@ -146,6 +165,21 @@ func LoadConfig() *Config {
 	}
 	if viper.IsSet("thinking.show") {
 		cfg.ShowThinking = viper.GetBool("thinking.show")
+	}
+
+	// Command validation mode: "blacklist" (default) or "whitelist"
+	if viper.IsSet("command_validation_mode") {
+		cfg.CommandValidationMode = viper.GetString("command_validation_mode")
+	}
+
+	// Command whitelist: JSON array of patterns with optional excludes
+	if val, ok := os.LookupEnv("AGENT_COMMAND_WHITELIST_JSON"); ok && val != "" {
+		cfg.CommandWhitelistJSON = val
+	}
+
+	// Ask LLM on unknown: whether to ask LLM before blocking non-whitelisted commands
+	if viper.IsSet("ask_llm_on_unknown") {
+		cfg.AskLLMOnUnknown = viper.GetBool("ask_llm_on_unknown")
 	}
 
 	return cfg
