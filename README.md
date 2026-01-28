@@ -296,8 +296,96 @@ Thinking budget set to 15000 tokens
 
 **Built-in Safety Features:**
 - **Path Traversal Protection**: All file operations are sandboxed within the working directory
+- **Command Validation Modes**: Blacklist (default) or whitelist approach for bash commands
 - **Dangerous Command Detection**: Commands like `rm -rf`, `dd`, format operations require confirmation
 - **Graceful Shutdown**: Double Ctrl+C to exit, single press shows help message
+
+#### Command Validation Modes
+
+The agent supports two modes for validating bash commands:
+
+**Blacklist Mode (Default):** Blocks known dangerous commands while allowing everything else. Dangerous patterns include destructive operations (`rm -rf /`), privilege escalation (`sudo`), and network piping (`curl | bash`).
+
+**Whitelist Mode:** Only allows explicitly whitelisted read-only commands. Enable with:
+```bash
+export AGENT_COMMAND_VALIDATION_MODE=whitelist
+```
+
+Default whitelisted commands include:
+- File reading: `ls`, `cat`, `head`, `tail`, `less`, `wc`
+- Search: `grep`, `rg`, `find`, `fd`, `which`
+- Git (read-only): `git status`, `git log`, `git diff`, `git show`
+- System info: `pwd`, `whoami`, `ps`, `df`, `du`
+- Container (read-only): `docker ps`, `kubectl get`
+
+Write operations (`mkdir`, `rm`, `git push`, `npm install`) are NOT whitelisted by default. Some commands use exclude patterns to block dangerous flags while allowing safe usage.
+
+**Adding Custom Whitelist Patterns:**
+
+Use the `AGENT_COMMAND_WHITELIST_JSON` environment variable with a JSON array of pattern objects:
+
+```bash
+# Allow a single custom command
+export AGENT_COMMAND_WHITELIST_JSON='[
+  {"pattern": "^my-safe-tool(\\s|$)", "description": "my safe tool"}
+]'
+
+# Allow multiple custom commands
+export AGENT_COMMAND_WHITELIST_JSON='[
+  {"pattern": "^my-tool(\\s|$)", "description": "my tool"},
+  {"pattern": "^another-tool\\s", "description": "another tool"},
+  {"pattern": "^make\\s+test", "description": "make test target"}
+]'
+
+# Allow go build and go run (not in default whitelist)
+export AGENT_COMMAND_WHITELIST_JSON='[
+  {"pattern": "^go\\s+build(\\s|$)", "description": "go build"},
+  {"pattern": "^go\\s+run\\s", "description": "go run"}
+]'
+
+# Allow npm install for a specific project
+export AGENT_COMMAND_WHITELIST_JSON='[
+  {"pattern": "^npm\\s+install(\\s|$)", "description": "npm install"}
+]'
+```
+
+Each entry in the JSON array supports:
+- `pattern` (required): Regex pattern to match commands
+- `exclude_pattern` (optional): Regex pattern to block even if the main pattern matches
+- `description` (optional): Human-readable description of the pattern
+
+**Exclude Patterns:**
+
+Use `exclude_pattern` to allow a command while blocking dangerous flags:
+
+```bash
+# Allow find but block -exec, -delete, and similar dangerous flags
+export AGENT_COMMAND_WHITELIST_JSON='[
+  {
+    "pattern": "^find(\\s|$)",
+    "exclude_pattern": "(?i)(-exec\\s|-execdir\\s|-delete(\\s|$)|-ok\\s|-okdir\\s)",
+    "description": "find files (read-only)"
+  }
+]'
+```
+
+This allows `find . -name "*.go"` but blocks `find . -exec rm {} \;`. The `(?i)` prefix makes the exclusion case-insensitive.
+
+**Pattern syntax tips:**
+- `^command` - Match at start of line
+- `(\s|$)` - Match whitespace or end of string (for commands with or without args)
+- `\s+` - Match one or more whitespace characters
+- Patterns are Go regular expressions
+
+**Piped Commands:** In whitelist mode, piped commands (e.g., `ls | grep foo`) are validated by checking each segment independently. All segments must be whitelisted for the command to execute.
+
+**LLM Fallback:** When `AGENT_ASK_LLM_ON_UNKNOWN=true` (default), non-whitelisted commands prompt for user confirmation instead of being immediately blocked. Set to `false` for strict whitelist-only mode.
+
+**Investigation Mode:** Command validation applies consistently in both interactive chat and investigation/daemon mode. The same whitelist/blacklist configuration governs both modes, so security policies are enforced regardless of how the agent is running.
+
+**Security Note:** Environment variables (`$VAR`, `${VAR}`) are NOT expanded during validation. The whitelist checks literal command text, but shell expands variables at runtime. Be cautious with commands that may output sensitive environment data. Note that command substitutions (`$()` and backticks) ARE recursively validated.
+
+See CLAUDE.md for the complete list of default whitelisted commands and additional configuration options.
 
 ### Skills
 
@@ -419,6 +507,11 @@ export AGENT_HISTORY_MAX_ENTRIES=500
 export AGENT_THINKING_ENABLED=true
 export AGENT_THINKING_BUDGET=10000
 export AGENT_SHOW_THINKING=false
+
+# Command validation (security)
+export AGENT_COMMAND_VALIDATION_MODE=whitelist  # or "blacklist" (default)
+export AGENT_COMMAND_WHITELIST_JSON='[{"pattern": "^custom-cmd\\s", "description": "custom command"}]'
+export AGENT_ASK_LLM_ON_UNKNOWN=true            # Ask before blocking non-whitelisted
 ```
 
 **Configuration options:**
@@ -430,10 +523,17 @@ export AGENT_SHOW_THINKING=false
 | `--thinking-budget` | `10000` | Token budget for thinking (min 1024) |
 | `--show-thinking` | `false` | Display AI's reasoning process |
 | `--workingDir` | `.` | Base directory for file operations |
-| `--welcomeMessage` | `Chat with Claude (use 'ctrl+c' to quit)` | Displayed on session start |
+| `--welcomeMessage` | `Chat with Claude...` | Displayed on session start |
 | `--goodbyeMessage` | `Bye!` | Displayed on session end |
 | `--historyFile` | `~/.agent-history` | Command history file location |
 | `--historyMaxEntries` | `1000` | Maximum history entries to keep |
+
+**Security configuration (environment variables only):**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENT_COMMAND_VALIDATION_MODE` | `blacklist` | `blacklist` or `whitelist` |
+| `AGENT_COMMAND_WHITELIST_JSON` | (none) | JSON array of additional regex patterns |
+| `AGENT_ASK_LLM_ON_UNKNOWN` | `true` | Ask LLM before blocking non-whitelisted commands |
 
 ## Development
 

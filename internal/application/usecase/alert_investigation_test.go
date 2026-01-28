@@ -27,10 +27,7 @@ func TestNewAlertInvestigationUseCase_NotNil(t *testing.T) {
 
 func TestNewAlertInvestigationUseCaseWithConfig_NotNil(t *testing.T) {
 	config := AlertInvestigationUseCaseConfig{
-		MaxActions:    20,
-		MaxDuration:   15 * time.Minute,
 		MaxConcurrent: 5,
-		AllowedTools:  []string{"bash", "read_file"},
 	}
 
 	uc := NewAlertInvestigationUseCaseWithConfig(config)
@@ -114,8 +111,9 @@ func TestAlertInvestigationUseCase_HandleAlert_CancelledContext(t *testing.T) {
 }
 
 func TestAlertInvestigationUseCase_HandleAlert_Timeout(t *testing.T) {
+	// Timeout is now enforced by SafetyEnforcer, not config
 	config := AlertInvestigationUseCaseConfig{
-		MaxDuration: 1 * time.Millisecond, // Very short timeout
+		MaxConcurrent: 1,
 	}
 
 	uc := NewAlertInvestigationUseCaseWithConfig(config)
@@ -253,7 +251,6 @@ func TestAlertInvestigationUseCase_StartInvestigation_IncrementsActiveCount(t *t
 func TestAlertInvestigationUseCase_StartInvestigation_MaxConcurrent(t *testing.T) {
 	config := AlertInvestigationUseCaseConfig{
 		MaxConcurrent: 2,
-		MaxDuration:   1 * time.Hour, // Long duration so they stay active
 	}
 
 	uc := NewAlertInvestigationUseCaseWithConfig(config)
@@ -473,15 +470,15 @@ func TestAlertInvestigationUseCase_ListActiveInvestigations_WithActive(t *testin
 // Tool/Command Safety Tests
 // =============================================================================
 
-func TestAlertInvestigationUseCase_IsToolAllowed_InConfig(t *testing.T) {
-	config := AlertInvestigationUseCaseConfig{
-		AllowedTools: []string{"bash", "read_file", "list_files"},
+func TestAlertInvestigationUseCase_IsToolAllowed_WithEnforcer(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
 	}
 
-	uc := NewAlertInvestigationUseCaseWithConfig(config)
-	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
-	}
+	// Create mock enforcer that allows bash and read_file
+	enforcer := NewMockSafetyEnforcerWithAllowedTools([]string{"bash", "read_file", "list_files"})
+	uc.SetSafetyEnforcer(enforcer)
 
 	if !uc.IsToolAllowed("bash") {
 		t.Error("IsToolAllowed('bash') = false, want true")
@@ -491,15 +488,15 @@ func TestAlertInvestigationUseCase_IsToolAllowed_InConfig(t *testing.T) {
 	}
 }
 
-func TestAlertInvestigationUseCase_IsToolAllowed_NotInConfig(t *testing.T) {
-	config := AlertInvestigationUseCaseConfig{
-		AllowedTools: []string{"bash", "read_file"},
+func TestAlertInvestigationUseCase_IsToolAllowed_NotAllowedByEnforcer(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
 	}
 
-	uc := NewAlertInvestigationUseCaseWithConfig(config)
-	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
-	}
+	// Create mock enforcer that only allows bash and read_file
+	enforcer := NewMockSafetyEnforcerWithAllowedTools([]string{"bash", "read_file"})
+	uc.SetSafetyEnforcer(enforcer)
 
 	if uc.IsToolAllowed("edit_file") {
 		t.Error("IsToolAllowed('edit_file') = true, want false")
@@ -509,15 +506,27 @@ func TestAlertInvestigationUseCase_IsToolAllowed_NotInConfig(t *testing.T) {
 	}
 }
 
-func TestAlertInvestigationUseCase_IsCommandBlocked_DangerousCommands(t *testing.T) {
-	config := AlertInvestigationUseCaseConfig{
-		BlockedCommands: []string{"rm -rf", "dd if=", "mkfs"},
+func TestAlertInvestigationUseCase_IsToolAllowed_NoEnforcer(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
 	}
 
-	uc := NewAlertInvestigationUseCaseWithConfig(config)
-	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
+	// Without an enforcer, all tools should be allowed (permissive default)
+	if !uc.IsToolAllowed("any_tool") {
+		t.Error("IsToolAllowed('any_tool') = false, want true when no enforcer")
 	}
+}
+
+func TestAlertInvestigationUseCase_IsCommandBlocked_WithEnforcer(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
+	}
+
+	// Create mock enforcer that blocks dangerous commands
+	enforcer := NewMockSafetyEnforcerWithBlockedCommands([]string{"rm -rf", "dd if=", "mkfs"})
+	uc.SetSafetyEnforcer(enforcer)
 
 	if !uc.IsCommandBlocked("rm -rf /") {
 		t.Error("IsCommandBlocked('rm -rf /') = false, want true")
@@ -528,20 +537,32 @@ func TestAlertInvestigationUseCase_IsCommandBlocked_DangerousCommands(t *testing
 }
 
 func TestAlertInvestigationUseCase_IsCommandBlocked_SafeCommands(t *testing.T) {
-	config := AlertInvestigationUseCaseConfig{
-		BlockedCommands: []string{"rm -rf", "dd if="},
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
 	}
 
-	uc := NewAlertInvestigationUseCaseWithConfig(config)
-	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
-	}
+	// Create mock enforcer that blocks specific patterns
+	enforcer := NewMockSafetyEnforcerWithBlockedCommands([]string{"rm -rf", "dd if="})
+	uc.SetSafetyEnforcer(enforcer)
 
 	if uc.IsCommandBlocked("ls -la") {
 		t.Error("IsCommandBlocked('ls -la') = true, want false")
 	}
 	if uc.IsCommandBlocked("top -b -n 1") {
 		t.Error("IsCommandBlocked('top -b -n 1') = true, want false")
+	}
+}
+
+func TestAlertInvestigationUseCase_IsCommandBlocked_NoEnforcer(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
+	}
+
+	// Without an enforcer, no commands should be blocked (permissive default)
+	if uc.IsCommandBlocked("rm -rf /") {
+		t.Error("IsCommandBlocked('rm -rf /') = true, want false when no enforcer")
 	}
 }
 
@@ -850,10 +871,7 @@ func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_BlockedCommand
 
 func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_ActionBudgetExhausted(t *testing.T) {
 	config := AlertInvestigationUseCaseConfig{
-		MaxActions:    3, // Very low action budget
-		MaxDuration:   15 * time.Minute,
 		MaxConcurrent: 5,
-		AllowedTools:  []string{"bash", "read_file"},
 	}
 
 	uc := NewAlertInvestigationUseCaseWithConfig(config)
@@ -861,7 +879,7 @@ func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_ActionBudgetEx
 		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
 	}
 
-	// Create a mock enforcer with the same low action budget
+	// Create a mock enforcer with low action budget (safety limits are now in SafetyEnforcer)
 	enforcer := NewMockSafetyEnforcerWithActionBudget(3)
 	if enforcer == nil {
 		t.Skip("NewMockSafetyEnforcerWithActionBudget() returned nil")
@@ -887,9 +905,7 @@ func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_ActionBudgetEx
 
 func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_Timeout(t *testing.T) {
 	config := AlertInvestigationUseCaseConfig{
-		MaxDuration:   50 * time.Millisecond, // Very short timeout
 		MaxConcurrent: 5,
-		AllowedTools:  []string{"bash", "read_file"},
 	}
 
 	uc := NewAlertInvestigationUseCaseWithConfig(config)
@@ -897,8 +913,8 @@ func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_Timeout(t *tes
 		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
 	}
 
-	// Create a mock enforcer that respects timeout
-	enforcer := NewMockSafetyEnforcer()
+	// Create a mock enforcer that triggers timeout (timeout is now enforced by SafetyEnforcer)
+	enforcer := NewMockSafetyEnforcerWithTimeout()
 	if enforcer == nil {
 		t.Skip("NewMockSafetyEnforcer() returned nil")
 	}
@@ -1243,9 +1259,7 @@ func TestAlertInvestigationUseCase_RunInvestigation_CleansUpTrackingOnError(t *t
 
 func TestAlertInvestigationUseCase_RunInvestigation_CleansUpTrackingOnTimeout(t *testing.T) {
 	config := AlertInvestigationUseCaseConfig{
-		MaxDuration:   1 * time.Millisecond, // Very short timeout to force timeout
 		MaxConcurrent: 5,
-		AllowedTools:  []string{"bash", "read_file"},
 	}
 
 	uc := NewAlertInvestigationUseCaseWithConfig(config)

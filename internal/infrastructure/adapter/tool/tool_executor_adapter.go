@@ -11,10 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -70,6 +70,16 @@ type ExecutorAdapter struct {
 	commandConfirmationCallback CommandConfirmationCallback
 	investigationStates         map[string]string // tracks investigation_id -> status
 	investigationMu             sync.Mutex
+
+	// Command validation - uses sync.Once to ensure immutability after first use.
+	// This prevents race conditions where SetValidationMode could swap the validator
+	// while checkCommandConfirmation is using it.
+	commandValidator     safety.CommandValidator
+	validatorOnce        sync.Once
+	pendingValidatorMode safety.CommandValidationMode
+	pendingWhitelist     *safety.CommandWhitelist
+	pendingAskLLM        bool
+	validatorConfigured  bool // true if SetValidationMode was called before first use
 }
 
 // toRawMessage converts various input types to json.RawMessage for validation.
@@ -98,16 +108,14 @@ func wrapFileOperationError(operation string, err error) error {
 
 	// Check for path traversal error in the error chain
 	if errors.Is(err, fileadapter.ErrPathTraversal) {
-		// Print a security warning to stderr
-		fmt.Fprintf(os.Stderr, "\x1b[91m[SECURITY WARNING] Path traversal attempt detected and blocked!\x1b[0m\n")
+		slog.Error("path traversal attempt detected and blocked") //nolint:sloglint // security warning must always log
 		return fmt.Errorf("%s blocked due to potential security threat: %w", operation, err)
 	}
 
 	// Check for PathValidationError which has detailed reason
 	var pathErr *fileadapter.PathValidationError
 	if errors.As(err, &pathErr) && pathErr.Reason == "path traversal attempt detected" {
-		// Print a security warning to stderr
-		fmt.Fprintf(os.Stderr, "\x1b[91m[SECURITY WARNING] Path traversal attempt detected and blocked!\x1b[0m\n")
+		slog.Error("path traversal attempt detected and blocked") //nolint:sloglint // security warning must always log
 		return fmt.Errorf("%s blocked due to potential security threat: %w", operation, err)
 	}
 
@@ -185,12 +193,52 @@ func (a *ExecutorAdapter) SetSubagentUseCase(uc SubagentUseCaseInterface) {
 
 // SetDangerousCommandCallback sets the callback for dangerous command confirmation.
 func (a *ExecutorAdapter) SetDangerousCommandCallback(cb DangerousCommandCallback) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.dangerousCommandCallback = cb
 }
 
 // SetCommandConfirmationCallback sets the callback for all command confirmation.
 func (a *ExecutorAdapter) SetCommandConfirmationCallback(cb CommandConfirmationCallback) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.commandConfirmationCallback = cb
+}
+
+// SetValidationMode configures command validation mode and whitelist.
+// mode: "blacklist" (default) or "whitelist"
+// whitelist: the CommandWhitelist to use when mode is "whitelist" (can be nil for blacklist mode)
+// askLLMOnUnknown: whether to ask LLM before blocking non-whitelisted commands (only for whitelist mode).
+//
+// IMPORTANT: This must be called during initialization, before any command validation occurs.
+// Once the validator is initialized (on first use), subsequent calls will log a warning and be ignored
+// to prevent race conditions.
+//
+// Returns an error if whitelist mode is specified but no whitelist is provided.
+func (a *ExecutorAdapter) SetValidationMode(
+	mode safety.CommandValidationMode,
+	whitelist *safety.CommandWhitelist,
+	askLLMOnUnknown bool,
+) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Check if validator has already been initialized (first use has occurred)
+	if a.commandValidator != nil {
+		//nolint:sloglint // security warning about potential race condition must always log
+		slog.Warn(
+			"SetValidationMode called after validator was already initialized; ignoring to prevent race condition",
+			"mode", mode,
+		)
+		return nil
+	}
+
+	// Store the pending configuration - will be used on first validation
+	a.pendingValidatorMode = mode
+	a.pendingWhitelist = whitelist
+	a.pendingAskLLM = askLLMOnUnknown
+	a.validatorConfigured = true
+	return nil
 }
 
 // RegisterTool registers a new tool with the executor.
@@ -296,7 +344,7 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 			"properties": map[string]interface{}{
 				"path": map[string]interface{}{
 					"type":        "string",
-					"description": "The relative path to the file to read in the working directory..",
+					"description": "The relative path to the file to read in the working directory.",
 				},
 				"start_line": map[string]interface{}{
 					"type":        "integer",
@@ -653,7 +701,8 @@ func (a *ExecutorAdapter) buildActivateSkillDescription() string {
 
 	skills, err := a.skillManager.DiscoverSkills(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to discover skills for tool description: %v\n", err)
+		//nolint:sloglint // operational warning without context
+		slog.Warn("failed to discover skills for tool description", "error", err)
 		return baseDescription
 	}
 	if len(skills.Skills) == 0 {
@@ -981,50 +1030,130 @@ const defaultBashTimeout = 30 * time.Second
 // maxBatchInvocations is the maximum number of tool invocations allowed in a single batch.
 const maxBatchInvocations = 20
 
-// isDangerousCommand checks if a command matches any dangerous patterns.
-// Uses the shared safety package for pattern detection.
-// Special case: writing to /dev/null is allowed.
-func isDangerousCommand(cmd string) (bool, string) {
-	return safety.IsDangerousCommand(cmd)
-}
-
 // checkCommandConfirmation checks if a command should be allowed to execute.
 // The llmDangerous parameter indicates whether the LLM assessed the command as dangerous.
-// Commands are considered dangerous if EITHER the pattern detection OR the LLM says so.
-// If the LLM incorrectly marks a dangerous command as safe, the discrepancy is noted.
+// Uses the CommandValidator to determine whether to allow, block, or confirm the command.
 func (a *ExecutorAdapter) checkCommandConfirmation(command string, description string, llmDangerous bool) error {
-	patternDangerous, patternReason := isDangerousCommand(command)
-	isDangerous := patternDangerous
-	reason := patternReason
+	// Initialize validator exactly once using sync.Once to prevent race conditions.
+	// This ensures the validator is immutable after first use, even if SetValidationMode
+	// is called concurrently (which would be a programming error, but we handle it safely).
+	a.validatorOnce.Do(func() {
+		a.mu.Lock()
+		defer a.mu.Unlock()
 
-	// Check for LLM assessment discrepancy
-	if patternDangerous && !llmDangerous {
-		// LLM incorrectly marked a dangerous command as safe
-		reason = fmt.Sprintf("%s (WARNING: LLM failed to identify this as dangerous)", patternReason)
-	} else if llmDangerous && !patternDangerous {
-		// LLM correctly identified something we didn't catch
-		isDangerous = true
-		reason = "marked dangerous by AI"
+		// Use pending configuration if SetValidationMode was called, otherwise use defaults
+		if a.validatorConfigured {
+			// Error can only occur if whitelist mode without whitelist, which SetValidationMode prevents
+			a.commandValidator, _ = safety.NewCommandValidator(
+				a.pendingValidatorMode,
+				a.pendingWhitelist,
+				a.pendingAskLLM,
+			)
+		} else {
+			// Default to blacklist mode - error is ignored because blacklist with nil whitelist is always valid
+			a.commandValidator, _ = safety.NewCommandValidator(safety.ModeBlacklist, nil, false)
+		}
+	})
+
+	// Read validator and callbacks under lock (validator is now immutable, but callbacks may change)
+	a.mu.Lock()
+	validator := a.commandValidator
+	confirmCallback := a.commandConfirmationCallback
+	dangerousCallback := a.dangerousCommandCallback
+	a.mu.Unlock()
+
+	// Validate outside lock (validator is immutable after creation)
+	result := validator.Validate(command, llmDangerous)
+
+	// Determine whitelist mode from validator's actual mode, not from stale nil check
+	// This prevents TOCTOU race where another thread could change the validator
+	validatorImpl, isImpl := validator.(*safety.CommandValidatorImpl)
+	isWhitelistMode := isImpl && validatorImpl.Mode() == safety.ModeWhitelist
+
+	// If not allowed and doesn't need confirmation, it's a hard block (whitelist strict mode)
+	if !result.Allowed && !result.NeedsConfirm {
+		return fmt.Errorf(safety.ErrFmtWhitelistBlocked, command)
 	}
 
-	switch {
-	case a.commandConfirmationCallback != nil:
-		if !a.commandConfirmationCallback(command, isDangerous, reason, description) {
-			if isDangerous {
-				return fmt.Errorf("dangerous command denied by user: %s (%s)", reason, command)
-			}
-			return fmt.Errorf("command denied by user: %s", command)
-		}
-	case a.dangerousCommandCallback != nil && isDangerous:
-		// Backward compatibility: use old callback for dangerous commands
-		if !a.dangerousCommandCallback(command, reason) {
-			return fmt.Errorf("dangerous command denied by user: %s (%s)", reason, command)
-		}
-	case isDangerous:
-		// No callback set and command is dangerous - block it
-		return fmt.Errorf("dangerous command blocked: %s (%s)", reason, command)
+	// In whitelist mode: whitelisted commands bypass the callback entirely
+	// In blacklist mode: safe commands should still go through the callback
+	isWhitelisted := result.Allowed && !result.NeedsConfirm && !result.IsDangerous
+
+	if isWhitelistMode && isWhitelisted {
+		return nil
+	}
+
+	// If CommandConfirmationCallback is set, call it
+	// In blacklist mode, this is called for ALL commands (even safe ones)
+	// isWhitelistFallback indicates this is a non-whitelisted command in whitelist mode
+	isWhitelistFallback := isWhitelistMode && !isWhitelisted
+	if confirmCallback != nil {
+		return a.handleWithConfirmCallback(command, description, result, confirmCallback, isWhitelistFallback)
+	}
+
+	// No general callback - check if dangerous command needs confirmation
+	if result.IsDangerous {
+		return a.handleDangerousOnly(command, result, dangerousCallback)
+	}
+
+	// Safe command with no callback - allow execution
+	return nil
+}
+
+// handleDangerousOnly handles confirmation for dangerous commands using the dangerous callback.
+func (a *ExecutorAdapter) handleDangerousOnly(
+	command string,
+	result safety.ValidationResult,
+	callback DangerousCommandCallback,
+) error {
+	if callback != nil {
+		return a.handleWithDangerousCallback(command, result, callback)
+	}
+	// No callback available for dangerous command - block it
+	if result.IsDangerous {
+		return fmt.Errorf(safety.ErrFmtDangerousBlocked, result.Reason, command)
 	}
 	return nil
+}
+
+// handleWithConfirmCallback processes confirmation using the general confirmation callback.
+func (a *ExecutorAdapter) handleWithConfirmCallback(
+	command, description string,
+	result safety.ValidationResult,
+	callback CommandConfirmationCallback,
+	isWhitelistFallback bool,
+) error {
+	if callback(command, result.IsDangerous, result.Reason, description) {
+		return nil
+	}
+	return a.buildDeniedError(command, result, isWhitelistFallback)
+}
+
+// handleWithDangerousCallback processes confirmation using the dangerous command callback.
+func (a *ExecutorAdapter) handleWithDangerousCallback(
+	command string,
+	result safety.ValidationResult,
+	callback DangerousCommandCallback,
+) error {
+	if callback(command, result.Reason) {
+		return nil
+	}
+	return fmt.Errorf(safety.ErrFmtDangerousDenied, result.Reason, command)
+}
+
+// buildDeniedError constructs the appropriate denial error based on context.
+func (a *ExecutorAdapter) buildDeniedError(
+	command string,
+	result safety.ValidationResult,
+	isWhitelistFallback bool,
+) error {
+	if isWhitelistFallback {
+		return fmt.Errorf(safety.ErrFmtWhitelistDenied, command)
+	}
+	if result.IsDangerous {
+		return fmt.Errorf(safety.ErrFmtDangerousDenied, result.Reason, command)
+	}
+	return fmt.Errorf(safety.ErrFmtCommandDenied, command)
 }
 
 // executeBash executes a bash command and returns the output.
@@ -1505,8 +1634,8 @@ func (a *ExecutorAdapter) registerInvestigationTools() {
 				},
 				"confidence": map[string]interface{}{
 					"type":        "number",
-					"minimum":     float64(0),
-					"maximum":     float64(1),
+					"minimum":     safety.ConfidenceMin,
+					"maximum":     safety.ConfidenceMax,
 					"description": "Confidence level from 0 to 1",
 				},
 				"findings": map[string]interface{}{
@@ -1604,8 +1733,8 @@ func (a *ExecutorAdapter) registerInvestigationTools() {
 				},
 				"progress": map[string]interface{}{
 					"type":        "number",
-					"minimum":     float64(0),
-					"maximum":     float64(100),
+					"minimum":     float64(safety.ProgressMin),
+					"maximum":     float64(safety.ProgressMax),
 					"description": "Progress percentage from 0 to 100",
 				},
 			},
@@ -1665,6 +1794,16 @@ const (
 	investigationStatusCompleted = "completed"
 	investigationStatusEscalated = "escalated"
 )
+
+// isValidPriority checks if the given priority is a valid escalation priority.
+func isValidPriority(priority string) bool {
+	switch priority {
+	case "low", "medium", "high", "critical":
+		return true
+	default:
+		return false
+	}
+}
 
 // RegisterInvestigation registers an investigation ID so it can be completed or escalated.
 // This is primarily used for testing and by the investigation runner.
@@ -1726,6 +1865,37 @@ type reportInvestigationInput struct {
 	Progress        *float64 `json:"progress,omitempty"`
 }
 
+// validateInvestigationID validates that an investigation ID is non-empty.
+func validateInvestigationID(id string) error {
+	if id == "" || strings.TrimSpace(id) == "" {
+		return errors.New("investigation_id is required and cannot be empty")
+	}
+	return nil
+}
+
+// requireInvestigationExists checks if an investigation exists and returns an error if not.
+func (a *ExecutorAdapter) requireInvestigationExists(investigationID string) error {
+	a.investigationMu.Lock()
+	_, exists := a.investigationStates[investigationID]
+	a.investigationMu.Unlock()
+	if !exists {
+		return fmt.Errorf("investigation_id %q not found", investigationID)
+	}
+	return nil
+}
+
+// marshalInvestigationOutput marshals the output map to JSON, optionally adding investigation_id.
+func marshalInvestigationOutput(output map[string]any, investigationID string) (string, error) {
+	if investigationID != "" {
+		output["investigation_id"] = investigationID
+	}
+	result, err := json.Marshal(output)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal output: %w", err)
+	}
+	return string(result), nil
+}
+
 // executeCompleteInvestigation executes the complete_investigation tool.
 func (a *ExecutorAdapter) executeCompleteInvestigation(ctx context.Context, input json.RawMessage) (string, error) {
 	if err := ctx.Err(); err != nil {
@@ -1737,24 +1907,19 @@ func (a *ExecutorAdapter) executeCompleteInvestigation(ctx context.Context, inpu
 		return "", fmt.Errorf("failed to parse input: %w", err)
 	}
 
-	// Validate investigation_id
-	if in.InvestigationID == "" || strings.TrimSpace(in.InvestigationID) == "" {
-		return "", errors.New("investigation_id is required and cannot be empty")
+	if err := validateInvestigationID(in.InvestigationID); err != nil {
+		return "", err
 	}
 
-	// Check if investigation exists
-	a.investigationMu.Lock()
-	_, exists := a.investigationStates[in.InvestigationID]
-	a.investigationMu.Unlock()
-	if !exists {
-		return "", fmt.Errorf("investigation_id %q not found", in.InvestigationID)
+	if err := a.requireInvestigationExists(in.InvestigationID); err != nil {
+		return "", err
 	}
 
 	// Validate confidence
 	if in.Confidence == nil {
 		return "", errors.New("confidence is required")
 	}
-	if *in.Confidence < 0 || *in.Confidence > 1 {
+	if *in.Confidence < safety.ConfidenceMin || *in.Confidence > safety.ConfidenceMax {
 		return "", errors.New("confidence must be between 0 and 1")
 	}
 
@@ -1772,22 +1937,14 @@ func (a *ExecutorAdapter) executeCompleteInvestigation(ctx context.Context, inpu
 	}
 
 	// Build output
-	output := map[string]interface{}{
+	output := map[string]any{
 		"status":       investigationStatusCompleted,
 		"confidence":   *in.Confidence,
 		"findings":     in.Findings,
 		"completed_at": time.Now().UTC().Format(time.RFC3339),
 	}
-	if in.InvestigationID != "" {
-		output["investigation_id"] = in.InvestigationID
-	}
 
-	result, err := json.Marshal(output)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal output: %w", err)
-	}
-
-	return string(result), nil
+	return marshalInvestigationOutput(output, in.InvestigationID)
 }
 
 // executeEscalateInvestigation executes the escalate_investigation tool.
@@ -1801,17 +1958,12 @@ func (a *ExecutorAdapter) executeEscalateInvestigation(ctx context.Context, inpu
 		return "", fmt.Errorf("failed to parse input: %w", err)
 	}
 
-	// Validate investigation_id
-	if in.InvestigationID == "" || strings.TrimSpace(in.InvestigationID) == "" {
-		return "", errors.New("investigation_id is required and cannot be empty")
+	if err := validateInvestigationID(in.InvestigationID); err != nil {
+		return "", err
 	}
 
-	// Check if investigation exists
-	a.investigationMu.Lock()
-	_, exists := a.investigationStates[in.InvestigationID]
-	a.investigationMu.Unlock()
-	if !exists {
-		return "", fmt.Errorf("investigation_id %q not found", in.InvestigationID)
+	if err := a.requireInvestigationExists(in.InvestigationID); err != nil {
+		return "", err
 	}
 
 	// Validate reason
@@ -1820,8 +1972,7 @@ func (a *ExecutorAdapter) executeEscalateInvestigation(ctx context.Context, inpu
 	}
 
 	// Validate priority
-	validPriorities := map[string]bool{"low": true, "medium": true, "high": true, "critical": true}
-	if !validPriorities[in.Priority] {
+	if !isValidPriority(in.Priority) {
 		return "", errors.New("priority must be one of: low, medium, high, critical")
 	}
 
@@ -1835,23 +1986,15 @@ func (a *ExecutorAdapter) executeEscalateInvestigation(ctx context.Context, inpu
 	if in.InvestigationID != "" {
 		escalationID = fmt.Sprintf("esc-%s-%d", in.InvestigationID, time.Now().UnixNano())
 	}
-	output := map[string]interface{}{
+	output := map[string]any{
 		"status":        investigationStatusEscalated,
 		"escalation_id": escalationID,
 		"reason":        in.Reason,
 		"priority":      in.Priority,
 		"escalated_at":  time.Now().UTC().Format(time.RFC3339),
 	}
-	if in.InvestigationID != "" {
-		output["investigation_id"] = in.InvestigationID
-	}
 
-	result, err := json.Marshal(output)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal output: %w", err)
-	}
-
-	return string(result), nil
+	return marshalInvestigationOutput(output, in.InvestigationID)
 }
 
 // executeReportInvestigation executes the report_investigation tool.
@@ -1865,9 +2008,8 @@ func (a *ExecutorAdapter) executeReportInvestigation(ctx context.Context, input 
 		return "", fmt.Errorf("failed to parse input: %w", err)
 	}
 
-	// Validate investigation_id
-	if in.InvestigationID == "" || strings.TrimSpace(in.InvestigationID) == "" {
-		return "", errors.New("investigation_id is required and cannot be empty")
+	if err := validateInvestigationID(in.InvestigationID); err != nil {
+		return "", err
 	}
 
 	// Validate message
@@ -1877,7 +2019,7 @@ func (a *ExecutorAdapter) executeReportInvestigation(ctx context.Context, input 
 
 	// Validate progress if provided
 	if in.Progress != nil {
-		if *in.Progress < 0 || *in.Progress > 100 {
+		if *in.Progress < float64(safety.ProgressMin) || *in.Progress > float64(safety.ProgressMax) {
 			return "", errors.New("progress must be between 0 and 100")
 		}
 	}
@@ -1899,6 +2041,50 @@ func (a *ExecutorAdapter) executeReportInvestigation(ctx context.Context, input 
 	}
 
 	return string(result), nil
+}
+
+// checkSubagentPrerequisites validates that a subagent tool can be called.
+// It checks for recursion prevention and use case availability.
+func (a *ExecutorAdapter) checkSubagentPrerequisites(
+	ctx context.Context,
+	toolName string,
+) (SubagentUseCaseInterface, error) {
+	if port.IsSubagentContext(ctx) {
+		return nil, fmt.Errorf(
+			"%s tool cannot be called from within a subagent (prevents infinite recursion)",
+			toolName,
+		)
+	}
+	a.mu.RLock()
+	uc := a.subagentUseCase
+	a.mu.RUnlock()
+	if uc == nil {
+		return nil, errors.New("subagent use case not available")
+	}
+	return uc, nil
+}
+
+// formatSubagentResult formats a SubagentResult as indented JSON.
+func formatSubagentResult(result *usecase.SubagentResult) (string, error) {
+	if result == nil {
+		return "", errors.New("subagent execution returned nil result")
+	}
+	resultJSON := map[string]any{
+		"subagent_id":   result.SubagentID,
+		"agent_name":    result.AgentName,
+		"status":        result.Status,
+		"output":        result.Output,
+		"actions_taken": result.ActionsTaken,
+		"duration_ms":   result.Duration.Milliseconds(),
+	}
+	if result.Error != nil {
+		resultJSON["error"] = result.Error.Error()
+	}
+	resultBytes, err := json.MarshalIndent(resultJSON, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to format result: %w", err)
+	}
+	return string(resultBytes), nil
 }
 
 // executeTask spawns a subagent to handle a delegated task.
@@ -1923,18 +2109,9 @@ func (a *ExecutorAdapter) executeReportInvestigation(ctx context.Context, input 
 // The result JSON includes: subagent_id, agent_name, status, output, actions_taken,
 // duration_ms, and error (if the subagent encountered an error).
 func (a *ExecutorAdapter) executeTask(ctx context.Context, input json.RawMessage) (string, error) {
-	// Check for recursion (subagents cannot spawn subagents)
-	if port.IsSubagentContext(ctx) {
-		return "", errors.New("task tool cannot be called from within a subagent (prevents infinite recursion)")
-	}
-
-	// Check if use case is set
-	a.mu.RLock()
-	useCase := a.subagentUseCase
-	a.mu.RUnlock()
-
-	if useCase == nil {
-		return "", errors.New("subagent use case not available")
+	uc, err := a.checkSubagentPrerequisites(ctx, "task")
+	if err != nil {
+		return "", err
 	}
 
 	// Parse input
@@ -1952,51 +2129,19 @@ func (a *ExecutorAdapter) executeTask(ctx context.Context, input json.RawMessage
 	}
 
 	// Spawn subagent
-	result, err := useCase.SpawnSubagent(ctx, params.AgentName, params.Prompt)
+	result, err := uc.SpawnSubagent(ctx, params.AgentName, params.Prompt)
 	if err != nil {
 		return "", fmt.Errorf("subagent execution failed: %w", err)
 	}
 
-	if result == nil {
-		return "", errors.New("subagent execution returned nil result")
-	}
-
-	// Format result as JSON
-	resultJSON := map[string]interface{}{
-		"subagent_id":   result.SubagentID,
-		"agent_name":    result.AgentName,
-		"status":        result.Status,
-		"output":        result.Output,
-		"actions_taken": result.ActionsTaken,
-		"duration_ms":   result.Duration.Milliseconds(),
-	}
-
-	if result.Error != nil {
-		resultJSON["error"] = result.Error.Error()
-	}
-
-	resultBytes, err := json.MarshalIndent(resultJSON, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("failed to format result: %w", err)
-	}
-
-	return string(resultBytes), nil
+	return formatSubagentResult(result)
 }
 
 // executeDelegate executes the delegate tool to spawn a dynamic subagent.
 func (a *ExecutorAdapter) executeDelegate(ctx context.Context, input json.RawMessage) (string, error) {
-	// Check for recursion (subagents cannot spawn subagents)
-	if port.IsSubagentContext(ctx) {
-		return "", errors.New("delegate tool cannot be called from within a subagent (prevents infinite recursion)")
-	}
-
-	// Check if use case is set
-	a.mu.RLock()
-	useCase := a.subagentUseCase
-	a.mu.RUnlock()
-
-	if useCase == nil {
-		return "", errors.New("subagent use case not available")
+	uc, err := a.checkSubagentPrerequisites(ctx, "delegate")
+	if err != nil {
+		return "", err
 	}
 
 	// Parse input
@@ -2026,35 +2171,12 @@ func (a *ExecutorAdapter) executeDelegate(ctx context.Context, input json.RawMes
 	}
 
 	// Spawn dynamic subagent
-	result, err := useCase.SpawnDynamicSubagent(ctx, config, params.Task)
+	result, err := uc.SpawnDynamicSubagent(ctx, config, params.Task)
 	if err != nil {
 		return "", fmt.Errorf("dynamic subagent execution failed: %w", err)
 	}
 
-	if result == nil {
-		return "", errors.New("dynamic subagent execution returned nil result")
-	}
-
-	// Format result as JSON
-	resultJSON := map[string]interface{}{
-		"subagent_id":   result.SubagentID,
-		"agent_name":    result.AgentName,
-		"status":        result.Status,
-		"output":        result.Output,
-		"actions_taken": result.ActionsTaken,
-		"duration_ms":   result.Duration.Milliseconds(),
-	}
-
-	if result.Error != nil {
-		resultJSON["error"] = result.Error.Error()
-	}
-
-	resultBytes, err := json.MarshalIndent(resultJSON, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("failed to format result: %w", err)
-	}
-
-	return string(resultBytes), nil
+	return formatSubagentResult(result)
 }
 
 // executeBatchTool executes the batch_tool tool.

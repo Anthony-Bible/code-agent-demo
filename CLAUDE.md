@@ -80,6 +80,9 @@ Environment variables with `AGENT_` prefix:
 - `AGENT_MODEL` - AI model (default: `hf:zai-org/GLM-4.6`)
 - `AGENT_MAX_TOKENS` - Response limit
 - `AGENT_WORKING_DIR` - Base directory for file operations
+- `AGENT_COMMAND_VALIDATION_MODE` - Command validation mode: `blacklist` (default) or `whitelist`
+- `AGENT_COMMAND_WHITELIST_JSON` - JSON array of whitelist patterns with optional excludes (whitelist mode only)
+- `AGENT_ASK_LLM_ON_UNKNOWN` - Ask LLM before blocking non-whitelisted commands (default: `true`)
 
 ## Testing Patterns
 
@@ -102,7 +105,170 @@ Mock implementations of ports for isolated testing - see `conversation_service_t
 
 - **Path traversal prevention** in `LocalFileManager` - validates paths stay within baseDir
 - **Dangerous command detection** in `ExecutorAdapter` - patterns like `rm -rf`, `dd`, etc. require confirmation
+- **Command validation modes** - blacklist (default) or whitelist approach for bash commands
 - **Input validation** at entity and DTO levels
+
+## Command Validation Modes
+
+The agent supports two modes for validating bash commands:
+
+### Blacklist Mode (Default)
+
+Blocks known dangerous commands while allowing everything else. Dangerous patterns include:
+- Destructive operations: `rm -rf /`, `dd if=`, `mkfs`
+- Privilege escalation: `sudo`, `su`
+- System modifications: `chmod 777`, `chown root`
+- Network piping: `curl | bash`, `wget | sh`
+- Dangerous find operations: `find -exec`, `find -execdir`, `find -delete`, `find -ok`, `find -okdir`
+
+Commands matching these patterns require user confirmation before execution.
+
+### Whitelist Mode
+
+Only allows explicitly whitelisted commands. Everything else is blocked by default.
+
+Enable with: `AGENT_COMMAND_VALIDATION_MODE=whitelist`
+
+**Default whitelisted categories (read-only operations):**
+
+| Category | Examples |
+|----------|----------|
+| File reading | `ls`, `cat`, `head`, `tail`, `less`, `wc`, `file`, `stat` |
+| Search | `grep`, `rg`, `find` (read-only), `fd`, `ag`, `which`, `locate` |
+| Text processing | `sort`, `uniq`, `cut`, `tr`, `diff`, `jq`, `yq` |
+| Git (read) | `git status`, `git log`, `git diff`, `git show`, `git branch` |
+| Go (info) | `go version`, `go env`, `go list`, `go doc`, `go vet` |
+| Node/npm (info) | `npm version`, `npm ls`, `npm outdated`, `npm audit` |
+| System info | `pwd`, `whoami`, `ps`, `df`, `du`, `free`, `uname` |
+| Docker (read) | `docker ps`, `docker images`, `docker logs`, `docker inspect` |
+| Kubectl (read) | `kubectl get`, `kubectl describe`, `kubectl logs` |
+
+**NOT whitelisted by default (write operations):**
+- `mkdir`, `touch`, `cp`, `mv`, `rm`
+- `git add`, `git commit`, `git push`
+- `go build`, `go run`, `npm install`, `make`
+- `curl`, `wget` (network operations)
+
+### Adding Custom Whitelist Patterns
+
+Add custom whitelist patterns via JSON environment variable:
+
+```bash
+export AGENT_COMMAND_WHITELIST_JSON='[
+  {"pattern": "^my-safe-tool(\\s|$)", "description": "my safe tool"},
+  {"pattern": "^another-tool\\s", "description": "another tool"}
+]'
+```
+
+Each entry in the JSON array can have:
+- `pattern` (required): Regex pattern to match commands
+- `exclude_pattern` (optional): Regex pattern to block even if the main pattern matches
+- `description` (optional): Human-readable description of the pattern
+
+**Example with exclude pattern:**
+
+```bash
+export AGENT_COMMAND_WHITELIST_JSON='[
+  {
+    "pattern": "^find(\\s|$)",
+    "exclude_pattern": "(-exec\\s|-delete)",
+    "description": "find without dangerous flags"
+  }
+]'
+```
+
+This allows `find . -name "*.go"` but blocks `find . -exec rm {} \;`.
+
+### LLM Fallback for Non-Whitelisted Commands
+
+When `AGENT_ASK_LLM_ON_UNKNOWN=true` (default), non-whitelisted commands trigger a confirmation callback instead of being immediately blocked. This allows:
+1. The LLM to assess if the command is dangerous
+2. User confirmation before execution
+
+Set to `false` for strict whitelist-only mode (blocks without asking).
+
+### Piped Commands
+
+In whitelist mode, piped commands (e.g., `ls | grep foo`) are checked by verifying **each segment**. All parts must be whitelisted for the command to execute.
+
+### Exclude Patterns
+
+Whitelist patterns support an optional `ExcludePattern` (or `exclude_pattern` in JSON) field that blocks commands even if they match the main pattern. This simulates negative lookahead in Go's regexp (which doesn't support it natively).
+
+**Via JSON configuration:**
+```bash
+export AGENT_COMMAND_WHITELIST_JSON='[
+  {
+    "pattern": "^find(\\s|$)",
+    "exclude_pattern": "(?i)(-exec\\s|-execdir\\s|-delete(\\s|$)|-ok\\s|-okdir\\s)",
+    "description": "find files (read-only)"
+  }
+]'
+```
+
+**Programmatic (internal):**
+```go
+type WhitelistPattern struct {
+    Pattern        *regexp.Regexp
+    Description    string
+    ExcludePattern *regexp.Regexp // Optional: if matches, command is NOT allowed
+}
+```
+
+The `(?i)` flag makes exclusions case-insensitive.
+
+### Implementation
+
+Key files:
+- `internal/domain/safety/command_whitelist.go` - Whitelist types and patterns
+- `internal/domain/safety/dangerous_commands.go` - Blacklist patterns
+- `internal/domain/safety/constants.go` - Shared constants and error format templates
+- `internal/infrastructure/adapter/tool/tool_executor_adapter.go` - Validation logic
+- `internal/infrastructure/config/container.go` - Configuration wiring
+
+### Error Message Constants
+
+Error messages are defined as constants in `internal/domain/safety/constants.go` for consistency:
+
+| Constant | Format | Description |
+|----------|--------|-------------|
+| `ErrFmtWhitelistBlocked` | `"whitelist: command blocked: %s"` | Non-whitelisted command, no LLM fallback |
+| `ErrFmtWhitelistDenied` | `"whitelist: user denied: %s"` | User denied via callback |
+| `ErrFmtDangerousBlocked` | `"dangerous command blocked: %s (%s)"` | Dangerous, no callback |
+| `ErrFmtDangerousDenied` | `"dangerous command denied by user: %s (%s)"` | User denied dangerous |
+| `ErrFmtCommandDenied` | `"command denied by user: %s"` | User denied non-dangerous |
+| `ErrMsgLLMFailedToDetect` | `"(WARNING: LLM failed to identify this as dangerous)"` | Pattern caught what LLM missed |
+| `ErrMsgMarkedDangerousByAI` | `"marked dangerous by AI"` | LLM-only detection |
+
+Format parameters are documented in comments: `ErrFmt*` constants use `fmt.Errorf`, `ErrMsg*` constants are plain strings.
+
+### Security Considerations
+
+#### Quote Handling
+- Shell quoting is recognized (single, double, backticks)
+- Unbalanced quotes are blocked (secure default)
+- Test complex commands before deployment
+
+#### Case Sensitivity
+- Patterns are case-sensitive by default (matches Linux behavior)
+- Use `case_insensitive: true` in JSON or `(?i)` prefix for case-insensitive
+
+#### Exclude Pattern Complexity
+Avoid in custom patterns:
+- Nested quantifiers: `(a+)+`
+- Large repetitions: `{100,}`
+- Complex alternations with outer quantifiers
+
+#### ReDoS Protection
+- Commands > 10,000 chars auto-blocked
+- Dangerous regex constructs rejected at parse time
+
+#### Environment Variable Expansion
+- Variables like `$VAR` and `${VAR}` are NOT expanded during validation
+- Validation sees literal text; shell expands variables at runtime
+- Example: `echo $SECRET` passes validation but may leak sensitive data
+- **Note:** Command substitutions (`$()` and backticks) ARE validated recursively
+- Recommendation: Be cautious with commands that output environment variables
 
 ## Agent Skills
 
