@@ -7,7 +7,7 @@
 //
 // Example usage:
 //
-//	adapter := ai.NewAnthropicAdapter("hf:zai-org/GLM-4.6")
+//	adapter := ai.NewAnthropicAdapter("hf:zai-org/GLM-4.7")
 //	response, err := adapter.SendMessage(ctx, messages, tools)
 //	if err != nil {
 //		log.Fatal(err)
@@ -56,7 +56,7 @@ type AnthropicAdapter struct {
 // If the model is empty, a default error will be returned when SendMessage is called.
 //
 // Parameters:
-//   - model: The AI model to use (e.g., "hf:zai-org/GLM-4.6", "claude-3-5-sonnet-20241022")
+//   - model: The AI model to use (e.g., "hf:zai-org/GLM-4.7", "claude-3-5-sonnet-20241022")
 //   - maxTokens: Maximum tokens for AI response
 //   - subagentManager: Optional subagent manager for providing subagent metadata to the system prompt
 //

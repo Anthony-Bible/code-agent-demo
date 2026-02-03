@@ -19,7 +19,7 @@ import (
 // Config holds all configuration values for the application.
 type Config struct {
 	// AIModel is the model identifier to use for AI requests.
-	// Defaults to "hf:zai-org/GLM-4.6"
+	// Defaults to "hf:zai-org/GLM-4.7"
 	AIModel string
 
 	// MaxTokens is the maximum number of tokens to generate in AI responses.
@@ -70,7 +70,7 @@ type Config struct {
 // Defaults returns a Config struct with all default values set.
 func Defaults() *Config {
 	return &Config{
-		AIModel:           "hf:zai-org/GLM-4.6",
+		AIModel:           "hf:zai-org/GLM-4.7",
 		MaxTokens:         20000,
 		WorkingDir:        ".",
 		WelcomeMessage:    "Chat with Claude (use 'ctrl+c' to quit)",

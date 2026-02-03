@@ -106,7 +106,7 @@ func GetConfig(cmd *cobra.Command) *config.Config {
 
 func init() {
 	// Define flags
-	rootCmd.PersistentFlags().String("model", "hf:zai-org/GLM-4.6", "AI model to use for requests")
+	rootCmd.PersistentFlags().String("model", "hf:zai-org/GLM-4.7", "AI model to use for requests")
 	rootCmd.PersistentFlags().StringP("dir", "d", ".", "Working directory for file operations")
 	rootCmd.PersistentFlags().Int("max-tokens", 20000, "Maximum tokens to generate in AI responses")
 	rootCmd.PersistentFlags().Bool("thinking", false, "Enable extended thinking")
