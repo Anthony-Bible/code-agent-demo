@@ -1,4 +1,5 @@
-agent
+# Agent working directory
+.agent/
 .agent/investigations/
 
 # Binary artifacts
@@ -7,6 +8,10 @@ code-editing-agent
 *.dll
 *.so
 *.dylib
+*.test
+
+# IDE
+.idea/
 
 # Database files
 data/*.db

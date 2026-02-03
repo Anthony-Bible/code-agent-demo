@@ -404,12 +404,12 @@ The application supports configuration via:
 
 **Command-line flags:**
 ```bash
-./agent chat --model "hf:zai-org/GLM-4.6" --max-tokens 20000 --thinking
+./agent chat --model "hf:zai-org/GLM-4.7" --max-tokens 20000 --thinking
 ```
 
 **Environment variables (AGENT_* prefix):**
 ```bash
-export AGENT_MODEL=hf:zai-org/GLM-4.6
+export AGENT_MODEL=hf:zai-org/GLM-4.7
 export AGENT_MAX_TOKENS=20000
 export AGENT_WORKING_DIR=/path/to/project
 export AGENT_WELCOME_MESSAGE="Hello! How can I help?"
@@ -424,7 +424,7 @@ export AGENT_SHOW_THINKING=false
 **Configuration options:**
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--model` | `hf:zai-org/GLM-4.6` | AI model to use |
+| `--model` | `hf:zai-org/GLM-4.7` | AI model to use |
 | `--max-tokens` | `20000` | Maximum tokens in responses |
 | `--thinking` | `false` | Enable extended thinking mode |
 | `--thinking-budget` | `10000` | Token budget for thinking (min 1024) |

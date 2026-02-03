@@ -77,7 +77,7 @@ Presentation (cmd/cli/) → Application (internal/application/) → Domain (inte
 ## Configuration
 
 Environment variables with `AGENT_` prefix:
-- `AGENT_MODEL` - AI model (default: `hf:zai-org/GLM-4.6`)
+- `AGENT_MODEL` - AI model (default: `hf:zai-org/GLM-4.7`)
 - `AGENT_MAX_TOKENS` - Response limit
 - `AGENT_WORKING_DIR` - Base directory for file operations
 
