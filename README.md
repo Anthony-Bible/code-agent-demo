@@ -2,7 +2,7 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-blue.svg)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Build Status](https://github.com/yourusername/code-editing-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/yourusername/code-editing-agent/actions)
+[![Build Status](https://github.com/Anthony-Bible/code-editing-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Anthony-Bible/code-editing-agent/actions)
 
 A sophisticated AI-powered command-line coding assistant built with Go using hexagonal (clean) architecture principles. The agent provides an interactive chat interface for code exploration, editing, and analysis with integrated tool capabilities and advanced AI features.
 
@@ -11,18 +11,27 @@ A sophisticated AI-powered command-line coding assistant built with Go using hex
 - **🤖 Interactive CLI Chat** - Terminal-based conversation with AI assistant
 - **🧠 Extended Thinking** - Claude's internal reasoning process with configurable token budgets
 - **📁 File System Tools** - Read, list, and edit files directly from chat
-- **🔄 Subagent System** - Spawn specialized AI assistants for delegated tasks
+- **🔄 Subagent System** - Spawn specialized AI assistants for delegated tasks (pre-defined or dynamic)
 - **📋 Plan Mode** - Propose changes for review before applying them
 - **🏗️ Hexagonal Architecture** - Clean separation of concerns with ports and adapters
 - **🔧 Modular Tool System** - Extensible architecture for adding custom tools with JSON schema validation
 - **🎯 Skill System** - Project-specific and global AI capabilities following agentskills.io
 - **🔍 Investigation System** - Structured problem analysis with confidence tracking and escalation
+- **🚨 Alert & Webhook Server** - HTTP server for receiving alerts from monitoring systems (Prometheus, GCP Monitoring)
+- **📊 Alert Investigation** - Automatic investigation of alerts with findings, actions, and escalation
 
 ## 📋 Table of Contents
 
 - [Quick Start](#quick-start)
 - [Installation](#installation)
 - [Usage](#usage)
+  - [Chat Mode](#chat-mode)
+  - [Webhook Server Mode](#webhook-server-mode)
+  - [Extended Thinking](#extended-thinking-mode-)
+  - [Plan Mode](#plan-mode)
+  - [Skills](#skills)
+  - [Subagents](#subagent-system)
+  - [Alerts & Investigations](#alerts--investigations)
 - [Architecture](#architecture)
 - [Configuration](#configuration)
 - [Development](#development)
@@ -30,6 +39,8 @@ A sophisticated AI-powered command-line coding assistant built with Go using hex
 - [License](#license)
 
 ## 🚀 Quick Start
+
+### Chat Mode
 
 ```bash
 # Set your Anthropic API key
@@ -40,7 +51,20 @@ go build -o agent ./cmd/cli
 ./agent chat
 
 # Or run directly with Go
-go run ./cmd/cli main.go chat
+go run ./cmd/cli/main.go chat
+```
+
+### Webhook Server Mode
+
+```bash
+# Set your Anthropic API key
+export ANTHROPIC_API_KEY=your-api-key-here
+
+# Build and run the webhook server
+go build -o agent ./cmd/cli
+./agent serve --config config/alert-sources.yaml
+
+# The server will start listening on http://localhost:8080 by default
 ```
 
 ## Architecture
@@ -52,17 +76,21 @@ This project follows hexagonal architecture (also known as ports and adapters), 
 ```mermaid
 flowchart TB
     subgraph CLI["Presentation Layer"]
-        CMD["CLI<br/>cmd/cli"]
+        CHAT_CMD["chat command<br/>cmd/cli"]
+        SERVE_CMD["serve command<br/>cmd/cli"]
     end
 
     subgraph APP["Application Layer"]
         SVC["ChatService"]
         UC1["MessageProcess"]
         UC2["ToolExecution"]
+        UC3["AlertHandler"]
+        UC4["InvestigationRunner"]
+        UC5["SubagentRunner"]
     end
 
     subgraph DOMAIN["Domain Layer"]
-        ENT["Entities<br/>(Conv, Msg, Tool)"]
+        ENT["Entities<br/>(Conv, Msg, Tool,<br/>Alert, Investigation,<br/>Skill, Subagent)"]
         SRV["ConversationService"]
 
         subgraph PORTS["Ports"]
@@ -70,6 +98,9 @@ flowchart TB
             P2["ToolExecutor"]
             P3["FileManager"]
             P4["UserInterface"]
+            P5["SkillManager"]
+            P6["SubagentManager"]
+            P7["AlertSourceManager"]
         end
     end
 
@@ -78,34 +109,66 @@ flowchart TB
         A2["ToolExecAdapter"]
         A3["LocalFileManager"]
         A4["CLIAdapter"]
+        A5["LocalSkillAdapter"]
+        A6["LocalSubagentAdapter"]
+        A7["PrometheusSource<br/>GCPMonitoringSource"]
+        A8["HTTPAdapter<br/>WebhookServer"]
     end
 
     subgraph EXT["External"]
         E1["Anthropic API"]
         E2["File System"]
         E3["Terminal"]
+        E4["Alert Sources<br/>(Prometheus, GCP)"]
     end
 
-    CMD --> SVC
+    %% Chat path
+    CHAT_CMD --> SVC
     SVC --> UC1
     SVC --> UC2
     UC1 --> SRV
     SRV --> ENT
 
+    %% Serve/webhook path
+    SERVE_CMD --> A8
+    A8 --> UC3
+    UC3 --> UC4
+    UC4 --> SRV
+
+    %% SubagentRunner is reached via ToolExecAdapter -> SubagentUseCase
+    A2 --> UC5
+
+    %% Port usage
     SRV --> P1
     SRV --> P2
     SVC --> P3
     SVC --> P4
+    UC4 --> P2
+    UC4 --> P5
+    UC5 --> P1
+    UC5 --> P2
+    UC5 --> P4
+    A8 --> P7
 
+    %% Port implementations
     P1 ==> A1
     P2 ==> A2
     P3 ==> A3
     P4 ==> A4
+    P5 ==> A5
+    P6 ==> A6
+    P7 ==> A7
 
+    %% AnthropicAdapter uses SubagentManager for agent context
+    A1 --> P6
+
+    %% External connections
     A1 --> E1
     A3 --> E2
-    A3 --> A2
-    A4 --> E3
+    A2 --> A3
+    A4 <--> E3
+    A7 --> E4
+    E4 --> A8
 
     classDef domain fill:#e1f5fe,stroke:#0277bd,stroke-width:3px,color:#000
     classDef app fill:#f3e5f5,stroke:#7b1fa2,stroke-width:3px,color:#000
@@ -114,10 +177,10 @@ flowchart TB
     classDef ext fill:#ffebee,stroke:#c62828,stroke-width:2px,color:#000
 
     class ENT,SRV domain
-    class SVC,UC1,UC2 app
-    class A1,A2,A3,A4 infra
-    class P1,P2,P3,P4 port
-    class E1,E2,E3 ext
+    class SVC,UC1,UC2,UC3,UC4,UC5 app
+    class A1,A2,A3,A4,A5,A6,A7,A8 infra
+    class P1,P2,P3,P4,P5,P6,P7 port
+    class E1,E2,E3,E4 ext
 ```
 
 ### Layer Responsibilities
@@ -125,9 +188,21 @@ flowchart TB
 | Layer | Responsibility | Located In |
 |-------|---------------|------------|
 | **Presentation** | CLI commands, user input/output handling | `cmd/cli/` |
-| **Application** | Use cases, orchestration, DTOs | `internal/application/` |
+| **Application** | Use cases, orchestration, DTOs (Chat, Tool, Alert, Investigation, Subagent) | `internal/application/` |
 | **Domain** | Business entities, services, port interfaces | `internal/domain/` |
 | **Infrastructure** | Port implementations, external integrations | `internal/infrastructure/` |
+
+### Key Domain Entities
+
+| Entity | Description |
+|--------|-------------|
+| `Conversation` | Manages chat state and message collection |
+| `Message` | Represents individual messages with role, content, and validation |
+| `Tool` | Represents executable tools with schema validation |
+| `Alert` | Represents alerts from monitoring systems with severity and labels |
+| `Investigation` | Tracks alert investigations with findings, actions, and status |
+| `Skill` | Represents discoverable AI capabilities from SKILL.md files |
+| `Subagent` | Represents subagent configurations from AGENT.md files |
 
 ## Project Structure
 
@@ -138,25 +213,35 @@ code-editing-agent/
 │       ├── main.go              # CLI entry point
 │       └── cmd/
 │           ├── root.go          # Root command setup
-│           └── chat.go          # Chat command implementation
+│           ├── chat.go          # Chat command implementation
+│           └── serve.go         # Webhook server command
 ├── internal/
 │   ├── application/
+│   │   ├── config/              # Configuration types (investigation config, etc.)
 │   │   ├── dto/                 # Data transfer objects
-│   │   ├── service/             # Application services
-│   │   └── usecase/             # Use case implementations
+│   │   ├── service/             # Application services (Chat, Investigation, Skill, Safety)
+│   │   └── usecase/             # Use case implementations (Message, Tool, Alert, Investigation, Subagent)
 │   ├── domain/
-│   │   ├── entity/              # Domain entities (Conversation, Message, Tool)
-│   │   ├── port/                # Port interfaces (AI, File, Tool, UI, Skill)
-│   │   └── service/             # Domain services
+│   │   ├── entity/              # Domain entities (Conversation, Message, Tool, Alert, Investigation, Skill, Subagent)
+│   │   ├── port/                # Port interfaces (AI, File, Tool, UI, Skill, Subagent, Alert, Context)
+│   │   ├── safety/              # Safety rules (dangerous commands, etc.)
+│   │   └── service/             # Domain services (Conversation, Tool)
 │   └── infrastructure/
 │       ├── adapter/             # Port implementations
-│       │   ├── ai/              # AI provider adapters
-│       │   ├── file/            # File manager adapters
-│       │   ├── skill/           # Skill manager adapters
-│       │   ├── tool/            # Tool executor adapters
-│       │   └── ui/              # User interface adapters
-│       └── config/              # Configuration & DI container
+│       │   ├── ai/              # AI provider adapters (Anthropic)
+│       │   ├── alert/           # Alert source adapters (Prometheus, GCP Monitoring)
+│       │   ├── file/            # File manager adapters (Local)
+│       │   ├── investigation/   # Investigation storage adapters (File)
+│       │   ├── skill/           # Skill manager adapters (Local)
+│       │   ├── subagent/        # Subagent manager adapters (Local)
+│       │   ├── tool/            # Tool executor adapters (Built-in tools)
+│       │   ├── ui/              # User interface adapters (CLI)
+│       │   └── webhook/         # Webhook server adapters (HTTP)
+│       ├── config/              # Configuration & DI container
+│       └── signal/              # Signal handlers (Interrupt, Reload)
+├── agents/                      # Pre-defined subagents (code-reviewer, test-writer, documentation-writer)
 ├── skills/                      # Project-specific skills (agentskills.io spec)
+├── config/                      # Configuration files (alert-sources.yaml, etc.)
 ├── CLAUDE.md                    # Project development guide
 ├── go.mod                       # Go module definition
 └── go.sum                       # Dependency checksums
@@ -175,7 +260,7 @@ code-editing-agent/
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/code-editing-agent.git
+   git clone https://github.com/anthony-bible/code-editing-agent.git
    cd code-editing-agent
    ```
 
@@ -192,22 +277,45 @@ code-editing-agent/
 #### Method 2: Global Install via Go
 
 ```bash
-go install github.com/yourusername/code-editing-agent/cmd/cli@latest
+go install github.com/anthony-bible/code-editing-agent/cmd/cli@latest
 ```
 
 ### Verify Installation
 
 ```bash
-# Check the agent is working
-./agent --version
+# List available commands
+./agent --help
 
-# Test with a simple command
+# Test chat command
 ./agent chat --help
+
+# Test serve command
+./agent serve --help
 ```
 
 ## 🎯 Usage
 
-### Basic Chat
+### Commands
+
+The agent supports two main modes of operation:
+
+#### Chat Mode
+
+```bash
+./agent chat [flags]
+```
+
+Start an interactive CLI session for code exploration, editing, and analysis.
+
+#### Webhook Server Mode
+
+```bash
+./agent serve [flags]
+```
+
+Start an HTTP server to receive webhook alerts from monitoring systems.
+
+### Chat Mode
 
 ```bash
 ./agent chat
@@ -223,6 +331,74 @@ New session started: 3a1b2c3d4e5f6789...
 [Tool: list_files executed]
 [Assistant: Found 5 Go files...]
 ```
+
+### Webhook Server Mode
+
+The agent includes a built-in webhook server for receiving alerts from monitoring systems and automatically investigating them.
+
+```bash
+# Start the webhook server
+./agent serve --addr :8080 --config config/alert-sources.yaml
+
+# With auto-approval for safe bash commands
+./agent serve --addr :8080 --auto-approve-safe
+```
+
+#### Supported Alert Sources
+
+The webhook server supports the following alert sources:
+
+| Source Type | Description | Webhook Path Example |
+|-------------|-------------|---------------------|
+| **Prometheus** | Alerts from Prometheus Alertmanager | `/alerts/prometheus` |
+| **GCP Monitoring** | Google Cloud Monitoring Incidents API | `/alerts/gcp` |
+
+#### Alert Sources Configuration
+
+Create a `config/alert-sources.yaml` file:
+
+```yaml
+addr: ":8080"
+
+sources:
+  # Prometheus Alertmanager webhook source
+  - type: prometheus
+    name: alertmanager
+    webhook_path: /alerts/prometheus
+
+  # Google Cloud Monitoring webhook source
+  - type: gcp_monitoring
+    name: gcp-alerts
+    webhook_path: /alerts/gcp
+```
+
+#### Server Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check |
+| `/ready` | GET | Readiness check |
+| `/alerts/{path}` | POST | Webhook receiver for configured sources |
+
+#### Automatic Alert Investigation
+
+When alerts are received:
+1. **Critical alerts** automatically trigger an investigation
+2. **Warning alerts** wait for manual trigger (configurable)
+3. The AI investigates using available tools (logs, metrics, code analysis, custom skills)
+4. Investigations produce findings with confidence levels
+5. Failed or uncertain investigations can be escalated to humans
+
+#### Skill Hot-Reload
+
+Send `SIGHUP` to the server to reload skills without restarting:
+```bash
+kill -HUP <pid>
+```
+
+For more details on the investigation system, see [Alerts & Investigations](#alerts--investigations).
+
+---
 
 ### Extended Thinking Mode 🧠
 
@@ -348,7 +524,23 @@ Skills are automatically discovered at startup and listed in the AI's context. T
 
 ### Subagent System
 
-The subagent system allows the main agent to delegate tasks to specialized or dynamic AI assistants. This is useful for complex, multi-step tasks or when isolation is beneficial.
+The subagent system allows the main agent to delegate tasks to specialized or dynamic AI assistants. This is useful for complex, multi-step tasks, focused problem-solving, or when isolation is beneficial.
+
+#### Context Window Isolation
+
+**Important:** Each subagent runs in its own **isolated conversation context** with a fresh context window. This means:
+
+- ✅ **Clean slate**: Subagents start with only their system prompt (from AGENT.md) and the delegated task
+- ✅ **No history leakage**: The parent conversation's message history is NOT passed to subagents
+- ✅ **Efficient resource usage**: Subagents don't consume tokens from the parent's context window
+- ✅ **Focused execution**: Each subagent concentrates solely on its assigned task
+
+The subagent receives only:
+1. Its custom system prompt from the `AGENT.md` file
+2. The task description/prompt from the parent agent
+3. Results from tools it executes during its session
+
+When the subagent completes, its output is returned to the parent as a condensed summary, not the full conversation history.
 
 #### Pre-defined Subagents
 
@@ -375,12 +567,16 @@ See CLAUDE.md for detailed AGENT.md format and frontmatter options.
 
 #### Dynamic Subagents (Delegation)
 
-You can also create dynamic agents on-the-fly with custom system prompts using the `delegate` tool.
+You can also create dynamic agents on-the-fly with custom system prompts using the `delegate` tool. These dynamic subagents also benefit from isolated context windows.
 
 **Usage:**
 ```
 > Use the delegate tool to create a 'regex-specialist' to help fix these patterns
 ```
+
+#### Recursion Prevention
+
+To prevent infinite loops, subagents cannot spawn other subagents. The `task` tool is blocked when executing in a subagent context. This ensures task delegation remains one level deep and predictable.
 
 ### Plan Mode
 
@@ -397,6 +593,93 @@ Plan mode allows you to review and approve proposed changes before they are appl
 
 **Via tool:**
 The AI can proactively enter plan mode using the `enter_plan_mode` tool when it detects a complex task.
+
+---
+
+### Alerts & Investigations
+
+The alert and investigation system enables automatic incident response and root cause analysis.
+
+#### Investigation Lifecycle
+
+An investigation progresses through these states:
+
+```
+started → running → completed
+                ├───→ failed
+                └───→ escalated
+```
+
+| State | Description |
+|-------|-------------|
+| **started** | Initial state when investigation is created |
+| **running** | Investigation is actively gathering information |
+| **completed** | Investigation finished successfully with findings |
+| **failed** | Investigation encountered an unrecoverable error |
+| **escalated** | Investigation requires human intervention |
+
+#### Investigation Features
+
+- **Findings**: Captures discoveries, potential root causes, and observations
+- **Actions**: Tracks all tool executions with inputs, outputs, and duration
+- **Confidence**: Float value from 0.0 (no confidence) to 1.0 (full confidence)
+- **Escalation**: Automatic escalation when investigation cannot determine root cause
+
+#### Severity Levels
+
+| Level | Description | Auto-Investigate |
+|-------|-------------|------------------|
+| **critical** | Urgent issue requiring immediate attention | Yes |
+| **warning** | Potential issue that should be investigated | No (configurable) |
+| **info** | Informational notification | No |
+
+#### Alert Sources
+
+The agent supports multiple alert sources via webhooks:
+
+##### Prometheus Alertmanager
+
+Configured to receive alerts from Prometheus Alertmanager. Include resource labels, metric labels, and alert annotations.
+
+##### GCP Monitoring
+
+Receives incidents from Google Cloud Monitoring v1.2 webhook API. Maps GCP severity levels (CRITICAL, ERROR, WARNING, INFO) to the agent's severity system.
+
+#### Configuration Example
+
+```yaml
+# config/alert-sources.yaml
+addr: ":8080"
+
+sources:
+  - type: prometheus
+    name: alertmanager
+    webhook_path: /alerts/prometheus
+
+  - type: gcp_monitoring
+    name: gcp-alerts
+    webhook_path: /alerts/gcp
+```
+
+#### Investigation Tools
+
+During an investigation, the AI can use tools to:
+- Read log files (`bash`, `read_file`)
+- Query metrics (via custom skills)
+- Analyze code traces
+- Check system state
+- Execute diagnostic commands
+
+#### Escalation
+
+When an investigation cannot determine a root cause with high confidence, it can be escalated:
+
+```
+Investigation escalated to human review:
+- Confidence: 0.45
+- Findings: 3 observations, no definitive root cause
+- Recommended actions: Manual log inspection required
+```
 
 ### Configuration
 
@@ -422,6 +705,7 @@ export AGENT_SHOW_THINKING=false
 ```
 
 **Configuration options:**
+
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--model` | `hf:zai-org/GLM-4.7` | AI model to use |
@@ -434,6 +718,19 @@ export AGENT_SHOW_THINKING=false
 | `--goodbyeMessage` | `Bye!` | Displayed on session end |
 | `--historyFile` | `~/.agent-history` | Command history file location |
 | `--historyMaxEntries` | `1000` | Maximum history entries to keep |
+| `--auto-approve-safe` | `false` | Auto-approve non-dangerous bash commands (serve mode only) |
+
+### Serve Command Configuration
+
+```bash
+# Webhook server configuration
+./agent serve --addr :8080 --config config/alert-sources.yaml
+
+# Available flags:
+--addr                 Address to listen on (default: :8080)
+--config               Path to alert sources config file (default: config/alert-sources.yaml)
+--auto-approve-safe    Auto-approve non-dangerous bash commands (default: false)
+```
 
 ## Development
 
@@ -449,6 +746,13 @@ go test -cover ./...
 # Run specific package tests
 go test ./internal/domain/entity -v
 go test ./internal/infrastructure/adapter/file -v
+go test ./internal/application/usecase -v
+
+# Run tests for alert handling
+go test ./internal/infrastructure/adapter/alert -v
+
+# Run tests for investigation system
+go test ./internal/application/usecase -run TestAlertInvestigation -v
 ```
 
 ### Building
@@ -482,28 +786,48 @@ The domain layer is the heart of the application and contains no external depend
   - `Conversation` - Manages chat state and message collection
   - `Message` - Represents individual messages with role, content, and validation
   - `Tool` - Represents executable tools with schema validation
+  - `Alert` - Represents alerts from monitoring systems
+  - `Investigation` - Tracks investigation lifecycle with state machine
+  - `Skill` - Represents discoverable AI capabilities
+  - `Subagent` - Represents subagent configurations
 
 - **Domain Services** (`internal/domain/service/`)
   - `ConversationService` - Core business logic for managing conversations
+  - `ToolService` - Tool-related domain logic
 
 - **Ports** (`internal/domain/port/`)
   - `AIProvider` - Interface for AI service integration
   - `FileManager` - Interface for file operations
   - `ToolExecutor` - Interface for tool execution
   - `UserInterface` - Interface for CLI interactions
+  - `SkillManager` - Interface for skill discovery
+  - `SubagentManager` - Interface for subagent management
+  - `AlertSource` - Interface for alert ingestion
+  - `Context` - Interface for AI context management
+
+- **Safety** (`internal/domain/safety/`)
+  - `DangerousCommands` - Definitions and validation of dangerous commands
 
 #### 2. Review the Application Layer
 This layer orchestrates use cases using domain services:
 
 - **Use Cases** (`internal/application/usecase/`)
   - `MessageProcessUseCase` - Handles message processing flow
-  - `ToolExecutionUseCase` - Handles tool execution
+  - `ToolExecutionUseCase` - Handles tool execution and safety
+  - `AlertHandler` - Receives and processes incoming alerts
+  - `AlertInvestigation` - Runs investigation workflows
+  - `InvestigationRunner` - Executes investigations with AI
+  - `EscalationHandler` - Handles escalation logic
+  - `SubagentRunner` - Manages subagent spawning and communication
 
 - **Services** (`internal/application/service/`)
   - `ChatService` - High-level orchestration service
+  - `InvestigationStore` - Persistence for investigations
+  - `SkillService` - Skill discovery and management
+  - `SafetyEnforcer` - Command safety validation
 
-- **DTOs** (`internal/application/dto/`)
-  - Request/response objects for layer boundaries
+- **Configuration** (`internal/application/config/`)
+  - `InvestigationConfig` - Investigation-specific configuration
 
 #### 3. Examine the Infrastructure Layer
 Implementations of the ports defined in the domain:
@@ -511,16 +835,127 @@ Implementations of the ports defined in the domain:
 - **Adapters** (`internal/infrastructure/adapter/`)
   - `ai/anthropic_adapter.go` - Anthropic API implementation
   - `file/local_file_adapter.go` - Local file system operations
-  - `tool/tool_executor_adapter.go` - Built-in tools (read, list, edit)
+  - `tool/tool_executor_adapter.go` - Built-in tools (read, list, edit, bash, fetch, etc.)
   - `ui/cli_adapter.go` - Terminal interface
+  - `skill/local_skill_adapter.go` - Skill discovery from filesystem
+  - `subagent/local_subagent_adapter.go` - Subagent discovery from filesystem
+  - `alert/prometheus_source.go` - Prometheus Alertmanager webhook handler
+  - `alert/gcp_monitoring_source.go` - GCP Monitoring webhook handler
+  - `investigation/file_store.go` - Investigation persistence
+  - `webhook/http_adapter.go` - HTTP webhook server
 
 - **Config** (`internal/infrastructure/config/`)
   - `container.go` - Dependency injection container
   - `config.go` - Configuration management
+  - `webhook_config.go` - Webhook server configuration
+
+- **Signal** (`internal/infrastructure/signal/`)
+  - `interrupt_handler.go` - Graceful shutdown handling
+  - `reload_handler.go` - SIGHUP handler for skill hot-reload
 
 #### 4. CLI Entry Point
 - `cmd/cli/main.go` - Application entry point
 - `cmd/cli/cmd/` - CLI command definitions using cobra
+  - `root.go` - Root command and global flags
+  - `chat.go` - Interactive chat command
+  - `serve.go` - Webhook server command
+
+### Adding an Alert Source
+
+1. **Implement the new source** in `internal/infrastructure/adapter/alert/`:
+
+```go
+// my_source.go
+package alert
+
+import (
+    "code-editing-agent/internal/domain/entity"
+    "code-editing-agent/internal/domain/port"
+    "context"
+)
+
+type MySource struct {
+    name        string
+    webhookPath string
+}
+
+func NewMySource(config SourceConfig) (port.WebhookAlertSource, error) {
+    // Validate and create source
+    return &MySource{
+        name:        config.Name,
+        webhookPath: config.WebhookPath,
+    }, nil
+}
+
+func (m *MySource) Name() string { return m.name }
+func (m *MySource) Type() port.SourceType { return port.SourceTypeWebhook }
+func (m *MySource) WebhookPath() string { return m.webhookPath }
+func (m *MySource) Close() error { return nil }
+
+func (m *MySource) HandleWebhook(ctx context.Context, payload []byte) ([]*entity.Alert, error) {
+    // Parse webhook payload and return alerts
+    alert, _ := entity.NewAlert("id", m.name, entity.SeverityCritical, "title")
+    return []*entity.Alert{alert}, nil
+}
+```
+
+2. **Register the source** in `internal/infrastructure/adapter/alert/source_registry.go`:
+
+```go
+func (r *SourceRegistry) RegisterBuiltinFactories() {
+    r.RegisterFactory("prometheus", NewPrometheusSource)
+    r.RegisterFactory("gcp_monitoring", NewGCPMonitoringSource)
+    r.RegisterFactory("my_source", NewMySource)  // Add this line
+}
+```
+
+3. **Add configuration** to `config/alert-sources.yaml`:
+
+```yaml
+sources:
+  - type: my_source
+    name: my-alerts
+    webhook_path: /alerts/my
+```
+
+4. **Tests are required** - Add corresponding tests in `*_test.go`
+
+### Adding an Investigation Skill
+
+Create investigation-focused skills to enhance alert analysis:
+
+**skills/alert-investigation/SKILL.md**:
+```yaml
+---
+name: alert-investigation
+description: Specialized in investigating alerts from monitoring systems
+allowed-tools:
+  - read_file
+  - list_files
+  - bash
+  - activate_skill
+---
+
+# Alert Investigation Skill
+
+You are specialized in investigating alerts from monitoring systems.
+
+## Investigation Process
+
+1. **Understand the Alert**: Review alert metadata, labels, and description
+2. **Check Logs**: Look at relevant log files using bash and read_file
+3. **Analyze Metrics**: Query monitoring systems if available
+4. **Examine Code**: Review recent changes that might be related
+5. **Provide Findings**: Complete investigation with confidence and recommended actions
+
+## Output Format
+
+Complete investigation with:
+- Confidence level (0.0-1.0)
+- List of findings with severity
+- Root cause analysis when possible
+- Recommended actions
+```
 
 ### Adding a New Tool
 
@@ -557,12 +992,12 @@ The project uses table-driven tests throughout. Look at existing tests for patte
 | Package | Version | Purpose |
 |---------|---------|---------|
 | `github.com/anthropics/anthropic-sdk-go` | v1.19.0 | Anthropic API client |
-| `github.com/invopop/jsonschema` | v0.13.0 | JSON schema generation |
-| `github.com/stretchr/testify` | v1.11.1 | Testing utilities |
+| `github.com/chzyer/readline` | v1.5.1 | Interactive input with history |
 | `github.com/spf13/cobra` | v1.10.2 | CLI framework |
 | `github.com/spf13/viper` | v1.21.0 | Configuration management |
-| `github.com/chzyer/readline` | v1.5.1 | Interactive input with history |
+| `github.com/stretchr/testify` | v1.11.1 | Testing utilities |
 | `golang.org/x/net` | v0.48.0 | HTTP utilities |
+| `gopkg.in/yaml.v3` | v3.0.1 | YAML parsing for configuration files (SKILL.md, AGENT.md) |
 
 ## License
 
