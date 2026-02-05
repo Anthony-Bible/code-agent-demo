@@ -28,3 +28,9 @@ type ToolExecutor interface {
 	// ValidateToolInput validates input for a specific tool.
 	ValidateToolInput(name string, input interface{}) error
 }
+
+// SessionCleaner is an optional interface that ToolExecutor implementations
+// can implement to clean up session-specific state when a session ends.
+type SessionCleaner interface {
+	CleanupSession(sessionID string)
+}

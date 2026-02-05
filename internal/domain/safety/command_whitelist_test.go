@@ -2161,6 +2161,159 @@ func TestExtractDollarParenCommands_BoundaryDepth(t *testing.T) {
 	}
 }
 
+func TestCommandWhitelist_OutputRedirectionBlocked(t *testing.T) {
+	patterns := []WhitelistPattern{
+		{Pattern: regexp.MustCompile(`^cat(\s|$)`), Description: "display file"},
+		{Pattern: regexp.MustCompile(`^echo(\s|$)`), Description: "echo"},
+		{Pattern: regexp.MustCompile(`^ls(\s|$)`), Description: "list directory"},
+		{Pattern: regexp.MustCompile(`^grep(\s|$)`), Description: "search"},
+	}
+	whitelist := NewCommandWhitelist(patterns)
+
+	tests := []struct {
+		name        string
+		command     string
+		wantAllowed bool
+	}{
+		// Blocked: output redirections
+		{
+			name:        "stdout redirect",
+			command:     "cat file > output.txt",
+			wantAllowed: false,
+		},
+		{
+			name:        "stdout append",
+			command:     "cat file >> output.txt",
+			wantAllowed: false,
+		},
+		{
+			name:        "stderr redirect",
+			command:     "echo hello 2> /dev/null",
+			wantAllowed: false,
+		},
+		{
+			name:        "stderr append",
+			command:     "echo hello 2>> errors.log",
+			wantAllowed: false,
+		},
+		{
+			name:        "stdout and stderr redirect",
+			command:     "cat file &> output.txt",
+			wantAllowed: false,
+		},
+		{
+			name:        "stdout and stderr append",
+			command:     "cat file &>> output.txt",
+			wantAllowed: false,
+		},
+		{
+			name:        "fd 3 redirect",
+			command:     "echo hello 3> fd3.txt",
+			wantAllowed: false,
+		},
+
+		// Allowed: no redirections
+		{
+			name:        "simple cat",
+			command:     "cat file.txt",
+			wantAllowed: true,
+		},
+		{
+			name:        "simple grep",
+			command:     "grep pattern file",
+			wantAllowed: true,
+		},
+		{
+			name:        "simple ls",
+			command:     "ls -la",
+			wantAllowed: true,
+		},
+
+		// Allowed: redirection inside quotes (not actual shell redirection)
+		{
+			name:        "redirect in double quotes",
+			command:     `echo "hello > world"`,
+			wantAllowed: true,
+		},
+		{
+			name:        "redirect in single quotes",
+			command:     `echo 'test > file'`,
+			wantAllowed: true,
+		},
+		{
+			name:        "append in double quotes",
+			command:     `echo "data >> log"`,
+			wantAllowed: true,
+		},
+
+		// Allowed: input redirection (< is not blocked)
+		{
+			name:        "input redirect",
+			command:     "cat < input.txt",
+			wantAllowed: true,
+		},
+		{
+			name:        "heredoc",
+			command:     "cat << EOF",
+			wantAllowed: true,
+		},
+		{
+			name:        "herestring",
+			command:     "cat <<< hello",
+			wantAllowed: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			allowed, _ := whitelist.IsAllowed(tt.command)
+			if allowed != tt.wantAllowed {
+				t.Errorf("IsAllowed(%q) = %v, want %v", tt.command, allowed, tt.wantAllowed)
+			}
+		})
+	}
+}
+
+func TestIsAllowedWithPipes_OutputRedirectionInSegment(t *testing.T) {
+	patterns := []WhitelistPattern{
+		{Pattern: regexp.MustCompile(`^ls(\s|$)`), Description: "list directory"},
+		{Pattern: regexp.MustCompile(`^cat(\s|$)`), Description: "display file"},
+		{Pattern: regexp.MustCompile(`^grep(\s|$)`), Description: "search"},
+	}
+	whitelist := NewCommandWhitelist(patterns)
+
+	tests := []struct {
+		name        string
+		command     string
+		wantAllowed bool
+	}{
+		{
+			name:        "first segment has redirect",
+			command:     "ls > file && cat file",
+			wantAllowed: false,
+		},
+		{
+			name:        "pipe with no redirect allowed",
+			command:     "cat file | grep foo",
+			wantAllowed: true,
+		},
+		{
+			name:        "second segment has redirect",
+			command:     "ls | cat file > output.txt",
+			wantAllowed: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			allowed, _ := whitelist.IsAllowedWithPipes(tt.command)
+			if allowed != tt.wantAllowed {
+				t.Errorf("IsAllowedWithPipes(%q) = %v, want %v", tt.command, allowed, tt.wantAllowed)
+			}
+		})
+	}
+}
+
 func TestIsDangerousCommand_BoundaryDepth(t *testing.T) {
 	// Helper to build properly nested command: echo $(echo $(echo $(pwd)))
 	buildNestedCommand := func(depth int) string {

@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"bufio"
 	"bytes"
 	"code-editing-agent/internal/application/usecase"
 	"code-editing-agent/internal/domain/entity"
@@ -15,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -791,36 +793,40 @@ func (in *readFileInput) validateLineRange() error {
 	return nil
 }
 
-// formatLinesWithNumbers formats file content as numbered lines within the specified range.
-// startLine and endLine are 1-based line numbers. If nil, they default to the beginning and end of the file.
-func formatLinesWithNumbers(content string, startLine, endLine *int) string {
-	lines := strings.Split(content, "\n")
-	// Remove trailing empty line if content ends with newline
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
+// maxReadFileLines is the default line cap when no explicit range is requested.
+// Prevents sending excessively large outputs to the LLM.
+const maxReadFileLines = 2000
 
-	// Determine start and end indices (1-based to 0-based), clamped to valid range
-	startIdx := 0
-	if startLine != nil {
-		startIdx = min(*startLine-1, len(lines))
+// preAllocBuilder pre-allocates a strings.Builder based on file size, capped at 10MB.
+func preAllocBuilder(b *strings.Builder, f *os.File) {
+	const maxPreAlloc = 10 * 1024 * 1024
+	if info, err := f.Stat(); err == nil {
+		preAlloc := int(info.Size()) + 1024
+		if preAlloc > maxPreAlloc {
+			preAlloc = maxPreAlloc
+		}
+		b.Grow(preAlloc)
 	}
+}
 
-	endIdx := len(lines)
-	if endLine != nil {
-		endIdx = min(*endLine, len(lines))
+// appendTruncationNotice counts remaining lines via scanner and appends a truncation message.
+func appendTruncationNotice(result *strings.Builder, scanner *bufio.Scanner, linesRead int) {
+	totalLines := linesRead
+	for scanner.Scan() {
+		totalLines++
 	}
-
-	// Build output with line numbers
-	var result strings.Builder
-	for i := startIdx; i < endIdx; i++ {
-		result.WriteString(fmt.Sprintf("%d: %s\n", i+1, lines[i]))
-	}
-
-	return result.String()
+	fmt.Fprintf(
+		result,
+		"\n--- Output truncated at %d lines (file has %d total). Use start_line/end_line to read more. ---\n",
+		maxReadFileLines,
+		totalLines,
+	)
 }
 
 // executeReadFile executes the read_file tool.
+// It streams lines from the file to avoid loading the entire file into memory,
+// only keeping the requested line range. When no range is specified, output is
+// capped at maxReadFileLines with a truncation notice.
 func (a *ExecutorAdapter) executeReadFile(input json.RawMessage) (string, error) {
 	var in readFileInput
 	if err := json.Unmarshal(input, &in); err != nil {
@@ -831,12 +837,56 @@ func (a *ExecutorAdapter) executeReadFile(input json.RawMessage) (string, error)
 		return "", err
 	}
 
-	content, err := a.fileManager.ReadFile(in.Path)
+	path, err := a.fileManager.ResolvePath(in.Path)
 	if err != nil {
 		return "", wrapFileOperationError("Failed to read file", err)
 	}
 
-	return formatLinesWithNumbers(content, in.StartLine, in.EndLine), nil
+	f, err := os.Open(path)
+	if err != nil {
+		return "", wrapFileOperationError("Failed to read file", err)
+	}
+	defer f.Close()
+
+	startIdx := 1
+	if in.StartLine != nil {
+		startIdx = *in.StartLine
+	}
+	endIdx := 0 // 0 means "read to end"
+	if in.EndLine != nil {
+		endIdx = *in.EndLine
+	}
+
+	// Apply default cap when no explicit range is given
+	noExplicitRange := in.StartLine == nil && in.EndLine == nil
+	if noExplicitRange {
+		endIdx = maxReadFileLines
+	}
+
+	var result strings.Builder
+	preAllocBuilder(&result, f)
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024) // up to 1MB lines
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		if lineNum < startIdx {
+			continue
+		}
+		if endIdx > 0 && lineNum > endIdx {
+			break
+		}
+		fmt.Fprintf(&result, "%d: %s\n", lineNum, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return "", wrapFileOperationError("Failed to read file", err)
+	}
+
+	if noExplicitRange && lineNum > maxReadFileLines {
+		appendTruncationNotice(&result, scanner, lineNum)
+	}
+
+	return result.String(), nil
 }
 
 // listFilesInput represents the input for the list_files tool.
@@ -899,15 +949,18 @@ func (a *ExecutorAdapter) executeEditFile(input json.RawMessage) (string, error)
 		return "", errors.New("invalid input parameters: path is required and old_str must differ from new_str")
 	}
 
-	// Check if file exists
-	exists, err := a.fileManager.FileExists(in.Path)
-	if err != nil {
-		return "", wrapFileOperationError("Failed to check if file exists", err)
-	}
-
-	// If file doesn't exist and old_str is empty, create a new file
-	if !exists && in.OldStr == "" {
-		return a.createNewFile(in.Path, in.NewStr)
+	// Handle empty old_str: only valid for creating new files.
+	// Must check before FileExists/ReadFile to avoid unnecessary I/O,
+	// and before ReplaceAll which would OOM inserting new_str at every position.
+	if in.OldStr == "" {
+		exists, err := a.fileManager.FileExists(in.Path)
+		if err != nil {
+			return "", wrapFileOperationError("Failed to check if file exists", err)
+		}
+		if !exists {
+			return a.createNewFile(in.Path, in.NewStr)
+		}
+		return "", errors.New("old_str must not be empty when editing an existing file")
 	}
 
 	// Read existing file content

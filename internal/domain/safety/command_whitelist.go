@@ -121,9 +121,56 @@ func NewCommandWhitelist(patterns []WhitelistPattern) *CommandWhitelist {
 	}
 }
 
+// containsOutputRedirection checks if a command contains unquoted output redirection operators.
+// Detects: >, >>, 2>, 2>>, &>, &>>, n>, n>> (where n is any digit).
+// Does NOT block input redirections: <, <<, <<<.
+// Respects shell quoting: redirections inside single quotes, double quotes, or backticks are ignored.
+func containsOutputRedirection(cmd string) bool {
+	state := quoteNone
+	escaped := false
+
+	for i := range len(cmd) {
+		c := cmd[i]
+
+		// Handle escape sequences (only in double quotes or unquoted)
+		if escaped {
+			escaped = false
+			continue
+		}
+		if isEscapeChar(c, state) {
+			escaped = true
+			continue
+		}
+
+		// Handle quote characters
+		if isQuoteChar(c) {
+			state = updateQuoteState(state, c)
+			continue
+		}
+
+		// Only check for redirections when not inside quotes
+		if state != quoteNone {
+			continue
+		}
+
+		// Check for '>' character
+		if c == '>' {
+			// Look back to determine if this is an output redirection vs input heredoc
+			// If preceded by '<', this is part of <<, <<<, or <> — not an output redirect
+			if i > 0 && cmd[i-1] == '<' {
+				continue
+			}
+			// This is an output redirection (>, >>, n>, &>, etc.)
+			return true
+		}
+	}
+	return false
+}
+
 // IsAllowed checks if a command matches any whitelisted pattern.
 // Returns (true, description) if allowed, (false, "") if not allowed.
 // If a pattern has an ExcludePattern set, the command must not match the exclude pattern.
+// Commands containing unquoted output redirections (>, >>, 2>, &>, etc.) are always blocked.
 //
 // Note: This function does not perform length validation. Callers should use
 // IsAllowedWithPipes() which validates length before splitting and checking segments.
@@ -133,6 +180,10 @@ func (w *CommandWhitelist) IsAllowed(cmd string) (bool, string) {
 			// Check exclusion pattern (simulates negative lookahead)
 			if wp.ExcludePattern != nil && wp.ExcludePattern.MatchString(cmd) {
 				continue // Excluded, try next pattern
+			}
+			// Block commands with unquoted output redirections
+			if containsOutputRedirection(cmd) {
+				return false, ""
 			}
 			return true, wp.Description
 		}

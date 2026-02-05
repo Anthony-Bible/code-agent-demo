@@ -38,4 +38,7 @@ type FileManager interface {
 
 	// GetFileInfo returns metadata about a file or directory.
 	GetFileInfo(path string) (FileInfo, error)
+
+	// ResolvePath validates and resolves a path to an absolute path within the base directory.
+	ResolvePath(path string) (string, error)
 }
