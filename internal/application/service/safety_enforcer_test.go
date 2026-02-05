@@ -2,11 +2,61 @@ package service
 
 import (
 	"code-editing-agent/internal/application/config"
+	"code-editing-agent/internal/domain/safety"
 	"context"
 	"errors"
 	"testing"
 	"time"
 )
+
+// mockValidator is a test double for safety.CommandValidator.
+type mockValidator struct {
+	allowAll bool
+	blocked  map[string]bool
+}
+
+func newMockValidator(allowAll bool) *mockValidator {
+	return &mockValidator{allowAll: allowAll, blocked: make(map[string]bool)}
+}
+
+func (m *mockValidator) blockCommand(cmd string) {
+	m.blocked[cmd] = true
+}
+
+func (m *mockValidator) Validate(command string, _ bool) safety.ValidationResult {
+	if m.blocked[command] {
+		return safety.ValidationResult{
+			Allowed:     false,
+			IsDangerous: true,
+			Reason:      "blocked by mock",
+		}
+	}
+	if m.allowAll {
+		return safety.ValidationResult{Allowed: true}
+	}
+	// Check against dangerous patterns for realistic behavior
+	isDangerous, reason := safety.IsDangerousCommand(command)
+	if isDangerous {
+		return safety.ValidationResult{
+			Allowed:     false,
+			IsDangerous: true,
+			Reason:      reason,
+		}
+	}
+	return safety.ValidationResult{Allowed: true}
+}
+
+// newTestEnforcer creates an enforcer with a mock validator for testing.
+// The mock validator checks dangerous patterns but allows safe commands.
+func newTestEnforcer(t *testing.T, cfg *config.InvestigationConfig) SafetyEnforcer {
+	t.Helper()
+	validator := newMockValidator(false) // Use realistic validation
+	enforcer, err := NewInvestigationSafetyEnforcerWithValidator(cfg, validator)
+	if err != nil {
+		t.Fatalf("NewInvestigationSafetyEnforcerWithValidator() error = %v", err)
+	}
+	return enforcer
+}
 
 // =============================================================================
 // SafetyEnforcer Tests
@@ -52,38 +102,55 @@ func TestSafetyEnforcerErrors_HaveMessages(t *testing.T) {
 // Constructor Tests
 // =============================================================================
 
-func TestNewInvestigationSafetyEnforcer_NotNil(t *testing.T) {
+func TestNewInvestigationSafetyEnforcerWithValidator_NotNil(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig()
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
+	validator := newMockValidator(true)
+	enforcer, err := NewInvestigationSafetyEnforcerWithValidator(cfg, validator)
 	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
+		t.Fatalf("NewInvestigationSafetyEnforcerWithValidator() error = %v", err)
 	}
 	if enforcer == nil {
-		t.Error("NewInvestigationSafetyEnforcer() should not return nil")
+		t.Error("NewInvestigationSafetyEnforcerWithValidator() should not return nil")
 	}
 }
 
-func TestNewInvestigationSafetyEnforcer_NilConfig(t *testing.T) {
-	enforcer, err := NewInvestigationSafetyEnforcer(nil)
+func TestNewInvestigationSafetyEnforcerWithValidator_NilConfig(t *testing.T) {
+	validator := newMockValidator(true)
+	enforcer, err := NewInvestigationSafetyEnforcerWithValidator(nil, validator)
 	if err == nil {
-		t.Error("NewInvestigationSafetyEnforcer(nil) should return error")
+		t.Error("NewInvestigationSafetyEnforcerWithValidator(nil, validator) should return error")
 	}
 	if !errors.Is(err, ErrNilConfig) {
-		t.Errorf("NewInvestigationSafetyEnforcer(nil) error = %v, want ErrNilConfig", err)
+		t.Errorf("NewInvestigationSafetyEnforcerWithValidator(nil, validator) error = %v, want ErrNilConfig", err)
 	}
 	if enforcer != nil {
-		t.Error("NewInvestigationSafetyEnforcer(nil) should return nil enforcer")
+		t.Error("NewInvestigationSafetyEnforcerWithValidator(nil, validator) should return nil enforcer")
 	}
 }
 
-func TestNewInvestigationSafetyEnforcer_InvalidConfig(t *testing.T) {
-	cfg := config.NewInvestigationConfig() // Empty config - invalid
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
+func TestNewInvestigationSafetyEnforcerWithValidator_NilValidator(t *testing.T) {
+	cfg := config.DefaultInvestigationConfig()
+	enforcer, err := NewInvestigationSafetyEnforcerWithValidator(cfg, nil)
 	if err == nil {
-		t.Error("NewInvestigationSafetyEnforcer() with invalid config should return error")
+		t.Error("NewInvestigationSafetyEnforcerWithValidator(cfg, nil) should return error")
+	}
+	if !errors.Is(err, ErrNilValidator) {
+		t.Errorf("NewInvestigationSafetyEnforcerWithValidator(cfg, nil) error = %v, want ErrNilValidator", err)
 	}
 	if enforcer != nil {
-		t.Error("NewInvestigationSafetyEnforcer() with invalid config should return nil enforcer")
+		t.Error("NewInvestigationSafetyEnforcerWithValidator(cfg, nil) should return nil enforcer")
+	}
+}
+
+func TestNewInvestigationSafetyEnforcerWithValidator_InvalidConfig(t *testing.T) {
+	cfg := config.NewInvestigationConfig() // Empty config - invalid
+	validator := newMockValidator(true)
+	enforcer, err := NewInvestigationSafetyEnforcerWithValidator(cfg, validator)
+	if err == nil {
+		t.Error("NewInvestigationSafetyEnforcerWithValidator() with invalid config should return error")
+	}
+	if enforcer != nil {
+		t.Error("NewInvestigationSafetyEnforcerWithValidator() with invalid config should return nil enforcer")
 	}
 }
 
@@ -93,10 +160,7 @@ func TestNewInvestigationSafetyEnforcer_InvalidConfig(t *testing.T) {
 
 func TestInvestigationSafetyEnforcer_CheckToolAllowed_AllowedTool(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig()
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	tests := []struct {
 		name string
@@ -119,10 +183,7 @@ func TestInvestigationSafetyEnforcer_CheckToolAllowed_AllowedTool(t *testing.T) 
 
 func TestInvestigationSafetyEnforcer_CheckToolAllowed_BlockedTool(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig()
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	tests := []struct {
 		name string
@@ -149,12 +210,9 @@ func TestInvestigationSafetyEnforcer_CheckToolAllowed_BlockedTool(t *testing.T) 
 
 func TestInvestigationSafetyEnforcer_CheckToolAllowed_EmptyTool(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig()
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
-	err = enforcer.CheckToolAllowed("")
+	err := enforcer.CheckToolAllowed("")
 	if err == nil {
 		t.Error("CheckToolAllowed('') should return error")
 	}
@@ -170,10 +228,7 @@ func TestInvestigationSafetyEnforcer_CheckToolAllowed_CustomConfig(t *testing.T)
 	_ = cfg.SetMaxConcurrent(3)
 	_ = cfg.SetAllowedTools([]string{"custom_tool", "another_tool"})
 
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	// Custom tool should be allowed
 	if err := enforcer.CheckToolAllowed("custom_tool"); err != nil {
@@ -192,10 +247,7 @@ func TestInvestigationSafetyEnforcer_CheckToolAllowed_CustomConfig(t *testing.T)
 
 func TestInvestigationSafetyEnforcer_CheckCommandAllowed_SafeCommands(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig()
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	tests := []struct {
 		name    string
@@ -223,10 +275,7 @@ func TestInvestigationSafetyEnforcer_CheckCommandAllowed_SafeCommands(t *testing
 
 func TestInvestigationSafetyEnforcer_CheckCommandAllowed_DangerousCommands(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig()
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	tests := []struct {
 		name    string
@@ -256,13 +305,10 @@ func TestInvestigationSafetyEnforcer_CheckCommandAllowed_DangerousCommands(t *te
 
 func TestInvestigationSafetyEnforcer_CheckCommandAllowed_EmptyCommand(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig()
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	// Empty command should be allowed (no dangerous patterns)
-	err = enforcer.CheckCommandAllowed("")
+	err := enforcer.CheckCommandAllowed("")
 	if err != nil {
 		t.Errorf("CheckCommandAllowed('') error = %v, want nil", err)
 	}
@@ -276,9 +322,12 @@ func TestInvestigationSafetyEnforcer_CheckCommandAllowed_CustomBlockedPatterns(t
 	_ = cfg.SetAllowedTools([]string{"bash"})
 	_ = cfg.SetBlockedCommands([]string{"custom_danger", "secret_cmd"})
 
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
+	// Create a mock validator that blocks specific custom commands
+	validator := newMockValidator(true) // Allow all by default
+	validator.blockCommand("run custom_danger now")
+	enforcer, err := NewInvestigationSafetyEnforcerWithValidator(cfg, validator)
 	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
+		t.Fatalf("NewInvestigationSafetyEnforcerWithValidator() error = %v", err)
 	}
 
 	// Custom blocked pattern
@@ -286,7 +335,7 @@ func TestInvestigationSafetyEnforcer_CheckCommandAllowed_CustomBlockedPatterns(t
 		t.Error("CheckCommandAllowed() should block custom pattern")
 	}
 
-	// Default dangerous command should now be allowed (custom config replaces defaults)
+	// Default dangerous command - validator allows all, so this passes
 	if err := enforcer.CheckCommandAllowed("rm -rf /"); err != nil {
 		t.Logf("Note: custom config may or may not include default blocked commands: %v", err)
 	}
@@ -298,10 +347,7 @@ func TestInvestigationSafetyEnforcer_CheckCommandAllowed_CustomBlockedPatterns(t
 
 func TestInvestigationSafetyEnforcer_CheckActionBudget_UnderLimit(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig() // Default is 20 max actions
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	tests := []struct {
 		name         string
@@ -325,12 +371,9 @@ func TestInvestigationSafetyEnforcer_CheckActionBudget_UnderLimit(t *testing.T) 
 
 func TestInvestigationSafetyEnforcer_CheckActionBudget_AtLimit(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig() // Default is 20 max actions
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
-	err = enforcer.CheckActionBudget(20) // At limit
+	err := enforcer.CheckActionBudget(20) // At limit
 	if err == nil {
 		t.Error("CheckActionBudget(20) should return error at limit")
 	}
@@ -341,10 +384,7 @@ func TestInvestigationSafetyEnforcer_CheckActionBudget_AtLimit(t *testing.T) {
 
 func TestInvestigationSafetyEnforcer_CheckActionBudget_OverLimit(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig() // Default is 20 max actions
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	tests := []struct {
 		name         string
@@ -370,13 +410,10 @@ func TestInvestigationSafetyEnforcer_CheckActionBudget_OverLimit(t *testing.T) {
 
 func TestInvestigationSafetyEnforcer_CheckActionBudget_NegativeActions(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig()
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	// Negative actions should be treated as under limit (or error)
-	err = enforcer.CheckActionBudget(-1)
+	err := enforcer.CheckActionBudget(-1)
 	if err != nil {
 		t.Errorf("CheckActionBudget(-1) error = %v, want nil (negative treated as under limit)", err)
 	}
@@ -389,10 +426,7 @@ func TestInvestigationSafetyEnforcer_CheckActionBudget_CustomLimit(t *testing.T)
 	_ = cfg.SetMaxConcurrent(3)
 	_ = cfg.SetAllowedTools([]string{"bash"})
 
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	// Under custom limit
 	if err := enforcer.CheckActionBudget(4); err != nil {
@@ -411,13 +445,10 @@ func TestInvestigationSafetyEnforcer_CheckActionBudget_CustomLimit(t *testing.T)
 
 func TestInvestigationSafetyEnforcer_CheckTimeout_ActiveContext(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig()
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	ctx := context.Background()
-	err = enforcer.CheckTimeout(ctx)
+	err := enforcer.CheckTimeout(ctx)
 	if err != nil {
 		t.Errorf("CheckTimeout() with active context error = %v, want nil", err)
 	}
@@ -425,15 +456,12 @@ func TestInvestigationSafetyEnforcer_CheckTimeout_ActiveContext(t *testing.T) {
 
 func TestInvestigationSafetyEnforcer_CheckTimeout_CancelledContext(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig()
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	err = enforcer.CheckTimeout(ctx)
+	err := enforcer.CheckTimeout(ctx)
 	if err == nil {
 		t.Error("CheckTimeout() with cancelled context should return error")
 	}
@@ -444,16 +472,13 @@ func TestInvestigationSafetyEnforcer_CheckTimeout_CancelledContext(t *testing.T)
 
 func TestInvestigationSafetyEnforcer_CheckTimeout_ExpiredDeadline(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig()
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	// Context with already-expired deadline
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-1*time.Second))
 	defer cancel()
 
-	err = enforcer.CheckTimeout(ctx)
+	err := enforcer.CheckTimeout(ctx)
 	if err == nil {
 		t.Error("CheckTimeout() with expired deadline should return error")
 	}
@@ -464,16 +489,13 @@ func TestInvestigationSafetyEnforcer_CheckTimeout_ExpiredDeadline(t *testing.T) 
 
 func TestInvestigationSafetyEnforcer_CheckTimeout_FutureDeadline(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig()
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	// Context with future deadline
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(1*time.Hour))
 	defer cancel()
 
-	err = enforcer.CheckTimeout(ctx)
+	err := enforcer.CheckTimeout(ctx)
 	if err != nil {
 		t.Errorf("CheckTimeout() with future deadline error = %v, want nil", err)
 	}
@@ -481,10 +503,7 @@ func TestInvestigationSafetyEnforcer_CheckTimeout_FutureDeadline(t *testing.T) {
 
 func TestInvestigationSafetyEnforcer_CheckTimeout_NilContext(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig()
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	// This should either panic or return error - we test it doesn't panic silently
 	defer func() {
@@ -494,7 +513,7 @@ func TestInvestigationSafetyEnforcer_CheckTimeout_NilContext(t *testing.T) {
 	}()
 
 	//nolint:staticcheck // Testing nil context behavior intentionally
-	err = enforcer.CheckTimeout(nil)
+	err := enforcer.CheckTimeout(nil)
 	if err == nil {
 		t.Error("CheckTimeout(nil) should return error or panic")
 	}
@@ -506,10 +525,7 @@ func TestInvestigationSafetyEnforcer_CheckTimeout_NilContext(t *testing.T) {
 
 func TestInvestigationSafetyEnforcer_ImplementsInterface(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig()
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	// Compile-time check that InvestigationSafetyEnforcer implements SafetyEnforcer
 	_ = enforcer
@@ -522,11 +538,7 @@ func TestInvestigationSafetyEnforcer_ImplementsInterface(t *testing.T) {
 func TestSafetyEnforcer_InterfaceMethods(t *testing.T) {
 	// This test verifies the interface definition by using the concrete implementation
 	cfg := config.DefaultInvestigationConfig()
-	var enforcer SafetyEnforcer
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	// All interface methods should be callable
 	_ = enforcer.CheckToolAllowed("bash")
@@ -541,10 +553,7 @@ func TestSafetyEnforcer_InterfaceMethods(t *testing.T) {
 
 func TestInvestigationSafetyEnforcer_CommandWithWhitespace(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig()
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	tests := []struct {
 		name      string
@@ -573,10 +582,7 @@ func TestInvestigationSafetyEnforcer_CommandWithWhitespace(t *testing.T) {
 
 func TestInvestigationSafetyEnforcer_ToolWithCase(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig()
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	// Tool names should be case-sensitive
 	tests := []struct {
@@ -610,10 +616,7 @@ func TestInvestigationSafetyEnforcer_ToolWithCase(t *testing.T) {
 
 func TestInvestigationSafetyEnforcer_ConcurrentChecks(t *testing.T) {
 	cfg := config.DefaultInvestigationConfig()
-	enforcer, err := NewInvestigationSafetyEnforcer(cfg)
-	if err != nil {
-		t.Fatalf("NewInvestigationSafetyEnforcer() error = %v", err)
-	}
+	enforcer := newTestEnforcer(t, cfg)
 
 	done := make(chan bool, 3)
 

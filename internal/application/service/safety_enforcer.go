@@ -43,22 +43,6 @@ type InvestigationSafetyEnforcer struct {
 	validator safety.CommandValidator
 }
 
-// NewInvestigationSafetyEnforcer creates a new SafetyEnforcer from an InvestigationConfig.
-// Returns ErrNilConfig if cfg is nil.
-// Returns a validation error if the config is invalid.
-//
-// Deprecated: Use NewInvestigationSafetyEnforcerWithValidator instead to enable
-// whitelist/blacklist command validation.
-func NewInvestigationSafetyEnforcer(cfg *config.InvestigationConfig) (SafetyEnforcer, error) {
-	if cfg == nil {
-		return nil, ErrNilConfig
-	}
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
-	return &InvestigationSafetyEnforcer{cfg: cfg, validator: nil}, nil
-}
-
 // NewInvestigationSafetyEnforcerWithValidator creates a new SafetyEnforcer with CommandValidator.
 // The CommandValidator provides whitelist/blacklist-based command validation.
 // Returns ErrNilConfig if cfg is nil.
@@ -89,24 +73,11 @@ func (e *InvestigationSafetyEnforcer) CheckToolAllowed(tool string) error {
 }
 
 // CheckCommandAllowed returns ErrCommandBlocked if the command matches a blocked pattern.
-// If a CommandValidator is configured, uses whitelist/blacklist validation.
-// Otherwise, falls back to simple substring matching against blocked commands.
+// Uses the configured CommandValidator for whitelist/blacklist validation.
 func (e *InvestigationSafetyEnforcer) CheckCommandAllowed(cmd string) error {
-	// If validator is configured, use it for sophisticated whitelist/blacklist validation
-	if e.validator != nil {
-		result := e.validator.Validate(cmd, false)
-		if !result.Allowed {
-			return ErrCommandBlocked
-		}
-		return nil
-	}
-
-	// Fallback: legacy substring-based validation for backward compatibility
-	// This path is used when SafetyEnforcer is created without a CommandValidator
-	for _, blocked := range e.cfg.BlockedCommands() {
-		if safety.IsCommandBlocked(cmd, []string{blocked}) {
-			return ErrCommandBlocked
-		}
+	result := e.validator.Validate(cmd, false)
+	if !result.Allowed {
+		return ErrCommandBlocked
 	}
 	return nil
 }
