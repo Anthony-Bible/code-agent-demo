@@ -15,9 +15,6 @@ var (
 	// ErrUnbalancedParens indicates unbalanced $() in a command.
 	ErrUnbalancedParens = errors.New("unbalanced $() in command")
 
-	// ErrNestedQuantifiers indicates a pattern contains nested quantifiers which may cause ReDoS.
-	ErrNestedQuantifiers = errors.New("pattern contains nested quantifiers which may cause ReDoS")
-
 	// ErrPatternTooLong indicates a pattern exceeds the maximum allowed length.
 	ErrPatternTooLong = errors.New("pattern too long")
 
@@ -26,12 +23,6 @@ var (
 
 	// ErrWhitelistRequired indicates whitelist mode was requested but no whitelist was provided.
 	ErrWhitelistRequired = errors.New("whitelist required for whitelist mode")
-
-	// ErrLargeRepetition indicates a pattern contains large repetition which may cause ReDoS.
-	ErrLargeRepetition = errors.New("pattern contains large repetition which may cause ReDoS")
-
-	// ErrAlternationQuantifier indicates a pattern contains alternation with outer quantifier which may cause ReDoS.
-	ErrAlternationQuantifier = errors.New("pattern contains alternation with quantifier which may cause ReDoS")
 )
 
 // Shared regex patterns for dangerous command detection.

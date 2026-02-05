@@ -117,7 +117,7 @@ func TestCommandValidator_WhitelistMode_Blocked(t *testing.T) {
 
 func TestCommandValidator_WhitelistMode_LLMFallback(t *testing.T) {
 	mock := newMockAllowChecker(map[string]string{"ls": "list files"})
-	validator, err := NewCommandValidator(ModeWhitelist, mock, true) // askLLMOnUnknown=true
+	validator, err := NewCommandValidator(ModeWhitelist, mock, true) // confirmOnUnknown=true
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

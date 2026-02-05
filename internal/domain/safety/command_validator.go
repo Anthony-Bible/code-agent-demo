@@ -18,7 +18,7 @@ type ValidationResult struct {
 	Reason string
 
 	// NeedsConfirm indicates whether user confirmation is required before execution.
-	// This is true for dangerous commands and non-whitelisted commands when askLLMOnUnknown is true.
+	// This is true for dangerous commands and non-whitelisted commands when confirmOnUnknown is true.
 	NeedsConfirm bool
 }
 
@@ -33,7 +33,7 @@ type CommandValidator interface {
 	//
 	// Validation behavior depends on the configured mode:
 	// - Whitelist mode: Only whitelisted commands are allowed without confirmation.
-	//   Non-whitelisted commands require confirmation if askLLMOnUnknown is true.
+	//   Non-whitelisted commands require confirmation if confirmOnUnknown is true.
 	// - Blacklist mode: Commands are allowed unless they match dangerous patterns
 	//   or the LLM flagged them as dangerous.
 	Validate(command string, llmDangerous bool) ValidationResult
@@ -42,9 +42,9 @@ type CommandValidator interface {
 // CommandValidatorImpl is the standard implementation of CommandValidator.
 // It combines whitelist checking and dangerous pattern detection.
 type CommandValidatorImpl struct {
-	mode            CommandValidationMode
-	whitelist       CommandAllowChecker // uses interface for testability
-	askLLMOnUnknown bool
+	mode             CommandValidationMode
+	whitelist        CommandAllowChecker // uses interface for testability
+	confirmOnUnknown bool
 }
 
 // NewCommandValidator creates a new CommandValidatorImpl.
@@ -52,21 +52,21 @@ type CommandValidatorImpl struct {
 // Parameters:
 //   - mode: The validation mode (ModeBlacklist or ModeWhitelist)
 //   - whitelist: The whitelist checker (can be nil for blacklist mode)
-//   - askLLMOnUnknown: Whether to ask for confirmation on non-whitelisted commands (whitelist mode only)
+//   - confirmOnUnknown: Whether to ask for confirmation on non-whitelisted commands (whitelist mode only)
 //
 // Returns an error if whitelist mode is specified but no whitelist is provided.
 func NewCommandValidator(
 	mode CommandValidationMode,
 	whitelist CommandAllowChecker,
-	askLLMOnUnknown bool,
+	confirmOnUnknown bool,
 ) (*CommandValidatorImpl, error) {
 	if mode == ModeWhitelist && whitelist == nil {
 		return nil, ErrWhitelistRequired
 	}
 	return &CommandValidatorImpl{
-		mode:            mode,
-		whitelist:       whitelist,
-		askLLMOnUnknown: askLLMOnUnknown,
+		mode:             mode,
+		whitelist:        whitelist,
+		confirmOnUnknown: confirmOnUnknown,
 	}, nil
 }
 
@@ -95,7 +95,7 @@ func (v *CommandValidatorImpl) validateWhitelistMode(command string, llmDangerou
 	}
 
 	// Command is not whitelisted
-	if !v.askLLMOnUnknown {
+	if !v.confirmOnUnknown {
 		// Strict whitelist mode: block non-whitelisted commands
 		return ValidationResult{
 			Allowed:      false,
@@ -105,7 +105,7 @@ func (v *CommandValidatorImpl) validateWhitelistMode(command string, llmDangerou
 		}
 	}
 
-	// askLLMOnUnknown is true: determine danger level and require confirmation
+	// confirmOnUnknown is true: determine danger level and require confirmation
 	isDangerous, reason := v.evaluateDanger(command, llmDangerous)
 	if reason == "" {
 		reason = "not on whitelist"
@@ -174,5 +174,5 @@ func (v *CommandValidatorImpl) Mode() CommandValidationMode {
 // AskLLMOnUnknown returns whether to ask for confirmation on non-whitelisted commands.
 // This is a test-only accessor for verifying constructor behavior.
 func (v *CommandValidatorImpl) AskLLMOnUnknown() bool {
-	return v.askLLMOnUnknown
+	return v.confirmOnUnknown
 }

@@ -265,6 +265,8 @@ func TestDefaultWhitelistPatterns(t *testing.T) {
 		"df -h",
 		"docker ps",
 		"kubectl get pods",
+		"jq '.foo' file.json",
+		"yq '.bar' file.yaml",
 	}
 
 	for _, cmd := range allowedCommands {
@@ -297,6 +299,8 @@ func TestDefaultWhitelistPatterns(t *testing.T) {
 		"touch file.txt",
 		"mv old new",
 		"cp src dst",
+		"yq -i '.foo = \"bar\"' file.yaml",
+		"yq --inplace '.foo = \"bar\"' file.yaml",
 	}
 
 	for _, cmd := range blockedCommands {
@@ -1064,104 +1068,6 @@ func TestSplitCommandSegmentsQuoteAware(t *testing.T) {
 	}
 }
 
-func TestValidateRegexSafety(t *testing.T) {
-	tests := []struct {
-		name    string
-		pattern string
-		wantErr bool
-	}{
-		{
-			name:    "safe pattern",
-			pattern: `^ls(\s|$)`,
-			wantErr: false,
-		},
-		{
-			name:    "safe pattern with alternation",
-			pattern: `^(git|hg)\s+status`,
-			wantErr: false,
-		},
-		{
-			name:    "nested quantifier - plus plus",
-			pattern: `(a+)+`,
-			wantErr: true,
-		},
-		{
-			name:    "nested quantifier - star star",
-			pattern: `(.*)*`,
-			wantErr: true,
-		},
-		{
-			name:    "nested quantifier - plus star",
-			pattern: `(.+)*`,
-			wantErr: true,
-		},
-		{
-			name:    "nested quantifier with curly brace",
-			pattern: `(a+){2,}`,
-			wantErr: true,
-		},
-		{
-			name:    "large repetition",
-			pattern: `a{100,}`,
-			wantErr: true,
-		},
-		{
-			name:    "large repetition exact",
-			pattern: `a{1000}`,
-			wantErr: true,
-		},
-		{
-			name:    "safe small repetition",
-			pattern: `a{1,10}`,
-			wantErr: false,
-		},
-		{
-			name:    "alternation with outer plus",
-			pattern: `(a|b)+`,
-			wantErr: true,
-		},
-		{
-			name:    "alternation with outer star",
-			pattern: `(a|b)*`,
-			wantErr: true,
-		},
-		{
-			name:    "alternation with outer curly brace",
-			pattern: `(a|b){2,}`,
-			wantErr: true,
-		},
-		{
-			name:    "classic backtracking pattern",
-			pattern: `(a|a)*b`,
-			wantErr: true,
-		},
-		{
-			name:    "overlapping alternation branches",
-			pattern: `(a|ab)*`,
-			wantErr: true,
-		},
-		{
-			name:    "safe alternation without quantifier",
-			pattern: `^(git|hg|svn)$`,
-			wantErr: false,
-		},
-		{
-			name:    "safe alternation with inner quantifier only",
-			pattern: `^(foo+|bar)$`,
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateRegexSafety(tt.pattern)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("validateRegexSafety(%q) error = %v, wantErr %v", tt.pattern, err, tt.wantErr)
-			}
-		})
-	}
-}
-
 func TestParseWhitelistPatternsJSON_CaseInsensitive(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -1221,44 +1127,6 @@ func TestParseWhitelistPatternsJSON_CaseInsensitive(t *testing.T) {
 			allowed, _ := whitelist.IsAllowed(tt.testCommand)
 			if allowed != tt.wantMatch {
 				t.Errorf("IsAllowed(%q) = %v, want %v", tt.testCommand, allowed, tt.wantMatch)
-			}
-		})
-	}
-}
-
-func TestParseWhitelistPatternsJSON_ReDoSRejection(t *testing.T) {
-	tests := []struct {
-		name    string
-		jsonStr string
-		wantErr bool
-	}{
-		{
-			name:    "nested quantifier rejected",
-			jsonStr: `[{"pattern": "(a+)+"}]`,
-			wantErr: true,
-		},
-		{
-			name:    "large repetition rejected",
-			jsonStr: `[{"pattern": "a{100,}"}]`,
-			wantErr: true,
-		},
-		{
-			name:    "nested quantifier in exclude rejected",
-			jsonStr: `[{"pattern": "^cmd", "exclude_pattern": "(a+)+"}]`,
-			wantErr: true,
-		},
-		{
-			name:    "safe pattern accepted",
-			jsonStr: `[{"pattern": "^ls(\\s|$)"}]`,
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := ParseWhitelistPatternsJSON(tt.jsonStr)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ParseWhitelistPatternsJSON(%q) error = %v, wantErr %v", tt.jsonStr, err, tt.wantErr)
 			}
 		})
 	}
@@ -1733,13 +1601,6 @@ func TestSentinelErrors_SplitCommand(t *testing.T) {
 				t.Errorf("splitCommandSegmentsQuoteAware(%q) error = %v, want %v", tt.cmd, err, tt.wantErr)
 			}
 		})
-	}
-}
-
-func TestSentinelErrors_ValidateRegex(t *testing.T) {
-	err := validateRegexSafety(`(a+)+`)
-	if !errors.Is(err, ErrNestedQuantifiers) {
-		t.Errorf("validateRegexSafety() error = %v, want %v", err, ErrNestedQuantifiers)
 	}
 }
 

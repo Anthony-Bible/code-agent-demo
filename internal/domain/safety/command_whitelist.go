@@ -126,6 +126,11 @@ func NewCommandWhitelist(patterns []WhitelistPattern) *CommandWhitelist {
 // Does NOT block input redirections: <, <<, <<<.
 // Respects shell quoting: redirections inside single quotes, double quotes, or backticks are ignored.
 func containsOutputRedirection(cmd string) bool {
+	// Early exit: no '>' means no output redirection possible
+	if strings.IndexByte(cmd, '>') == -1 {
+		return false
+	}
+
 	state := quoteNone
 	escaped := false
 
@@ -175,6 +180,9 @@ func containsOutputRedirection(cmd string) bool {
 // Note: This function does not perform length validation. Callers should use
 // IsAllowedWithPipes() which validates length before splitting and checking segments.
 func (w *CommandWhitelist) IsAllowed(cmd string) (bool, string) {
+	if containsOutputRedirection(cmd) {
+		return false, ""
+	}
 	for _, wp := range w.patterns {
 		if wp.Pattern.MatchString(cmd) {
 			// Check exclusion pattern (simulates negative lookahead)
@@ -182,9 +190,6 @@ func (w *CommandWhitelist) IsAllowed(cmd string) (bool, string) {
 				continue // Excluded, try next pattern
 			}
 			// Block commands with unquoted output redirections
-			if containsOutputRedirection(cmd) {
-				return false, ""
-			}
 			return true, wp.Description
 		}
 	}
@@ -518,7 +523,7 @@ func textProcessingPatterns() []WhitelistPattern {
 		MustSimple("sha256sum", "compute SHA256 checksum"),
 		MustSimple("sha1sum", "compute SHA1 checksum"),
 		MustSimple("jq", "JSON processor"),
-		MustSimple("yq", "YAML processor"),
+		MustExcluding("yq", "YAML processor (read-only)", `(-i\b|--inplace)`),
 	}
 }
 
@@ -660,51 +665,11 @@ func containerPatterns() []WhitelistPattern {
 	}
 }
 
-// Patterns for detecting ReDoS-vulnerable regex constructs.
-var (
-	// Nested quantifiers: (a+)+, (.*)*,  (.+)+, etc.
-	nestedQuantifierPattern = regexp.MustCompile(`\([^)]*[+*][^)]*\)[+*?]|\([^)]*[+*][^)]*\)\{`)
-	// Large repetitions: {100,}, {1000}, etc.
-	largeRepetitionPattern = regexp.MustCompile(`\{(\d+)(,(\d*))?\}`)
-	// Alternation with outer quantifier: (a|b)+, (a|b)*, (x|y|z){n,}.
-	alternationQuantifierPattern = regexp.MustCompile(`\([^)]*\|[^)]*\)[+*]|\([^)]*\|[^)]*\)\{`)
-)
-
-// validateRegexSafety checks if a regex pattern contains constructs that could cause
-// catastrophic backtracking (ReDoS). Returns an error if the pattern is unsafe.
-func validateRegexSafety(pattern string) error {
-	// Check for nested quantifiers (e.g., (a+)+, (.*)*) which can cause exponential backtracking
-	if nestedQuantifierPattern.MatchString(pattern) {
-		return ErrNestedQuantifiers
-	}
-
-	// Check for alternation with outer quantifier (e.g., (a|b)+, (x|y)*) which can cause backtracking
-	if alternationQuantifierPattern.MatchString(pattern) {
-		return ErrAlternationQuantifier
-	}
-
-	// Check for large repetitions
-	matches := largeRepetitionPattern.FindAllStringSubmatch(pattern, -1)
-	for _, match := range matches {
-		if len(match) >= 2 {
-			var count int
-			if _, err := fmt.Sscanf(match[1], "%d", &count); err == nil && count >= 100 {
-				return fmt.Errorf("%w: {%d,...}", ErrLargeRepetition, count)
-			}
-		}
-	}
-
-	return nil
-}
-
-// parseAndValidatePattern compiles a pattern string with validation.
+// parseAndValidatePattern compiles a pattern string with length validation.
 // Returns the compiled regex or an error.
 func parseAndValidatePattern(pattern string) (*regexp.Regexp, error) {
 	if len(pattern) > MaxCommandLength {
 		return nil, ErrPatternTooLong
-	}
-	if err := validateRegexSafety(pattern); err != nil {
-		return nil, err
 	}
 	return regexp.Compile(pattern)
 }
