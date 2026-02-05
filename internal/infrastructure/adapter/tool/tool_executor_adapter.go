@@ -799,7 +799,7 @@ const maxReadFileLines = 2000
 
 // preAllocBuilder pre-allocates a strings.Builder based on file size, capped at 10MB.
 func preAllocBuilder(b *strings.Builder, f *os.File) {
-	const maxPreAlloc = 10 * 1024 * 1024
+	const maxPreAlloc = 10 << 20
 	if info, err := f.Stat(); err == nil {
 		preAlloc := int(info.Size()) + 1024
 		if preAlloc > maxPreAlloc {
@@ -937,7 +937,12 @@ type editFileInput struct {
 	NewStr string `json:"new_str"`
 }
 
+// maxEditFileSize is the maximum file size (in bytes) that edit_file will process.
+// Files larger than this should be handled differently (e.g., targeted line-range edits).
+const maxEditFileSize = 50 << 20 // 50MB
+
 // executeEditFile executes the edit_file tool.
+// Uses []byte throughout to avoid the string([]byte) copy that doubles memory.
 func (a *ExecutorAdapter) executeEditFile(input json.RawMessage) (string, error) {
 	var in editFileInput
 	if err := json.Unmarshal(input, &in); err != nil {
@@ -963,22 +968,43 @@ func (a *ExecutorAdapter) executeEditFile(input json.RawMessage) (string, error)
 		return "", errors.New("old_str must not be empty when editing an existing file")
 	}
 
-	// Read existing file content
-	content, err := a.fileManager.ReadFile(in.Path)
+	// Resolve and validate the path
+	path, err := a.fileManager.ResolvePath(in.Path)
 	if err != nil {
 		return "", wrapFileOperationError("Failed to read file", err)
 	}
 
-	oldContent := content
-	newContent := strings.ReplaceAll(oldContent, in.OldStr, in.NewStr)
+	// Check file size before reading to prevent OOM on huge files
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", wrapFileOperationError("Failed to read file", err)
+	}
+	if info.IsDir() {
+		return "", wrapFileOperationError("Failed to read file", fileadapter.ErrIsDirectory)
+	}
+	if info.Size() > maxEditFileSize {
+		return "", fmt.Errorf(
+			"file too large for edit_file (%dMB > %dMB limit); use targeted line-range reads and smaller edits",
+			info.Size()/(1024*1024),
+			maxEditFileSize/(1024*1024),
+		)
+	}
+
+	// Read as []byte directly to avoid string conversion copy
+	oldContent, err := os.ReadFile(path)
+	if err != nil {
+		return "", wrapFileOperationError("Failed to read file", err)
+	}
+
+	newContent := bytes.ReplaceAll(oldContent, []byte(in.OldStr), []byte(in.NewStr))
 
 	// Check if replacement occurred
-	if oldContent == newContent && in.OldStr != "" {
+	if bytes.Equal(oldContent, newContent) {
 		return "", errors.New("old string not found in file")
 	}
 
-	// Write the modified content
-	if err := a.fileManager.WriteFile(in.Path, newContent); err != nil {
+	// Write the modified content directly to avoid []byte→string→[]byte round-trip
+	if err := os.WriteFile(path, newContent, info.Mode().Perm()); err != nil {
 		return "", wrapFileOperationError("Failed to write file", err)
 	}
 
