@@ -628,5 +628,8 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 		msg.ToolCalls = entityToolCalls
 	}
 
+	msg.InputTokens = response.Usage.InputTokens
+	msg.OutputTokens = response.Usage.OutputTokens
+
 	return msg, toolCalls, nil
 }

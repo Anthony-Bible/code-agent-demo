@@ -9,12 +9,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 )
 
 var (
 	ErrConversationNotFound = errors.New("conversation not found")
 	ErrToolNotFound         = errors.New("tool not found")
+)
+
+const (
+	// minCompactionThreshold is the minimum allowed compaction threshold to prevent thrashing.
+	minCompactionThreshold = int64(10000)
+	// maxSummaryContentRunes is the maximum number of runes to include from a message's content in a compaction summary.
+	maxSummaryContentRunes = 2000
+	// maxSummaryToolResultRunes is the maximum number of runes to include from a tool result in a compaction summary.
+	maxSummaryToolResultRunes = 200
 )
 
 // ConversationService handles the core business logic for managing conversations.
@@ -26,22 +37,39 @@ type ConversationService struct {
 	conversations          map[string]*entity.Conversation
 	currentSession         string
 	processing             map[string]bool
+	processingMu           sync.RWMutex // Protects processing map for concurrent access
 	sessionModes           map[string]bool
 	sessionModesMu         sync.RWMutex // Protects sessionModes map for concurrent access
 	sessionThinkingModes   map[string]port.ThinkingModeInfo
 	sessionThinkingModesMu sync.RWMutex // Protects sessionThinkingModes map for concurrent access
 	sessionSystemPrompts   map[string]string
-	sessionSystemPromptsMu sync.RWMutex // Protects sessionSystemPrompts map for concurrent access
+	sessionSystemPromptsMu sync.RWMutex     // Protects sessionSystemPrompts map for concurrent access
+	sessionTokenUsage      map[string]int64 // total tokens (input+output) from latest API response
+	sessionTokenUsageMu    sync.RWMutex
+	compactionThreshold    int64
 }
 
 // NewConversationService creates a new instance of ConversationService.
 // It requires an AI provider and tool executor for operations.
-func NewConversationService(aiProvider port.AIProvider, toolExecutor port.ToolExecutor) (*ConversationService, error) {
+// An optional compactionThreshold parameter sets the token threshold for auto-compaction.
+func NewConversationService(
+	aiProvider port.AIProvider,
+	toolExecutor port.ToolExecutor,
+	compactionThreshold ...int64,
+) (*ConversationService, error) {
 	if aiProvider == nil {
 		return nil, errors.New("AI provider cannot be nil")
 	}
 	if toolExecutor == nil {
 		return nil, errors.New("tool executor cannot be nil")
+	}
+
+	threshold := int64(160000)
+	if len(compactionThreshold) > 0 && compactionThreshold[0] > 0 {
+		threshold = compactionThreshold[0]
+	}
+	if threshold < minCompactionThreshold {
+		threshold = minCompactionThreshold
 	}
 
 	return &ConversationService{
@@ -52,6 +80,8 @@ func NewConversationService(aiProvider port.AIProvider, toolExecutor port.ToolEx
 		sessionModes:         make(map[string]bool),
 		sessionThinkingModes: make(map[string]port.ThinkingModeInfo),
 		sessionSystemPrompts: make(map[string]string),
+		sessionTokenUsage:    make(map[string]int64),
+		compactionThreshold:  threshold,
 	}, nil
 }
 
@@ -71,7 +101,9 @@ func (cs *ConversationService) StartConversation(ctx context.Context) (string, e
 
 	cs.conversations[sessionID] = conversation
 	cs.currentSession = sessionID
+	cs.processingMu.Lock()
 	cs.processing[sessionID] = false
+	cs.processingMu.Unlock()
 
 	return sessionID, nil
 }
@@ -145,7 +177,7 @@ func (cs *ConversationService) ProcessAssistantResponse(
 	}
 
 	// Finalize response
-	return cs.finalizeAIResponse(sessionID, conversation, response, toolCalls)
+	return cs.finalizeAIResponse(ctx, sessionID, conversation, response, toolCalls)
 }
 
 // ProcessAssistantResponseStreaming processes an AI assistant response with streaming support.
@@ -175,7 +207,7 @@ func (cs *ConversationService) ProcessAssistantResponseStreaming(
 	}
 
 	// Finalize response
-	return cs.finalizeAIResponse(sessionID, conversation, response, toolCalls)
+	return cs.finalizeAIResponse(ctx, sessionID, conversation, response, toolCalls)
 }
 
 // prepareAIRequest prepares the context, message parameters, and tool parameters for an AI request.
@@ -284,6 +316,7 @@ func (cs *ConversationService) prepareAIRequest(
 // finalizeAIResponse adds the AI response to the conversation and updates processing state.
 // This is shared logic between streaming and non-streaming requests.
 func (cs *ConversationService) finalizeAIResponse(
+	ctx context.Context,
 	sessionID string,
 	conversation *entity.Conversation,
 	response *entity.Message,
@@ -296,10 +329,22 @@ func (cs *ConversationService) finalizeAIResponse(
 	}
 
 	// Check if response contains tool usage
-	if len(toolCalls) > 0 {
-		cs.processing[sessionID] = true
-	} else {
-		cs.processing[sessionID] = false
+	hasToolCalls := len(toolCalls) > 0
+	cs.processingMu.Lock()
+	cs.processing[sessionID] = hasToolCalls
+	cs.processingMu.Unlock()
+
+	// Track token usage and check for compaction (atomic to avoid race between set and check)
+	shouldCompact := cs.setTokensAndCheckThreshold(sessionID, response.InputTokens, response.OutputTokens)
+	if !hasToolCalls && shouldCompact {
+		if err := cs.compactConversation(ctx, sessionID, conversation); err != nil {
+			fmt.Fprintf(
+				os.Stderr,
+				"[ConversationService] Auto-compaction failed for session %s (non-fatal, conversation continues): %v\n",
+				sessionID,
+				err,
+			)
+		}
 	}
 
 	return response, toolCalls, nil
@@ -343,7 +388,9 @@ func (cs *ConversationService) ExecuteToolsInResponse(
 	}
 
 	// Reset processing state after executing tools
+	cs.processingMu.Lock()
 	cs.processing[sessionID] = false
+	cs.processingMu.Unlock()
 
 	return results, nil
 }
@@ -382,7 +429,9 @@ func (cs *ConversationService) EndConversation(ctx context.Context, sessionID st
 	}
 
 	// Remove processing state
+	cs.processingMu.Lock()
 	delete(cs.processing, sessionID)
+	cs.processingMu.Unlock()
 
 	// Remove mode state
 	cs.sessionModesMu.Lock()
@@ -398,6 +447,11 @@ func (cs *ConversationService) EndConversation(ctx context.Context, sessionID st
 	cs.sessionSystemPromptsMu.Lock()
 	delete(cs.sessionSystemPrompts, sessionID)
 	cs.sessionSystemPromptsMu.Unlock()
+
+	// Remove token usage tracking
+	cs.sessionTokenUsageMu.Lock()
+	delete(cs.sessionTokenUsage, sessionID)
+	cs.sessionTokenUsageMu.Unlock()
 
 	// Clean up session state in tool executor if it supports it
 	if cleaner, ok := cs.toolExecutor.(port.SessionCleaner); ok {
@@ -416,6 +470,8 @@ func (cs *ConversationService) IsProcessing(sessionID string) (bool, error) {
 	if !exists {
 		return false, ErrConversationNotFound
 	}
+	cs.processingMu.RLock()
+	defer cs.processingMu.RUnlock()
 	return cs.processing[sessionID], nil
 }
 
@@ -425,7 +481,9 @@ func (cs *ConversationService) SetProcessingState(sessionID string, processing b
 	if !exists {
 		return ErrConversationNotFound
 	}
+	cs.processingMu.Lock()
 	cs.processing[sessionID] = processing
+	cs.processingMu.Unlock()
 	return nil
 }
 
@@ -549,4 +607,148 @@ func (cs *ConversationService) GetCustomSystemPrompt(sessionID string) (string, 
 	defer cs.sessionSystemPromptsMu.RUnlock()
 	prompt, ok := cs.sessionSystemPrompts[sessionID]
 	return prompt, ok
+}
+
+// setTokenUsage stores the total token count (input+output) for a session.
+// The API reports input_tokens as the full conversation size each time, so
+// input+output represents the total conversation footprint after each response.
+func (cs *ConversationService) setTokenUsage(sessionID string, input, output int64) {
+	cs.sessionTokenUsageMu.Lock()
+	defer cs.sessionTokenUsageMu.Unlock()
+	cs.sessionTokenUsage[sessionID] = input + output
+}
+
+// setTokensAndCheckThreshold atomically sets token usage and checks whether
+// the compaction threshold has been reached. This avoids a race condition
+// between separate set and check calls.
+func (cs *ConversationService) setTokensAndCheckThreshold(sessionID string, input, output int64) bool {
+	cs.sessionTokenUsageMu.Lock()
+	defer cs.sessionTokenUsageMu.Unlock()
+	total := input + output
+	cs.sessionTokenUsage[sessionID] = total
+	return total >= cs.compactionThreshold
+}
+
+// getTokenUsage returns the current total token count for a session.
+func (cs *ConversationService) getTokenUsage(sessionID string) int64 {
+	cs.sessionTokenUsageMu.RLock()
+	defer cs.sessionTokenUsageMu.RUnlock()
+	return cs.sessionTokenUsage[sessionID]
+}
+
+// GetTokenUsage returns the current total token count and compaction threshold for a session.
+func (cs *ConversationService) GetTokenUsage(sessionID string) (int64, int64) {
+	return cs.getTokenUsage(sessionID), cs.compactionThreshold
+}
+
+// formatMessageForSummary writes a single message's content to the builder for summarization.
+func formatMessageForSummary(sb *strings.Builder, msg entity.Message) {
+	fmt.Fprintf(sb, "[%s]: ", msg.Role)
+	if msg.Content != "" {
+		sb.WriteString(truncateByRunes(msg.Content, maxSummaryContentRunes, "... (truncated)"))
+	}
+	formatToolCallsForSummary(sb, msg.ToolCalls)
+	formatToolResultsForSummary(sb, msg.ToolResults)
+	sb.WriteString("\n\n")
+}
+
+// formatToolCallsForSummary appends tool call names to the builder.
+func formatToolCallsForSummary(sb *strings.Builder, toolCalls []entity.ToolCall) {
+	if len(toolCalls) == 0 {
+		return
+	}
+	sb.WriteString(" [Tool calls: ")
+	for i, tc := range toolCalls {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(tc.ToolName)
+	}
+	sb.WriteString("]")
+}
+
+// formatToolResultsForSummary appends truncated tool results to the builder.
+func formatToolResultsForSummary(sb *strings.Builder, toolResults []entity.ToolResult) {
+	for _, tr := range toolResults {
+		result := truncateByRunes(tr.Result, maxSummaryToolResultRunes, "...")
+		fmt.Fprintf(sb, " [Tool result: %s]", result)
+	}
+}
+
+// truncateByRunes truncates a string to maxRunes runes and appends a suffix if truncation occurred.
+// Unlike byte-slice truncation, this is safe for multi-byte UTF-8 characters.
+func truncateByRunes(s string, maxRunes int, suffix string) string {
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + suffix
+}
+
+// buildSummaryRequest formats conversation messages into a prompt for the AI to summarize.
+func (cs *ConversationService) buildSummaryRequest(messages []entity.Message) []port.MessageParam {
+	var sb strings.Builder
+	sb.WriteString("Please provide a detailed summary of the following conversation. ")
+	sb.WriteString("Preserve key decisions, code changes, file paths, error messages, and any important context. ")
+	sb.WriteString("The summary should allow the conversation to continue without losing critical information.\n\n")
+	sb.WriteString("=== CONVERSATION TO SUMMARIZE ===\n\n")
+
+	for _, msg := range messages {
+		formatMessageForSummary(&sb, msg)
+	}
+
+	sb.WriteString("=== END CONVERSATION ===\n\n")
+	sb.WriteString("Provide a comprehensive summary that captures all important details:")
+
+	return []port.MessageParam{
+		{
+			Role:    entity.RoleUser,
+			Content: sb.String(),
+		},
+	}
+}
+
+// compactConversation summarizes the conversation via an AI call and replaces history with the summary.
+func (cs *ConversationService) compactConversation(
+	ctx context.Context,
+	sessionID string,
+	conversation *entity.Conversation,
+) error {
+	messages := conversation.GetMessages()
+	if len(messages) == 0 {
+		return nil
+	}
+
+	summaryMessages := cs.buildSummaryRequest(messages)
+
+	summaryResponse, _, err := cs.aiProvider.SendMessage(ctx, summaryMessages, nil)
+	if err != nil {
+		return fmt.Errorf("failed to generate conversation summary: %w", err)
+	}
+
+	conversation.Clear()
+
+	summaryContent := "[CONVERSATION SUMMARY - Auto-compacted]\n\n" + summaryResponse.Content
+	summaryMsg, err := entity.NewMessage(entity.RoleUser, summaryContent)
+	if err != nil {
+		return fmt.Errorf("failed to create summary message: %w", err)
+	}
+
+	if err := conversation.AddMessage(*summaryMsg); err != nil {
+		return fmt.Errorf("failed to add summary message: %w", err)
+	}
+
+	// Reset token counter based on summary size
+	cs.sessionTokenUsageMu.Lock()
+	cs.sessionTokenUsage[sessionID] = summaryResponse.InputTokens + summaryResponse.OutputTokens
+	cs.sessionTokenUsageMu.Unlock()
+
+	fmt.Fprintf(
+		os.Stderr,
+		"[ConversationService] Auto-compacted conversation %s: %d messages → 1 summary message\n",
+		sessionID,
+		len(messages),
+	)
+
+	return nil
 }

@@ -53,6 +53,8 @@ type Message struct {
 	ToolCalls      []ToolCall      `json:"tool_calls,omitempty"`      // Tool calls from assistant messages
 	ToolResults    []ToolResult    `json:"tool_results,omitempty"`    // Tool results from user messages
 	ThinkingBlocks []ThinkingBlock `json:"thinking_blocks,omitempty"` // Thinking blocks
+	InputTokens    int64           `json:"input_tokens,omitempty"`
+	OutputTokens   int64           `json:"output_tokens,omitempty"`
 }
 
 // validateRole checks if the provided role is valid.

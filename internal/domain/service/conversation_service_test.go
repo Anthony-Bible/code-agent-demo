@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -2008,4 +2010,357 @@ func (m *messageCapturingMockAIProvider) SendMessage(
 
 	// Delegate to base mock
 	return m.mockAIProvider.SendMessage(ctx, messages, tools)
+}
+
+// =============================================================================
+// Auto-Compaction Tests
+// =============================================================================
+
+// compactionMockAIProvider returns high-token responses and generates summaries for compaction.
+type compactionMockAIProvider struct {
+	mockAIProvider
+
+	callCount       int
+	inputTokens     int64
+	outputTokens    int64
+	summaryResponse string
+}
+
+func (m *compactionMockAIProvider) SendMessage(
+	_ context.Context,
+	_ []port.MessageParam,
+	tools []port.ToolParam,
+) (*entity.Message, []port.ToolCallInfo, error) {
+	m.callCount++
+
+	// If tools is nil, this is a compaction summary request
+	if tools == nil {
+		resp := &entity.Message{
+			Role:    entity.RoleAssistant,
+			Content: m.summaryResponse,
+		}
+		resp.InputTokens = 500
+		resp.OutputTokens = 500
+		return resp, nil, nil
+	}
+
+	// Normal response with high token counts
+	resp := &entity.Message{
+		Role:    entity.RoleAssistant,
+		Content: "Response " + strconv.Itoa(m.callCount),
+	}
+	resp.InputTokens = m.inputTokens
+	resp.OutputTokens = m.outputTokens
+	return resp, nil, nil
+}
+
+func TestTokenTracking(t *testing.T) {
+	svc, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{}, int64(160000))
+	if err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+
+	ctx := context.Background()
+	sessionID, _ := svc.StartConversation(ctx)
+
+	// First update: input=100 + output=200 = 300
+	svc.setTokenUsage(sessionID, 100, 200)
+	usage := svc.getTokenUsage(sessionID)
+	if usage != 300 {
+		t.Errorf("Expected total 300, got %d", usage)
+	}
+
+	// Second update: replaces with input=50 + output=75 = 125
+	svc.setTokenUsage(sessionID, 50, 75)
+	usage = svc.getTokenUsage(sessionID)
+	if usage != 125 {
+		t.Errorf("Expected total 125, got %d", usage)
+	}
+
+	// Unknown session returns zero
+	unknown := svc.getTokenUsage("nonexistent")
+	if unknown != 0 {
+		t.Errorf("Expected 0 for unknown session, got %d", unknown)
+	}
+}
+
+func TestCompactionTriggered(t *testing.T) {
+	provider := &compactionMockAIProvider{
+		inputTokens:     6000,
+		outputTokens:    6000,
+		summaryResponse: "This is a summary of the conversation.",
+	}
+
+	// Threshold at minimum floor to trigger compaction easily (6000+6000=12000 > 10000)
+	svc, err := NewConversationService(provider, &mockToolExecutor{}, int64(10000))
+	if err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+
+	ctx := context.Background()
+	sessionID, _ := svc.StartConversation(ctx)
+
+	// Add a user message and process response
+	_, _ = svc.AddUserMessage(ctx, sessionID, "Hello")
+	resp, _, err := svc.ProcessAssistantResponse(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("First response failed: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("Expected response")
+	}
+
+	// First response: 600+600=1200 tokens, exceeds threshold of 1000
+	// Since no tool calls, compaction should have triggered
+	conv, _ := svc.GetConversation(sessionID)
+
+	// After compaction, conversation should have exactly 1 summary message
+	if conv.MessageCount() != 1 {
+		t.Errorf("Expected 1 message after compaction, got %d", conv.MessageCount())
+	}
+
+	lastMsg, ok := conv.GetLastMessage()
+	if !ok {
+		t.Fatal("Expected last message")
+	}
+	if !strings.Contains(lastMsg.Content, "[CONVERSATION SUMMARY - Auto-compacted]") {
+		t.Errorf("Expected summary marker in message, got: %s", lastMsg.Content)
+	}
+	if !strings.Contains(lastMsg.Content, "This is a summary of the conversation.") {
+		t.Errorf("Expected summary content in message, got: %s", lastMsg.Content)
+	}
+}
+
+func TestCompactionPreservesSystemPrompt(t *testing.T) {
+	provider := &compactionMockAIProvider{
+		inputTokens:     6000,
+		outputTokens:    6000,
+		summaryResponse: "Summary after system prompt test.",
+	}
+
+	svc, err := NewConversationService(provider, &mockToolExecutor{}, int64(10000))
+	if err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+
+	ctx := context.Background()
+	sessionID, _ := svc.StartConversation(ctx)
+
+	// Set custom system prompt
+	customPrompt := "You are a helpful pirate assistant."
+	_ = svc.SetCustomSystemPrompt(ctx, sessionID, customPrompt)
+
+	// Trigger compaction
+	_, _ = svc.AddUserMessage(ctx, sessionID, "Hello pirate")
+	_, _, _ = svc.ProcessAssistantResponse(ctx, sessionID)
+
+	// Verify system prompt survived compaction (stored separately in sessionSystemPrompts)
+	retrievedPrompt, exists := svc.GetCustomSystemPrompt(sessionID)
+	if !exists {
+		t.Error("Expected custom system prompt to survive compaction")
+	}
+	if retrievedPrompt != customPrompt {
+		t.Errorf("Expected prompt '%s', got '%s'", customPrompt, retrievedPrompt)
+	}
+}
+
+func TestCompactionNotTriggeredDuringToolCycle(t *testing.T) {
+	// Provider returns tool calls — compaction should NOT trigger while processing
+	toolCallProvider := &mockAIProvider{
+		response: &entity.Message{
+			Role:    entity.RoleAssistant,
+			Content: "Let me use a tool",
+		},
+		toolCalls: []port.ToolCallInfo{
+			{ToolID: "tool_1", ToolName: "list_files", Input: map[string]interface{}{"path": "."}},
+		},
+	}
+
+	// Set high tokens on the response to exceed threshold
+	toolCallProvider.response.InputTokens = 6000
+	toolCallProvider.response.OutputTokens = 6000
+
+	svc, err := NewConversationService(toolCallProvider, &mockToolExecutor{}, int64(10000))
+	if err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+
+	ctx := context.Background()
+	sessionID, _ := svc.StartConversation(ctx)
+
+	_, _ = svc.AddUserMessage(ctx, sessionID, "List files")
+	_, toolCalls, err := svc.ProcessAssistantResponse(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("Response failed: %v", err)
+	}
+
+	// Should have tool calls and be in processing state
+	if len(toolCalls) == 0 {
+		t.Fatal("Expected tool calls")
+	}
+
+	processing, _ := svc.IsProcessing(sessionID)
+	if !processing {
+		t.Error("Expected processing state to be true")
+	}
+
+	// Conversation should NOT be compacted (still has original messages)
+	conv, _ := svc.GetConversation(sessionID)
+	if conv.MessageCount() < 2 {
+		t.Errorf("Expected at least 2 messages (no compaction during tool cycle), got %d", conv.MessageCount())
+	}
+
+	// Verify no summary marker
+	lastMsg, _ := conv.GetLastMessage()
+	if strings.Contains(lastMsg.Content, "[CONVERSATION SUMMARY") {
+		t.Error("Compaction should not trigger during tool processing")
+	}
+}
+
+func TestCompactionCleanup(t *testing.T) {
+	svc, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{}, int64(160000))
+	if err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+
+	ctx := context.Background()
+	sessionID, _ := svc.StartConversation(ctx)
+
+	// Add some token usage
+	svc.setTokenUsage(sessionID, 1000, 2000)
+	usage := svc.getTokenUsage(sessionID)
+	if usage != 3000 {
+		t.Fatalf("Expected 3000, got %d", usage)
+	}
+
+	// End conversation
+	err = svc.EndConversation(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("EndConversation failed: %v", err)
+	}
+
+	// Token usage should be cleaned up
+	usage = svc.getTokenUsage(sessionID)
+	if usage != 0 {
+		t.Errorf("Expected 0 after cleanup, got %d", usage)
+	}
+}
+
+func TestSetTokensAndCheckThreshold(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     int64
+		output    int64
+		threshold int64
+		want      bool
+	}{
+		{
+			name:      "below threshold returns false",
+			input:     100,
+			output:    200,
+			threshold: 10000,
+			want:      false,
+		},
+		{
+			name:      "at threshold returns true",
+			input:     5000,
+			output:    5000,
+			threshold: 10000,
+			want:      true,
+		},
+		{
+			name:      "above threshold returns true",
+			input:     6000,
+			output:    6000,
+			threshold: 10000,
+			want:      true,
+		},
+		{
+			name:      "new session starts at zero",
+			input:     1,
+			output:    1,
+			threshold: 10000,
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{}, tt.threshold)
+			if err != nil {
+				t.Fatalf("Failed to create service: %v", err)
+			}
+
+			ctx := context.Background()
+			sessionID, _ := svc.StartConversation(ctx)
+
+			got := svc.setTokensAndCheckThreshold(sessionID, tt.input, tt.output)
+
+			if got != tt.want {
+				t.Errorf("setTokensAndCheckThreshold() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTruncateByRunes(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		maxRunes int
+		suffix   string
+		want     string
+	}{
+		{
+			name:     "short string unchanged",
+			input:    "hello",
+			maxRunes: 10,
+			suffix:   "...",
+			want:     "hello",
+		},
+		{
+			name:     "exact length unchanged",
+			input:    "hello",
+			maxRunes: 5,
+			suffix:   "...",
+			want:     "hello",
+		},
+		{
+			name:     "ASCII truncation",
+			input:    "hello world",
+			maxRunes: 5,
+			suffix:   "...",
+			want:     "hello...",
+		},
+		{
+			name:     "multi-byte UTF-8 truncation preserves valid chars",
+			input:    "你好世界测试数据",
+			maxRunes: 4,
+			suffix:   "...",
+			want:     "你好世界...",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			maxRunes: 10,
+			suffix:   "...",
+			want:     "",
+		},
+		{
+			name:     "emoji truncation",
+			input:    "🎉🎊🎈🎁🎀",
+			maxRunes: 3,
+			suffix:   "…",
+			want:     "🎉🎊🎈…",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncateByRunes(tt.input, tt.maxRunes, tt.suffix)
+			if got != tt.want {
+				t.Errorf("truncateByRunes(%q, %d, %q) = %q, want %q", tt.input, tt.maxRunes, tt.suffix, got, tt.want)
+			}
+		})
+	}
 }

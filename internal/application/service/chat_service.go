@@ -304,6 +304,7 @@ func (cs *ChatService) SendMessage(
 		return cs.handleToolRequestCycle(ctx, resp)
 	}
 
+	cs.displayTokenUsage(req.SessionID)
 	return resp, nil
 }
 
@@ -529,6 +530,10 @@ func (cs *ChatService) continueAfterToolExecution(
 	// Check if processing (has tools)
 	isProcessing, _ := cs.conversationService.IsProcessing(sessionID)
 
+	if !isProcessing {
+		cs.displayTokenUsage(sessionID)
+	}
+
 	return &dto.SendMessageResponse{
 		SessionID:    sessionID,
 		AssistantMsg: assistantMsg,
@@ -536,6 +541,19 @@ func (cs *ChatService) continueAfterToolExecution(
 		IsFinished:   !isProcessing,
 		ToolCalls:    toolCalls,
 	}, nil
+}
+
+// displayTokenUsage shows the current token usage and percentage of the compaction threshold.
+func (cs *ChatService) displayTokenUsage(sessionID string) {
+	used, threshold := cs.conversationService.GetTokenUsage(sessionID)
+	if threshold <= 0 {
+		return
+	}
+	pct := float64(used) / float64(threshold) * 100
+	msg := fmt.Sprintf("Tokens: %d / %d (%.1f%%)", used, threshold, pct)
+	if err := cs.userInterface.DisplaySystemMessage(msg); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to display token usage: %v\n", err)
+	}
 }
 
 // EndSession ends a chat session.

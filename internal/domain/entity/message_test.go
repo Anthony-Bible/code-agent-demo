@@ -1133,6 +1133,108 @@ func TestMessage_Validate_ThinkingBlockBug(t *testing.T) {
 	}
 }
 
+// TestMessage_TokenFields_Validation tests that token fields do not affect message validation.
+func TestMessage_TokenFields_Validation(t *testing.T) {
+	tests := []struct {
+		name         string
+		inputTokens  int64
+		outputTokens int64
+	}{
+		{name: "both tokens set", inputTokens: 1500, outputTokens: 300},
+		{name: "zero tokens", inputTokens: 0, outputTokens: 0},
+		{name: "only input tokens", inputTokens: 500, outputTokens: 0},
+		{name: "only output tokens", inputTokens: 0, outputTokens: 200},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := Message{
+				Role:         RoleAssistant,
+				Content:      "Hello",
+				Timestamp:    time.Now(),
+				InputTokens:  tt.inputTokens,
+				OutputTokens: tt.outputTokens,
+			}
+			if err := msg.Validate(); err != nil {
+				t.Errorf("Validate() error = %v", err)
+			}
+		})
+	}
+}
+
+// TestMessage_TokenFields_JSONRoundTrip tests that token fields survive JSON marshal/unmarshal.
+func TestMessage_TokenFields_JSONRoundTrip(t *testing.T) {
+	tests := []struct {
+		name         string
+		inputTokens  int64
+		outputTokens int64
+	}{
+		{name: "typical values", inputTokens: 1500, outputTokens: 300},
+		{name: "large values", inputTokens: 100000, outputTokens: 50000},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := Message{
+				Role:         RoleAssistant,
+				Content:      "Test content",
+				Timestamp:    time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+				InputTokens:  tt.inputTokens,
+				OutputTokens: tt.outputTokens,
+			}
+
+			data, err := json.Marshal(msg)
+			if err != nil {
+				t.Fatalf("json.Marshal() error = %v", err)
+			}
+
+			var got Message
+			if err = json.Unmarshal(data, &got); err != nil {
+				t.Fatalf("json.Unmarshal() error = %v", err)
+			}
+
+			if got.InputTokens != tt.inputTokens {
+				t.Errorf("InputTokens = %d, want %d", got.InputTokens, tt.inputTokens)
+			}
+			if got.OutputTokens != tt.outputTokens {
+				t.Errorf("OutputTokens = %d, want %d", got.OutputTokens, tt.outputTokens)
+			}
+		})
+	}
+}
+
+// TestMessage_TokenFields_OmitEmpty tests that zero-value token fields are omitted from JSON.
+func TestMessage_TokenFields_OmitEmpty(t *testing.T) {
+	msg := Message{
+		Role:      RoleAssistant,
+		Content:   "Test content",
+		Timestamp: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	if msg.InputTokens != 0 {
+		t.Errorf("InputTokens should default to 0, got %d", msg.InputTokens)
+	}
+	if msg.OutputTokens != 0 {
+		t.Errorf("OutputTokens should default to 0, got %d", msg.OutputTokens)
+	}
+
+	var rawMap map[string]json.RawMessage
+	if err := json.Unmarshal(data, &rawMap); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if _, exists := rawMap["input_tokens"]; exists {
+		t.Errorf("input_tokens should be omitted from JSON when zero, got: %s", string(data))
+	}
+	if _, exists := rawMap["output_tokens"]; exists {
+		t.Errorf("output_tokens should be omitted from JSON when zero, got: %s", string(data))
+	}
+}
+
 // TestMessage_Validate_ThinkingBlocksVsToolContent tests that ThinkingBlocks should be treated
 // equivalently to ToolCalls/ToolResults for content validation purposes.
 func TestMessage_Validate_ThinkingBlocksVsToolContent(t *testing.T) {
