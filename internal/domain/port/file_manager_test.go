@@ -41,6 +41,10 @@ func (m *mockFileManager) GetFileInfo(path string) (FileInfo, error) {
 	return FileInfo{}, nil
 }
 
+func (m *mockFileManager) ResolvePath(path string) (string, error) {
+	return path, nil
+}
+
 // TestFileManagerReadFile_Exists validates ReadFile method exists.
 func TestFileManagerReadFile_Exists(t *testing.T) {
 	var manager FileManager = (*mockFileManager)(nil)

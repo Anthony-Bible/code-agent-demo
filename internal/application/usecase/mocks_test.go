@@ -23,6 +23,7 @@ var (
 type MockSafetyEnforcer struct {
 	mu              sync.RWMutex
 	blockedTools    map[string]bool
+	allowedTools    map[string]bool // If non-nil, only these tools are allowed
 	blockedCommands []string
 	actionBudget    int
 	timeoutEnabled  bool
@@ -42,6 +43,16 @@ func NewMockSafetyEnforcerWithBlockedTools(tools []string) *MockSafetyEnforcer {
 	m := NewMockSafetyEnforcer()
 	for _, t := range tools {
 		m.blockedTools[t] = true
+	}
+	return m
+}
+
+// NewMockSafetyEnforcerWithAllowedTools creates a mock that only allows specific tools.
+func NewMockSafetyEnforcerWithAllowedTools(tools []string) *MockSafetyEnforcer {
+	m := NewMockSafetyEnforcer()
+	m.allowedTools = make(map[string]bool)
+	for _, t := range tools {
+		m.allowedTools[t] = true
 	}
 	return m
 }
@@ -67,10 +78,18 @@ func NewMockSafetyEnforcerWithTimeout() *MockSafetyEnforcer {
 	return m
 }
 
-// CheckToolAllowed returns error if the tool is in the blocked list.
+// CheckToolAllowed returns error if the tool is blocked or not in the allowed list.
 func (m *MockSafetyEnforcer) CheckToolAllowed(tool string) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	// If allowedTools is set, only tools in it are allowed
+	if m.allowedTools != nil {
+		if !m.allowedTools[tool] {
+			return errMockToolBlocked
+		}
+		return nil
+	}
+	// Otherwise, check blockedTools
 	if m.blockedTools[tool] {
 		return errMockToolBlocked
 	}
@@ -110,6 +129,13 @@ func (m *MockSafetyEnforcer) CheckTimeout(ctx context.Context) error {
 		return errMockTimeout
 	}
 	return nil
+}
+
+// GetMaxActions returns the action budget.
+func (m *MockSafetyEnforcer) GetMaxActions() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.actionBudget
 }
 
 // mockInvestigationRecord is a minimal InvestigationRecordData implementation for testing.

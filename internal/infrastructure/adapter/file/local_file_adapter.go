@@ -466,6 +466,18 @@ func (fm *LocalFileManager) DeleteFile(path string) error {
 	return os.RemoveAll(path)
 }
 
+// ResolvePath validates and resolves a path to an absolute path within the base directory.
+func (fm *LocalFileManager) ResolvePath(path string) (string, error) {
+	if err := fm.validatePath(path); err != nil {
+		return "", err
+	}
+	cleaned := filepath.Clean(path)
+	if filepath.IsAbs(cleaned) {
+		return cleaned, nil
+	}
+	return filepath.Join(fm.baseDir, cleaned), nil
+}
+
 // GetFileInfo returns metadata about a file or directory.
 func (fm *LocalFileManager) GetFileInfo(path string) (port.FileInfo, error) {
 	if err := fm.validatePath(path); err != nil {

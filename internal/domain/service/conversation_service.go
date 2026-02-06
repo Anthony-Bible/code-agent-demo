@@ -196,7 +196,7 @@ func (cs *ConversationService) prepareAIRequest(
 	}
 
 	// Get conversation history for AI provider
-	messages := conversation.GetMessages()
+	messages := conversation.Messages
 	messageParams := make([]port.MessageParam, len(messages))
 	for i, msg := range messages {
 		// Convert ToolCalls from entity to port
@@ -398,6 +398,14 @@ func (cs *ConversationService) EndConversation(ctx context.Context, sessionID st
 	cs.sessionSystemPromptsMu.Lock()
 	delete(cs.sessionSystemPrompts, sessionID)
 	cs.sessionSystemPromptsMu.Unlock()
+
+	// Clean up session state in tool executor if it supports it
+	if cleaner, ok := cs.toolExecutor.(port.SessionCleaner); ok {
+		cleaner.CleanupSession(sessionID)
+	}
+
+	// Remove conversation from map to prevent memory leak
+	delete(cs.conversations, sessionID)
 
 	return nil
 }

@@ -6,12 +6,30 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/pprof"
 	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+// startPprof starts a pprof HTTP server on localhost:6060 using an explicit mux.
+func startPprof() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	srv := &http.Server{
+		Addr:              "localhost:6060",
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	go func() { _ = srv.ListenAndServe() }()
+}
 
 // global config shared between commands.
 var cfg *config.Config
@@ -81,6 +99,8 @@ refactoring options, and explanations.`,
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() error {
+	startPprof()
+
 	// Create interrupt handler with 2 second timeout for double-press detection
 	handler := signalhandler.NewInterruptHandler(2 * time.Second)
 	handler.Start()

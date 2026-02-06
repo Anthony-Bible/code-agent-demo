@@ -499,10 +499,10 @@ func TestEndConversation(t *testing.T) {
 			t.Errorf("unexpected error: %v", err)
 		}
 
-		// Conversation should still exist but be marked as ended
+		// Conversation should be deleted to prevent memory leak
 		_, exists := service.conversations[sessionID1]
-		if !exists {
-			t.Errorf("conversation should still exist after ending")
+		if exists {
+			t.Errorf("conversation should be deleted after ending")
 		}
 	})
 
