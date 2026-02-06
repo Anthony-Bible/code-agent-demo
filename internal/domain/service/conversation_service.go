@@ -19,6 +19,9 @@ var (
 	ErrToolNotFound         = errors.New("tool not found")
 )
 
+// minCompactionThreshold is the minimum allowed compaction threshold to prevent thrashing.
+const minCompactionThreshold = int64(10000)
+
 // TokenUsage tracks cumulative token usage for a session.
 type TokenUsage struct {
 	TotalInputTokens  int64
@@ -39,6 +42,7 @@ type ConversationService struct {
 	conversations          map[string]*entity.Conversation
 	currentSession         string
 	processing             map[string]bool
+	processingMu           sync.RWMutex // Protects processing map for concurrent access
 	sessionModes           map[string]bool
 	sessionModesMu         sync.RWMutex // Protects sessionModes map for concurrent access
 	sessionThinkingModes   map[string]port.ThinkingModeInfo
@@ -68,6 +72,9 @@ func NewConversationService(
 	threshold := int64(160000)
 	if len(compactionThreshold) > 0 && compactionThreshold[0] > 0 {
 		threshold = compactionThreshold[0]
+	}
+	if threshold < minCompactionThreshold {
+		threshold = minCompactionThreshold
 	}
 
 	return &ConversationService{
@@ -99,7 +106,9 @@ func (cs *ConversationService) StartConversation(ctx context.Context) (string, e
 
 	cs.conversations[sessionID] = conversation
 	cs.currentSession = sessionID
+	cs.processingMu.Lock()
 	cs.processing[sessionID] = false
+	cs.processingMu.Unlock()
 
 	return sessionID, nil
 }
@@ -173,7 +182,7 @@ func (cs *ConversationService) ProcessAssistantResponse(
 	}
 
 	// Finalize response
-	return cs.finalizeAIResponse(sessionID, conversation, response, toolCalls)
+	return cs.finalizeAIResponse(ctx, sessionID, conversation, response, toolCalls)
 }
 
 // ProcessAssistantResponseStreaming processes an AI assistant response with streaming support.
@@ -203,7 +212,7 @@ func (cs *ConversationService) ProcessAssistantResponseStreaming(
 	}
 
 	// Finalize response
-	return cs.finalizeAIResponse(sessionID, conversation, response, toolCalls)
+	return cs.finalizeAIResponse(ctx, sessionID, conversation, response, toolCalls)
 }
 
 // prepareAIRequest prepares the context, message parameters, and tool parameters for an AI request.
@@ -312,6 +321,7 @@ func (cs *ConversationService) prepareAIRequest(
 // finalizeAIResponse adds the AI response to the conversation and updates processing state.
 // This is shared logic between streaming and non-streaming requests.
 func (cs *ConversationService) finalizeAIResponse(
+	ctx context.Context,
 	sessionID string,
 	conversation *entity.Conversation,
 	response *entity.Message,
@@ -324,18 +334,17 @@ func (cs *ConversationService) finalizeAIResponse(
 	}
 
 	// Check if response contains tool usage
-	if len(toolCalls) > 0 {
-		cs.processing[sessionID] = true
-	} else {
-		cs.processing[sessionID] = false
-	}
+	hasToolCalls := len(toolCalls) > 0
+	cs.processingMu.Lock()
+	cs.processing[sessionID] = hasToolCalls
+	cs.processingMu.Unlock()
 
 	// Track token usage and check for compaction
 	cs.addTokenUsage(sessionID, response.InputTokens, response.OutputTokens)
-	if !cs.processing[sessionID] {
+	if !hasToolCalls {
 		usage := cs.getTokenUsage(sessionID)
 		if usage.Total() >= cs.compactionThreshold {
-			if err := cs.compactConversation(sessionID, conversation); err != nil {
+			if err := cs.compactConversation(ctx, sessionID, conversation); err != nil {
 				fmt.Fprintf(os.Stderr, "[ConversationService] Compaction error for session %s: %v\n", sessionID, err)
 			}
 		}
@@ -382,7 +391,9 @@ func (cs *ConversationService) ExecuteToolsInResponse(
 	}
 
 	// Reset processing state after executing tools
+	cs.processingMu.Lock()
 	cs.processing[sessionID] = false
+	cs.processingMu.Unlock()
 
 	return results, nil
 }
@@ -421,7 +432,9 @@ func (cs *ConversationService) EndConversation(ctx context.Context, sessionID st
 	}
 
 	// Remove processing state
+	cs.processingMu.Lock()
 	delete(cs.processing, sessionID)
+	cs.processingMu.Unlock()
 
 	// Remove mode state
 	cs.sessionModesMu.Lock()
@@ -460,6 +473,8 @@ func (cs *ConversationService) IsProcessing(sessionID string) (bool, error) {
 	if !exists {
 		return false, ErrConversationNotFound
 	}
+	cs.processingMu.RLock()
+	defer cs.processingMu.RUnlock()
 	return cs.processing[sessionID], nil
 }
 
@@ -469,7 +484,9 @@ func (cs *ConversationService) SetProcessingState(sessionID string, processing b
 	if !exists {
 		return ErrConversationNotFound
 	}
+	cs.processingMu.Lock()
 	cs.processing[sessionID] = processing
+	cs.processingMu.Unlock()
 	return nil
 }
 
@@ -683,7 +700,11 @@ func (cs *ConversationService) buildSummaryRequest(messages []entity.Message) []
 }
 
 // compactConversation summarizes the conversation via an AI call and replaces history with the summary.
-func (cs *ConversationService) compactConversation(sessionID string, conversation *entity.Conversation) error {
+func (cs *ConversationService) compactConversation(
+	ctx context.Context,
+	sessionID string,
+	conversation *entity.Conversation,
+) error {
 	messages := conversation.GetMessages()
 	if len(messages) == 0 {
 		return nil
@@ -691,7 +712,7 @@ func (cs *ConversationService) compactConversation(sessionID string, conversatio
 
 	summaryMessages := cs.buildSummaryRequest(messages)
 
-	summaryResponse, _, err := cs.aiProvider.SendMessage(context.Background(), summaryMessages, nil)
+	summaryResponse, _, err := cs.aiProvider.SendMessage(ctx, summaryMessages, nil)
 	if err != nil {
 		return fmt.Errorf("failed to generate conversation summary: %w", err)
 	}

@@ -2092,13 +2092,13 @@ func TestTokenTracking(t *testing.T) {
 
 func TestCompactionTriggered(t *testing.T) {
 	provider := &compactionMockAIProvider{
-		inputTokens:     600,
-		outputTokens:    600,
+		inputTokens:     6000,
+		outputTokens:    6000,
 		summaryResponse: "This is a summary of the conversation.",
 	}
 
-	// Low threshold to trigger compaction easily
-	svc, err := NewConversationService(provider, &mockToolExecutor{}, int64(1000))
+	// Threshold at minimum floor to trigger compaction easily (6000+6000=12000 > 10000)
+	svc, err := NewConversationService(provider, &mockToolExecutor{}, int64(10000))
 	if err != nil {
 		t.Fatalf("Failed to create service: %v", err)
 	}
@@ -2139,12 +2139,12 @@ func TestCompactionTriggered(t *testing.T) {
 
 func TestCompactionPreservesSystemPrompt(t *testing.T) {
 	provider := &compactionMockAIProvider{
-		inputTokens:     600,
-		outputTokens:    600,
+		inputTokens:     6000,
+		outputTokens:    6000,
 		summaryResponse: "Summary after system prompt test.",
 	}
 
-	svc, err := NewConversationService(provider, &mockToolExecutor{}, int64(1000))
+	svc, err := NewConversationService(provider, &mockToolExecutor{}, int64(10000))
 	if err != nil {
 		t.Fatalf("Failed to create service: %v", err)
 	}
@@ -2183,10 +2183,10 @@ func TestCompactionNotTriggeredDuringToolCycle(t *testing.T) {
 	}
 
 	// Set high tokens on the response to exceed threshold
-	toolCallProvider.response.InputTokens = 600
-	toolCallProvider.response.OutputTokens = 600
+	toolCallProvider.response.InputTokens = 6000
+	toolCallProvider.response.OutputTokens = 6000
 
-	svc, err := NewConversationService(toolCallProvider, &mockToolExecutor{}, int64(1000))
+	svc, err := NewConversationService(toolCallProvider, &mockToolExecutor{}, int64(10000))
 	if err != nil {
 		t.Fatalf("Failed to create service: %v", err)
 	}

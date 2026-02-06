@@ -211,8 +211,8 @@ func loadCompactionThreshold(defaultVal int64) int64 {
 		return defaultVal
 	}
 	threshold := viper.GetInt64("compaction_threshold")
-	if threshold > 0 {
-		return threshold
+	if threshold < 10000 {
+		return defaultVal
 	}
-	return defaultVal
+	return threshold
 }
