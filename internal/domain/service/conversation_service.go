@@ -19,8 +19,14 @@ var (
 	ErrToolNotFound         = errors.New("tool not found")
 )
 
-// minCompactionThreshold is the minimum allowed compaction threshold to prevent thrashing.
-const minCompactionThreshold = int64(10000)
+const (
+	// minCompactionThreshold is the minimum allowed compaction threshold to prevent thrashing.
+	minCompactionThreshold = int64(10000)
+	// maxSummaryContentRunes is the maximum number of runes to include from a message's content in a compaction summary.
+	maxSummaryContentRunes = 2000
+	// maxSummaryToolResultRunes is the maximum number of runes to include from a tool result in a compaction summary.
+	maxSummaryToolResultRunes = 200
+)
 
 // TokenUsage tracks cumulative token usage for a session.
 type TokenUsage struct {
@@ -339,14 +345,16 @@ func (cs *ConversationService) finalizeAIResponse(
 	cs.processing[sessionID] = hasToolCalls
 	cs.processingMu.Unlock()
 
-	// Track token usage and check for compaction
-	cs.addTokenUsage(sessionID, response.InputTokens, response.OutputTokens)
-	if !hasToolCalls {
-		usage := cs.getTokenUsage(sessionID)
-		if usage.Total() >= cs.compactionThreshold {
-			if err := cs.compactConversation(ctx, sessionID, conversation); err != nil {
-				fmt.Fprintf(os.Stderr, "[ConversationService] Compaction error for session %s: %v\n", sessionID, err)
-			}
+	// Track token usage and check for compaction (atomic to avoid race between add and check)
+	shouldCompact := cs.addTokensAndCheckThreshold(sessionID, response.InputTokens, response.OutputTokens)
+	if !hasToolCalls && shouldCompact {
+		if err := cs.compactConversation(ctx, sessionID, conversation); err != nil {
+			fmt.Fprintf(
+				os.Stderr,
+				"[ConversationService] Auto-compaction failed for session %s (non-fatal, conversation continues): %v\n",
+				sessionID,
+				err,
+			)
 		}
 	}
 
@@ -625,6 +633,22 @@ func (cs *ConversationService) addTokenUsage(sessionID string, input, output int
 	usage.TotalOutputTokens += output
 }
 
+// addTokensAndCheckThreshold atomically adds token usage and checks whether
+// the compaction threshold has been reached. This avoids a race condition
+// between separate add and check calls.
+func (cs *ConversationService) addTokensAndCheckThreshold(sessionID string, input, output int64) bool {
+	cs.sessionTokenUsageMu.Lock()
+	defer cs.sessionTokenUsageMu.Unlock()
+	usage, exists := cs.sessionTokenUsage[sessionID]
+	if !exists {
+		usage = &TokenUsage{}
+		cs.sessionTokenUsage[sessionID] = usage
+	}
+	usage.TotalInputTokens += input
+	usage.TotalOutputTokens += output
+	return usage.Total() >= cs.compactionThreshold
+}
+
 // getTokenUsage returns the current token usage for a session.
 func (cs *ConversationService) getTokenUsage(sessionID string) *TokenUsage {
 	cs.sessionTokenUsageMu.RLock()
@@ -639,11 +663,7 @@ func (cs *ConversationService) getTokenUsage(sessionID string) *TokenUsage {
 func formatMessageForSummary(sb *strings.Builder, msg entity.Message) {
 	fmt.Fprintf(sb, "[%s]: ", msg.Role)
 	if msg.Content != "" {
-		content := msg.Content
-		if len(content) > 2000 {
-			content = content[:2000] + "... (truncated)"
-		}
-		sb.WriteString(content)
+		sb.WriteString(truncateByRunes(msg.Content, maxSummaryContentRunes, "... (truncated)"))
 	}
 	formatToolCallsForSummary(sb, msg.ToolCalls)
 	formatToolResultsForSummary(sb, msg.ToolResults)
@@ -668,12 +688,19 @@ func formatToolCallsForSummary(sb *strings.Builder, toolCalls []entity.ToolCall)
 // formatToolResultsForSummary appends truncated tool results to the builder.
 func formatToolResultsForSummary(sb *strings.Builder, toolResults []entity.ToolResult) {
 	for _, tr := range toolResults {
-		result := tr.Result
-		if len(result) > 200 {
-			result = result[:200] + "..."
-		}
+		result := truncateByRunes(tr.Result, maxSummaryToolResultRunes, "...")
 		fmt.Fprintf(sb, " [Tool result: %s]", result)
 	}
+}
+
+// truncateByRunes truncates a string to maxRunes runes and appends a suffix if truncation occurred.
+// Unlike byte-slice truncation, this is safe for multi-byte UTF-8 characters.
+func truncateByRunes(s string, maxRunes int, suffix string) string {
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + suffix
 }
 
 // buildSummaryRequest formats conversation messages into a prompt for the AI to summarize.

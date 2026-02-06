@@ -2251,3 +2251,129 @@ func TestCompactionCleanup(t *testing.T) {
 		t.Errorf("Expected 0 after cleanup, got %d", usage.Total())
 	}
 }
+
+func TestAddTokensAndCheckThreshold(t *testing.T) {
+	tests := []struct {
+		name      string
+		additions []struct{ input, output int64 }
+		threshold int64
+		wantLast  bool // expected return value of the last call
+	}{
+		{
+			name:      "below threshold returns false",
+			additions: []struct{ input, output int64 }{{100, 200}},
+			threshold: 10000,
+			wantLast:  false,
+		},
+		{
+			name:      "at threshold returns true",
+			additions: []struct{ input, output int64 }{{5000, 5000}},
+			threshold: 10000,
+			wantLast:  true,
+		},
+		{
+			name:      "above threshold returns true",
+			additions: []struct{ input, output int64 }{{6000, 6000}},
+			threshold: 10000,
+			wantLast:  true,
+		},
+		{
+			name: "accumulates across calls",
+			additions: []struct{ input, output int64 }{
+				{3000, 3000}, // 6000 total, below
+				{2000, 2000}, // 10000 total, at threshold
+			},
+			threshold: 10000,
+			wantLast:  true,
+		},
+		{
+			name:      "new session starts at zero",
+			additions: []struct{ input, output int64 }{{1, 1}},
+			threshold: 10000,
+			wantLast:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{}, tt.threshold)
+			if err != nil {
+				t.Fatalf("Failed to create service: %v", err)
+			}
+
+			ctx := context.Background()
+			sessionID, _ := svc.StartConversation(ctx)
+
+			var got bool
+			for _, add := range tt.additions {
+				got = svc.addTokensAndCheckThreshold(sessionID, add.input, add.output)
+			}
+
+			if got != tt.wantLast {
+				t.Errorf("addTokensAndCheckThreshold() = %v, want %v", got, tt.wantLast)
+			}
+		})
+	}
+}
+
+func TestTruncateByRunes(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		maxRunes int
+		suffix   string
+		want     string
+	}{
+		{
+			name:     "short string unchanged",
+			input:    "hello",
+			maxRunes: 10,
+			suffix:   "...",
+			want:     "hello",
+		},
+		{
+			name:     "exact length unchanged",
+			input:    "hello",
+			maxRunes: 5,
+			suffix:   "...",
+			want:     "hello",
+		},
+		{
+			name:     "ASCII truncation",
+			input:    "hello world",
+			maxRunes: 5,
+			suffix:   "...",
+			want:     "hello...",
+		},
+		{
+			name:     "multi-byte UTF-8 truncation preserves valid chars",
+			input:    "你好世界测试数据",
+			maxRunes: 4,
+			suffix:   "...",
+			want:     "你好世界...",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			maxRunes: 10,
+			suffix:   "...",
+			want:     "",
+		},
+		{
+			name:     "emoji truncation",
+			input:    "🎉🎊🎈🎁🎀",
+			maxRunes: 3,
+			suffix:   "…",
+			want:     "🎉🎊🎈…",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncateByRunes(tt.input, tt.maxRunes, tt.suffix)
+			if got != tt.want {
+				t.Errorf("truncateByRunes(%q, %d, %q) = %q, want %q", tt.input, tt.maxRunes, tt.suffix, got, tt.want)
+			}
+		})
+	}
+}
