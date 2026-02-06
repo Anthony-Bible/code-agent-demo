@@ -81,24 +81,30 @@ type Config struct {
 	// Only applies in whitelist mode.
 	// Defaults to true.
 	AskLLMOnUnknown bool
+
+	// CommandWhitelistOverride determines whether custom whitelist patterns
+	// replace the defaults entirely (true) or extend them (false).
+	// Only applies in whitelist mode. Defaults to false.
+	CommandWhitelistOverride bool
 }
 
 // Defaults returns a Config struct with all default values set.
 func Defaults() *Config {
 	return &Config{
-		AIModel:               "hf:zai-org/GLM-4.7",
-		MaxTokens:             20000,
-		WorkingDir:            ".",
-		WelcomeMessage:        "Chat with Claude (use 'ctrl+c' to quit)",
-		GoodbyeMessage:        "Bye!",
-		HistoryFile:           "~/.code-editing-agent-history",
-		HistoryMaxEntries:     1000,
-		ExtendedThinking:      false,
-		ThinkingBudget:        10000,
-		ShowThinking:          false,
-		CommandValidationMode: "blacklist",
-		CommandWhitelistJSON:  "",
-		AskLLMOnUnknown:       true,
+		AIModel:                  "hf:zai-org/GLM-4.7",
+		MaxTokens:                20000,
+		WorkingDir:               ".",
+		WelcomeMessage:           "Chat with Claude (use 'ctrl+c' to quit)",
+		GoodbyeMessage:           "Bye!",
+		HistoryFile:              "~/.code-editing-agent-history",
+		HistoryMaxEntries:        1000,
+		ExtendedThinking:         false,
+		ThinkingBudget:           10000,
+		ShowThinking:             false,
+		CommandValidationMode:    "blacklist",
+		CommandWhitelistJSON:     "",
+		AskLLMOnUnknown:          true,
+		CommandWhitelistOverride: false,
 	}
 }
 
@@ -180,6 +186,11 @@ func LoadConfig() *Config {
 	// Ask LLM on unknown: whether to ask LLM before blocking non-whitelisted commands
 	if viper.IsSet("ask_llm_on_unknown") {
 		cfg.AskLLMOnUnknown = viper.GetBool("ask_llm_on_unknown")
+	}
+
+	// Command whitelist override: whether custom patterns replace defaults
+	if viper.IsSet("command_whitelist_override") {
+		cfg.CommandWhitelistOverride = viper.GetBool("command_whitelist_override")
 	}
 
 	return cfg

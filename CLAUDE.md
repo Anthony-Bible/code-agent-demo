@@ -82,6 +82,7 @@ Environment variables with `AGENT_` prefix:
 - `AGENT_WORKING_DIR` - Base directory for file operations
 - `AGENT_COMMAND_VALIDATION_MODE` - Command validation mode: `blacklist` (default) or `whitelist`
 - `AGENT_COMMAND_WHITELIST_JSON` - JSON array of whitelist patterns with optional excludes (whitelist mode only)
+- `AGENT_COMMAND_WHITELIST_OVERRIDE` - Replace default whitelist patterns with custom ones (default: `false`)
 - `AGENT_ASK_LLM_ON_UNKNOWN` - Ask LLM before blocking non-whitelisted commands (default: `true`)
 
 ## Testing Patterns
@@ -178,6 +179,33 @@ export AGENT_COMMAND_WHITELIST_JSON='[
 ```
 
 This allows `find . -name "*.go"` but blocks `find . -exec rm {} \;`.
+
+### Whitelist Override Mode
+
+By default, custom patterns extend the defaults. To replace defaults entirely:
+
+```bash
+export AGENT_COMMAND_WHITELIST_OVERRIDE=true
+```
+
+**Example: Minimal whitelist**
+```bash
+export AGENT_COMMAND_VALIDATION_MODE=whitelist
+export AGENT_COMMAND_WHITELIST_OVERRIDE=true
+export AGENT_COMMAND_WHITELIST_JSON='[
+  {"pattern": "^ls(\\s|$)", "description": "list files"},
+  {"pattern": "^cat(\\s|$)", "description": "read files"}
+]'
+```
+
+| Scenario | Behavior |
+|----------|----------|
+| `OVERRIDE=true`, no JSON | Empty whitelist, blocks all commands |
+| `OVERRIDE=true`, with JSON | Only custom patterns active |
+| `OVERRIDE=false` (default) | Custom patterns extend defaults |
+| `OVERRIDE=true`, blacklist mode | Setting ignored (only applies to whitelist mode) |
+
+**Warning:** `OVERRIDE=true` with no custom patterns blocks ALL commands.
 
 ### LLM Fallback for Non-Whitelisted Commands
 

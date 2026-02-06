@@ -449,10 +449,8 @@ func TestWhitelistMode_SubstitutionBlocking(t *testing.T) {
 				if !strings.Contains(err.Error(), "whitelist") || !strings.Contains(err.Error(), "command blocked") {
 					t.Errorf("error should mention whitelist and command blocked, got: %v", err)
 				}
-			} else {
-				if err != nil {
-					t.Errorf("command %q should be allowed: %v", tt.command, err)
-				}
+			} else if err != nil {
+				t.Errorf("command %q should be allowed: %v", tt.command, err)
 			}
 		})
 	}
@@ -488,5 +486,104 @@ func TestWhitelistMode_DangerousButWhitelisted(t *testing.T) {
 	// whitelisted commands bypass dangerous command checks
 	if callbackCalled {
 		t.Error("in whitelist mode, whitelisted commands should bypass dangerous checks")
+	}
+}
+
+// TestWhitelistMode_OverrideReplacesDefaults verifies that when override mode is used,
+// only custom patterns are active (simulating AGENT_COMMAND_WHITELIST_OVERRIDE=true).
+func TestWhitelistMode_OverrideReplacesDefaults(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	// Custom-only whitelist (simulating override=true with custom patterns)
+	customPatterns := []safety.WhitelistPattern{
+		{Pattern: regexp.MustCompile(`^mycommand(\s|$)`), Description: "custom command only"},
+	}
+	whitelist := safety.NewCommandWhitelist(customPatterns)
+	err := adapter.SetValidationMode(safety.ModeWhitelist, whitelist, false)
+	if err != nil {
+		t.Fatalf("failed to set validation mode: %v", err)
+	}
+
+	// 'ls' should be blocked (not in custom patterns, no defaults)
+	input := `{"command": "ls", "dangerous": false}`
+	_, err = adapter.ExecuteTool(context.Background(), "bash", input)
+
+	if err == nil {
+		t.Fatal("'ls' should be blocked when using override mode with custom-only patterns")
+	}
+
+	if !strings.Contains(err.Error(), "whitelist") {
+		t.Errorf("error should mention whitelist, got: %v", err)
+	}
+}
+
+// TestWhitelistMode_EmptyWhitelistBlocksAll verifies that an empty whitelist
+// (simulating AGENT_COMMAND_WHITELIST_OVERRIDE=true with no custom patterns)
+// blocks all commands.
+func TestWhitelistMode_EmptyWhitelistBlocksAll(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	// Empty whitelist (override=true with no custom JSON)
+	whitelist := safety.NewCommandWhitelist([]safety.WhitelistPattern{})
+	err := adapter.SetValidationMode(safety.ModeWhitelist, whitelist, false)
+	if err != nil {
+		t.Fatalf("failed to set validation mode: %v", err)
+	}
+
+	// Any command should be blocked
+	testCmds := []string{"ls", "pwd", "echo hello", "cat /etc/passwd"}
+	for _, cmd := range testCmds {
+		input := `{"command": "` + cmd + `", "dangerous": false}`
+		_, err = adapter.ExecuteTool(context.Background(), "bash", input)
+
+		if err == nil {
+			t.Errorf("command %q should be blocked with empty whitelist", cmd)
+		}
+		if !strings.Contains(err.Error(), "whitelist") {
+			t.Errorf("error for %q should mention whitelist, got: %v", cmd, err)
+		}
+	}
+}
+
+// TestWhitelistMode_OverrideWithCustomAllowsOnlyCustom verifies that override mode
+// with custom patterns only allows those specific patterns.
+func TestWhitelistMode_OverrideWithCustomAllowsOnlyCustom(t *testing.T) {
+	fileManager := file.NewLocalFileManager(".")
+	adapter := NewExecutorAdapter(fileManager)
+
+	// Custom whitelist with specific patterns
+	customPatterns := []safety.WhitelistPattern{
+		{Pattern: regexp.MustCompile(`^echo(\s|$)`), Description: "echo only"},
+		{Pattern: regexp.MustCompile(`^cat(\s|$)`), Description: "cat only"},
+	}
+	whitelist := safety.NewCommandWhitelist(customPatterns)
+	err := adapter.SetValidationMode(safety.ModeWhitelist, whitelist, false)
+	if err != nil {
+		t.Fatalf("failed to set validation mode: %v", err)
+	}
+
+	tests := []struct {
+		cmd     string
+		allowed bool
+	}{
+		{"echo hello", true},
+		{"cat /etc/passwd", true},
+		{"ls", false},       // Not in custom patterns
+		{"pwd", false},      // Not in custom patterns
+		{"grep foo", false}, // Not in custom patterns
+	}
+
+	for _, tt := range tests {
+		input := `{"command": "` + tt.cmd + `", "dangerous": false}`
+		_, err = adapter.ExecuteTool(context.Background(), "bash", input)
+
+		if tt.allowed && err != nil {
+			t.Errorf("command %q should be allowed: %v", tt.cmd, err)
+		}
+		if !tt.allowed && err == nil {
+			t.Errorf("command %q should be blocked", tt.cmd)
+		}
 	}
 }

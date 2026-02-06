@@ -446,20 +446,41 @@ func buildValidationConfig(cfg *Config) (safety.CommandValidationMode, *safety.C
 		return mode, nil, nil
 	}
 
-	// Whitelist mode: build the whitelist from defaults + custom patterns
-	patterns := safety.DefaultWhitelistPatterns()
+	// Whitelist mode: build patterns based on override setting
+	patterns, err := buildWhitelistPatterns(cfg)
+	if err != nil {
+		return "", nil, err
+	}
+	return mode, safety.NewCommandWhitelist(patterns), nil
+}
 
-	if cfg.CommandWhitelistJSON != "" {
-		customPatterns, parseErr := safety.ParseWhitelistPatternsJSON(cfg.CommandWhitelistJSON)
-		if parseErr != nil {
-			return "", nil, fmt.Errorf("invalid AGENT_COMMAND_WHITELIST_JSON: %w", parseErr)
-		}
-		if len(customPatterns) > 0 {
-			patterns = append(patterns, customPatterns...)
-		}
+// buildWhitelistPatterns constructs the whitelist pattern list based on config.
+// If CommandWhitelistOverride is true, only custom patterns are used.
+// Otherwise, custom patterns extend the defaults.
+func buildWhitelistPatterns(cfg *Config) ([]safety.WhitelistPattern, error) {
+	// Parse custom patterns if provided
+	customPatterns, err := parseCustomPatterns(cfg.CommandWhitelistJSON)
+	if err != nil {
+		return nil, fmt.Errorf("invalid AGENT_COMMAND_WHITELIST_JSON: %w", err)
 	}
 
-	return mode, safety.NewCommandWhitelist(patterns), nil
+	// Override mode: use ONLY custom patterns (empty = blocks all)
+	if cfg.CommandWhitelistOverride {
+		return customPatterns, nil
+	}
+
+	// Extend mode: defaults + custom
+	patterns := safety.DefaultWhitelistPatterns()
+	return append(patterns, customPatterns...), nil
+}
+
+// parseCustomPatterns parses the JSON whitelist configuration.
+// Returns empty slice if json is empty, error if json is invalid.
+func parseCustomPatterns(json string) ([]safety.WhitelistPattern, error) {
+	if json == "" {
+		return nil, nil
+	}
+	return safety.ParseWhitelistPatternsJSON(json)
 }
 
 // createCommandValidator creates a CommandValidator based on the configuration.

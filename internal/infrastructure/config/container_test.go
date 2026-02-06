@@ -1,6 +1,7 @@
 package config
 
 import (
+	"code-editing-agent/internal/domain/safety"
 	"code-editing-agent/internal/infrastructure/adapter/ui"
 	"os"
 	"path/filepath"
@@ -142,5 +143,79 @@ func TestContainer_HistoryIntegrationWithChatService(t *testing.T) {
 		// Verify history file is configured
 		assert.Equal(t, "/tmp/chatservice-history-test", cliAdapter.GetHistoryFile(),
 			"UIAdapter used by ChatService should have history file configured")
+	})
+}
+
+// TestBuildWhitelistPatterns verifies that buildWhitelistPatterns respects
+// the CommandWhitelistOverride setting.
+func TestBuildWhitelistPatterns(t *testing.T) {
+	t.Run("override=false extends defaults with custom patterns", func(t *testing.T) {
+		cfg := Defaults()
+		cfg.CommandValidationMode = "whitelist"
+		cfg.CommandWhitelistOverride = false
+		cfg.CommandWhitelistJSON = `[{"pattern": "^mycustom(\\s|$)", "description": "custom"}]`
+
+		patterns, err := buildWhitelistPatterns(cfg)
+		require.NoError(t, err)
+
+		// Should have defaults + custom pattern
+		defaultCount := len(safety.DefaultWhitelistPatterns())
+		assert.Greater(t, len(patterns), defaultCount,
+			"should have more patterns than defaults")
+
+		// Last pattern should be our custom one
+		lastPattern := patterns[len(patterns)-1]
+		assert.Equal(t, "custom", lastPattern.Description)
+	})
+
+	t.Run("override=true uses only custom patterns", func(t *testing.T) {
+		cfg := Defaults()
+		cfg.CommandValidationMode = "whitelist"
+		cfg.CommandWhitelistOverride = true
+		cfg.CommandWhitelistJSON = `[{"pattern": "^mycustom(\\s|$)", "description": "custom"}]`
+
+		patterns, err := buildWhitelistPatterns(cfg)
+		require.NoError(t, err)
+
+		// Should have only our custom pattern
+		assert.Len(t, patterns, 1, "should have only custom pattern")
+		assert.Equal(t, "custom", patterns[0].Description)
+	})
+
+	t.Run("override=true with no JSON returns empty patterns", func(t *testing.T) {
+		cfg := Defaults()
+		cfg.CommandValidationMode = "whitelist"
+		cfg.CommandWhitelistOverride = true
+		cfg.CommandWhitelistJSON = ""
+
+		patterns, err := buildWhitelistPatterns(cfg)
+		require.NoError(t, err)
+
+		// Should have no patterns (blocks all commands)
+		assert.Empty(t, patterns, "should have no patterns")
+	})
+
+	t.Run("override=false with no JSON uses defaults", func(t *testing.T) {
+		cfg := Defaults()
+		cfg.CommandValidationMode = "whitelist"
+		cfg.CommandWhitelistOverride = false
+		cfg.CommandWhitelistJSON = ""
+
+		patterns, err := buildWhitelistPatterns(cfg)
+		require.NoError(t, err)
+
+		// Should have exactly the defaults
+		assert.Len(t, patterns, len(safety.DefaultWhitelistPatterns()),
+			"should have exactly default patterns")
+	})
+
+	t.Run("invalid JSON returns error", func(t *testing.T) {
+		cfg := Defaults()
+		cfg.CommandValidationMode = "whitelist"
+		cfg.CommandWhitelistJSON = `[{"pattern": "invalid json`
+
+		_, err := buildWhitelistPatterns(cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "AGENT_COMMAND_WHITELIST_JSON")
 	})
 }

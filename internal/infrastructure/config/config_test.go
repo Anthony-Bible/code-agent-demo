@@ -343,3 +343,40 @@ func TestConfig_ExtendedThinkingFieldsExist(t *testing.T) {
 		require.NotNil(t, cfg)
 	})
 }
+
+// TestConfig_CommandWhitelistOverride verifies CommandWhitelistOverride default and env var loading.
+func TestConfig_CommandWhitelistOverride(t *testing.T) {
+	resetViper := func() {
+		viper.Reset()
+	}
+
+	t.Run("defaults to false", func(t *testing.T) {
+		cfg := Defaults()
+		assert.False(t, cfg.CommandWhitelistOverride,
+			"CommandWhitelistOverride should default to false")
+	})
+
+	t.Run("AGENT_COMMAND_WHITELIST_OVERRIDE=true sets to true", func(t *testing.T) {
+		resetViper()
+		defer resetViper()
+
+		t.Setenv("AGENT_COMMAND_WHITELIST_OVERRIDE", "true")
+
+		cfg := LoadConfig()
+
+		assert.True(t, cfg.CommandWhitelistOverride,
+			"AGENT_COMMAND_WHITELIST_OVERRIDE=true should set CommandWhitelistOverride to true")
+	})
+
+	t.Run("AGENT_COMMAND_WHITELIST_OVERRIDE=false keeps false", func(t *testing.T) {
+		resetViper()
+		defer resetViper()
+
+		t.Setenv("AGENT_COMMAND_WHITELIST_OVERRIDE", "false")
+
+		cfg := LoadConfig()
+
+		assert.False(t, cfg.CommandWhitelistOverride,
+			"AGENT_COMMAND_WHITELIST_OVERRIDE=false should set CommandWhitelistOverride to false")
+	})
+}
