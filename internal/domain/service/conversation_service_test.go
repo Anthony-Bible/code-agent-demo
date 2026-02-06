@@ -2063,30 +2063,24 @@ func TestTokenTracking(t *testing.T) {
 	ctx := context.Background()
 	sessionID, _ := svc.StartConversation(ctx)
 
-	// Accumulate tokens
-	svc.addTokenUsage(sessionID, 100, 200)
+	// First update: input=100 + output=200 = 300
+	svc.setTokenUsage(sessionID, 100, 200)
 	usage := svc.getTokenUsage(sessionID)
-	if usage.TotalInputTokens != 100 {
-		t.Errorf("Expected input tokens 100, got %d", usage.TotalInputTokens)
-	}
-	if usage.TotalOutputTokens != 200 {
-		t.Errorf("Expected output tokens 200, got %d", usage.TotalOutputTokens)
-	}
-	if usage.Total() != 300 {
-		t.Errorf("Expected total 300, got %d", usage.Total())
+	if usage != 300 {
+		t.Errorf("Expected total 300, got %d", usage)
 	}
 
-	// Accumulate more
-	svc.addTokenUsage(sessionID, 50, 75)
+	// Second update: replaces with input=50 + output=75 = 125
+	svc.setTokenUsage(sessionID, 50, 75)
 	usage = svc.getTokenUsage(sessionID)
-	if usage.Total() != 425 {
-		t.Errorf("Expected total 425, got %d", usage.Total())
+	if usage != 125 {
+		t.Errorf("Expected total 125, got %d", usage)
 	}
 
 	// Unknown session returns zero
 	unknown := svc.getTokenUsage("nonexistent")
-	if unknown.Total() != 0 {
-		t.Errorf("Expected 0 for unknown session, got %d", unknown.Total())
+	if unknown != 0 {
+		t.Errorf("Expected 0 for unknown session, got %d", unknown)
 	}
 }
 
@@ -2233,10 +2227,10 @@ func TestCompactionCleanup(t *testing.T) {
 	sessionID, _ := svc.StartConversation(ctx)
 
 	// Add some token usage
-	svc.addTokenUsage(sessionID, 1000, 2000)
+	svc.setTokenUsage(sessionID, 1000, 2000)
 	usage := svc.getTokenUsage(sessionID)
-	if usage.Total() != 3000 {
-		t.Fatalf("Expected 3000, got %d", usage.Total())
+	if usage != 3000 {
+		t.Fatalf("Expected 3000, got %d", usage)
 	}
 
 	// End conversation
@@ -2247,50 +2241,46 @@ func TestCompactionCleanup(t *testing.T) {
 
 	// Token usage should be cleaned up
 	usage = svc.getTokenUsage(sessionID)
-	if usage.Total() != 0 {
-		t.Errorf("Expected 0 after cleanup, got %d", usage.Total())
+	if usage != 0 {
+		t.Errorf("Expected 0 after cleanup, got %d", usage)
 	}
 }
 
-func TestAddTokensAndCheckThreshold(t *testing.T) {
+func TestSetTokensAndCheckThreshold(t *testing.T) {
 	tests := []struct {
 		name      string
-		additions []struct{ input, output int64 }
+		input     int64
+		output    int64
 		threshold int64
-		wantLast  bool // expected return value of the last call
+		want      bool
 	}{
 		{
 			name:      "below threshold returns false",
-			additions: []struct{ input, output int64 }{{100, 200}},
+			input:     100,
+			output:    200,
 			threshold: 10000,
-			wantLast:  false,
+			want:      false,
 		},
 		{
 			name:      "at threshold returns true",
-			additions: []struct{ input, output int64 }{{5000, 5000}},
+			input:     5000,
+			output:    5000,
 			threshold: 10000,
-			wantLast:  true,
+			want:      true,
 		},
 		{
 			name:      "above threshold returns true",
-			additions: []struct{ input, output int64 }{{6000, 6000}},
+			input:     6000,
+			output:    6000,
 			threshold: 10000,
-			wantLast:  true,
-		},
-		{
-			name: "accumulates across calls",
-			additions: []struct{ input, output int64 }{
-				{3000, 3000}, // 6000 total, below
-				{2000, 2000}, // 10000 total, at threshold
-			},
-			threshold: 10000,
-			wantLast:  true,
+			want:      true,
 		},
 		{
 			name:      "new session starts at zero",
-			additions: []struct{ input, output int64 }{{1, 1}},
+			input:     1,
+			output:    1,
 			threshold: 10000,
-			wantLast:  false,
+			want:      false,
 		},
 	}
 
@@ -2304,13 +2294,10 @@ func TestAddTokensAndCheckThreshold(t *testing.T) {
 			ctx := context.Background()
 			sessionID, _ := svc.StartConversation(ctx)
 
-			var got bool
-			for _, add := range tt.additions {
-				got = svc.addTokensAndCheckThreshold(sessionID, add.input, add.output)
-			}
+			got := svc.setTokensAndCheckThreshold(sessionID, tt.input, tt.output)
 
-			if got != tt.wantLast {
-				t.Errorf("addTokensAndCheckThreshold() = %v, want %v", got, tt.wantLast)
+			if got != tt.want {
+				t.Errorf("setTokensAndCheckThreshold() = %v, want %v", got, tt.want)
 			}
 		})
 	}

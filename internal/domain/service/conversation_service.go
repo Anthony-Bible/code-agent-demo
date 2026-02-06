@@ -28,17 +28,6 @@ const (
 	maxSummaryToolResultRunes = 200
 )
 
-// TokenUsage tracks cumulative token usage for a session.
-type TokenUsage struct {
-	TotalInputTokens  int64
-	TotalOutputTokens int64
-}
-
-// Total returns the sum of input and output tokens.
-func (t *TokenUsage) Total() int64 {
-	return t.TotalInputTokens + t.TotalOutputTokens
-}
-
 // ConversationService handles the core business logic for managing conversations.
 // It orchestrates the flow of messages between users and AI, processes tool executions,
 // maintains conversation state, and coordinates with the AI provider.
@@ -54,8 +43,8 @@ type ConversationService struct {
 	sessionThinkingModes   map[string]port.ThinkingModeInfo
 	sessionThinkingModesMu sync.RWMutex // Protects sessionThinkingModes map for concurrent access
 	sessionSystemPrompts   map[string]string
-	sessionSystemPromptsMu sync.RWMutex // Protects sessionSystemPrompts map for concurrent access
-	sessionTokenUsage      map[string]*TokenUsage
+	sessionSystemPromptsMu sync.RWMutex     // Protects sessionSystemPrompts map for concurrent access
+	sessionTokenUsage      map[string]int64 // total tokens (input+output) from latest API response
 	sessionTokenUsageMu    sync.RWMutex
 	compactionThreshold    int64
 }
@@ -91,7 +80,7 @@ func NewConversationService(
 		sessionModes:         make(map[string]bool),
 		sessionThinkingModes: make(map[string]port.ThinkingModeInfo),
 		sessionSystemPrompts: make(map[string]string),
-		sessionTokenUsage:    make(map[string]*TokenUsage),
+		sessionTokenUsage:    make(map[string]int64),
 		compactionThreshold:  threshold,
 	}, nil
 }
@@ -345,8 +334,8 @@ func (cs *ConversationService) finalizeAIResponse(
 	cs.processing[sessionID] = hasToolCalls
 	cs.processingMu.Unlock()
 
-	// Track token usage and check for compaction (atomic to avoid race between add and check)
-	shouldCompact := cs.addTokensAndCheckThreshold(sessionID, response.InputTokens, response.OutputTokens)
+	// Track token usage and check for compaction (atomic to avoid race between set and check)
+	shouldCompact := cs.setTokensAndCheckThreshold(sessionID, response.InputTokens, response.OutputTokens)
 	if !hasToolCalls && shouldCompact {
 		if err := cs.compactConversation(ctx, sessionID, conversation); err != nil {
 			fmt.Fprintf(
@@ -620,43 +609,36 @@ func (cs *ConversationService) GetCustomSystemPrompt(sessionID string) (string, 
 	return prompt, ok
 }
 
-// addTokenUsage accumulates token usage for a session.
-func (cs *ConversationService) addTokenUsage(sessionID string, input, output int64) {
+// setTokenUsage stores the total token count (input+output) for a session.
+// The API reports input_tokens as the full conversation size each time, so
+// input+output represents the total conversation footprint after each response.
+func (cs *ConversationService) setTokenUsage(sessionID string, input, output int64) {
 	cs.sessionTokenUsageMu.Lock()
 	defer cs.sessionTokenUsageMu.Unlock()
-	usage, exists := cs.sessionTokenUsage[sessionID]
-	if !exists {
-		usage = &TokenUsage{}
-		cs.sessionTokenUsage[sessionID] = usage
-	}
-	usage.TotalInputTokens += input
-	usage.TotalOutputTokens += output
+	cs.sessionTokenUsage[sessionID] = input + output
 }
 
-// addTokensAndCheckThreshold atomically adds token usage and checks whether
+// setTokensAndCheckThreshold atomically sets token usage and checks whether
 // the compaction threshold has been reached. This avoids a race condition
-// between separate add and check calls.
-func (cs *ConversationService) addTokensAndCheckThreshold(sessionID string, input, output int64) bool {
+// between separate set and check calls.
+func (cs *ConversationService) setTokensAndCheckThreshold(sessionID string, input, output int64) bool {
 	cs.sessionTokenUsageMu.Lock()
 	defer cs.sessionTokenUsageMu.Unlock()
-	usage, exists := cs.sessionTokenUsage[sessionID]
-	if !exists {
-		usage = &TokenUsage{}
-		cs.sessionTokenUsage[sessionID] = usage
-	}
-	usage.TotalInputTokens += input
-	usage.TotalOutputTokens += output
-	return usage.Total() >= cs.compactionThreshold
+	total := input + output
+	cs.sessionTokenUsage[sessionID] = total
+	return total >= cs.compactionThreshold
 }
 
-// getTokenUsage returns the current token usage for a session.
-func (cs *ConversationService) getTokenUsage(sessionID string) *TokenUsage {
+// getTokenUsage returns the current total token count for a session.
+func (cs *ConversationService) getTokenUsage(sessionID string) int64 {
 	cs.sessionTokenUsageMu.RLock()
 	defer cs.sessionTokenUsageMu.RUnlock()
-	if usage, exists := cs.sessionTokenUsage[sessionID]; exists {
-		return usage
-	}
-	return &TokenUsage{}
+	return cs.sessionTokenUsage[sessionID]
+}
+
+// GetTokenUsage returns the current total token count and compaction threshold for a session.
+func (cs *ConversationService) GetTokenUsage(sessionID string) (int64, int64) {
+	return cs.getTokenUsage(sessionID), cs.compactionThreshold
 }
 
 // formatMessageForSummary writes a single message's content to the builder for summarization.
@@ -758,10 +740,7 @@ func (cs *ConversationService) compactConversation(
 
 	// Reset token counter based on summary size
 	cs.sessionTokenUsageMu.Lock()
-	cs.sessionTokenUsage[sessionID] = &TokenUsage{
-		TotalInputTokens:  summaryResponse.InputTokens,
-		TotalOutputTokens: summaryResponse.OutputTokens,
-	}
+	cs.sessionTokenUsage[sessionID] = summaryResponse.InputTokens + summaryResponse.OutputTokens
 	cs.sessionTokenUsageMu.Unlock()
 
 	fmt.Fprintf(
