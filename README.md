@@ -13,6 +13,7 @@ A sophisticated AI-powered command-line coding assistant built with Go using hex
 - **📁 File System Tools** - Read, list, and edit files directly from chat
 - **🔄 Subagent System** - Spawn specialized AI assistants for delegated tasks (pre-defined or dynamic)
 - **📋 Plan Mode** - Propose changes for review before applying them
+- **🔄 Auto-Compaction** - Automatic conversation summarization to manage context window limits
 - **🏗️ Hexagonal Architecture** - Clean separation of concerns with ports and adapters
 - **🔧 Modular Tool System** - Extensible architecture for adding custom tools with JSON schema validation
 - **🎯 Skill System** - Project-specific and global AI capabilities following agentskills.io
@@ -29,6 +30,7 @@ A sophisticated AI-powered command-line coding assistant built with Go using hex
   - [Webhook Server Mode](#webhook-server-mode)
   - [Extended Thinking](#extended-thinking-mode-)
   - [Plan Mode](#plan-mode)
+  - [Auto-Compaction](#auto-compaction)
   - [Skills](#skills)
   - [Subagents](#subagent-system)
   - [Alerts & Investigations](#alerts--investigations)
@@ -682,6 +684,45 @@ Plan mode allows you to review and approve proposed changes before they are appl
 **Via tool:**
 The AI can proactively enter plan mode using the `enter_plan_mode` tool when it detects a complex task.
 
+### Auto-Compaction
+
+Auto-compaction automatically summarizes long conversations to prevent hitting context window limits. When the total token usage (input + output) exceeds a configurable threshold, the conversation history is replaced with an AI-generated summary that preserves key decisions, code changes, file paths, and important context.
+
+#### How It Works
+
+1. After each AI response, the service checks total token usage against the threshold
+2. If the threshold is exceeded **and** no tool calls are in progress, compaction triggers
+3. The AI generates a detailed summary of the entire conversation
+4. The conversation history is replaced with a single summary message prefixed with `[CONVERSATION SUMMARY - Auto-compacted]`
+5. The token counter resets based on the summary size
+
+Compaction is **deferred during tool execution cycles** to avoid summarizing mid-operation. If compaction fails, the conversation continues normally (non-fatal).
+
+#### Configuration
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `AGENT_COMPACTION_THRESHOLD` | `160000` | Token threshold that triggers auto-compaction |
+
+The minimum allowed threshold is `10,000` tokens. Values below this floor are automatically raised to prevent excessive compaction.
+
+```bash
+# Use default (160,000 tokens)
+./agent chat
+
+# Set a custom threshold
+export AGENT_COMPACTION_THRESHOLD=100000
+./agent chat
+```
+
+#### What the Summary Preserves
+
+- Key decisions and reasoning
+- Code changes and file paths
+- Error messages and resolutions
+- Tool calls and their results (truncated for brevity)
+- System prompts (stored separately, always preserved)
+
 ---
 
 ### Alerts & Investigations
@@ -812,6 +853,7 @@ export AGENT_ASK_LLM_ON_UNKNOWN=true            # Ask before blocking non-whitel
 | `--historyFile` | `~/.agent-history` | Command history file location |
 | `--historyMaxEntries` | `1000` | Maximum history entries to keep |
 | `--auto-approve-safe` | `false` | Auto-approve non-dangerous bash commands (serve mode only) |
+| `AGENT_COMPACTION_THRESHOLD` | `160000` | Token threshold for auto-compaction (min 10,000) |
 
 ### Serve Command Configuration
 
