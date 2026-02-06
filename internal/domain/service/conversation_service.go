@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 )
 
@@ -16,6 +18,17 @@ var (
 	ErrConversationNotFound = errors.New("conversation not found")
 	ErrToolNotFound         = errors.New("tool not found")
 )
+
+// TokenUsage tracks cumulative token usage for a session.
+type TokenUsage struct {
+	TotalInputTokens  int64
+	TotalOutputTokens int64
+}
+
+// Total returns the sum of input and output tokens.
+func (t *TokenUsage) Total() int64 {
+	return t.TotalInputTokens + t.TotalOutputTokens
+}
 
 // ConversationService handles the core business logic for managing conversations.
 // It orchestrates the flow of messages between users and AI, processes tool executions,
@@ -32,16 +45,29 @@ type ConversationService struct {
 	sessionThinkingModesMu sync.RWMutex // Protects sessionThinkingModes map for concurrent access
 	sessionSystemPrompts   map[string]string
 	sessionSystemPromptsMu sync.RWMutex // Protects sessionSystemPrompts map for concurrent access
+	sessionTokenUsage      map[string]*TokenUsage
+	sessionTokenUsageMu    sync.RWMutex
+	compactionThreshold    int64
 }
 
 // NewConversationService creates a new instance of ConversationService.
 // It requires an AI provider and tool executor for operations.
-func NewConversationService(aiProvider port.AIProvider, toolExecutor port.ToolExecutor) (*ConversationService, error) {
+// An optional compactionThreshold parameter sets the token threshold for auto-compaction.
+func NewConversationService(
+	aiProvider port.AIProvider,
+	toolExecutor port.ToolExecutor,
+	compactionThreshold ...int64,
+) (*ConversationService, error) {
 	if aiProvider == nil {
 		return nil, errors.New("AI provider cannot be nil")
 	}
 	if toolExecutor == nil {
 		return nil, errors.New("tool executor cannot be nil")
+	}
+
+	threshold := int64(160000)
+	if len(compactionThreshold) > 0 && compactionThreshold[0] > 0 {
+		threshold = compactionThreshold[0]
 	}
 
 	return &ConversationService{
@@ -52,6 +78,8 @@ func NewConversationService(aiProvider port.AIProvider, toolExecutor port.ToolEx
 		sessionModes:         make(map[string]bool),
 		sessionThinkingModes: make(map[string]port.ThinkingModeInfo),
 		sessionSystemPrompts: make(map[string]string),
+		sessionTokenUsage:    make(map[string]*TokenUsage),
+		compactionThreshold:  threshold,
 	}, nil
 }
 
@@ -302,6 +330,17 @@ func (cs *ConversationService) finalizeAIResponse(
 		cs.processing[sessionID] = false
 	}
 
+	// Track token usage and check for compaction
+	cs.addTokenUsage(sessionID, response.InputTokens, response.OutputTokens)
+	if !cs.processing[sessionID] {
+		usage := cs.getTokenUsage(sessionID)
+		if usage.Total() >= cs.compactionThreshold {
+			if err := cs.compactConversation(sessionID, conversation); err != nil {
+				fmt.Fprintf(os.Stderr, "[ConversationService] Compaction error for session %s: %v\n", sessionID, err)
+			}
+		}
+	}
+
 	return response, toolCalls, nil
 }
 
@@ -398,6 +437,11 @@ func (cs *ConversationService) EndConversation(ctx context.Context, sessionID st
 	cs.sessionSystemPromptsMu.Lock()
 	delete(cs.sessionSystemPrompts, sessionID)
 	cs.sessionSystemPromptsMu.Unlock()
+
+	// Remove token usage tracking
+	cs.sessionTokenUsageMu.Lock()
+	delete(cs.sessionTokenUsage, sessionID)
+	cs.sessionTokenUsageMu.Unlock()
 
 	// Clean up session state in tool executor if it supports it
 	if cleaner, ok := cs.toolExecutor.(port.SessionCleaner); ok {
@@ -549,4 +593,135 @@ func (cs *ConversationService) GetCustomSystemPrompt(sessionID string) (string, 
 	defer cs.sessionSystemPromptsMu.RUnlock()
 	prompt, ok := cs.sessionSystemPrompts[sessionID]
 	return prompt, ok
+}
+
+// addTokenUsage accumulates token usage for a session.
+func (cs *ConversationService) addTokenUsage(sessionID string, input, output int64) {
+	cs.sessionTokenUsageMu.Lock()
+	defer cs.sessionTokenUsageMu.Unlock()
+	usage, exists := cs.sessionTokenUsage[sessionID]
+	if !exists {
+		usage = &TokenUsage{}
+		cs.sessionTokenUsage[sessionID] = usage
+	}
+	usage.TotalInputTokens += input
+	usage.TotalOutputTokens += output
+}
+
+// getTokenUsage returns the current token usage for a session.
+func (cs *ConversationService) getTokenUsage(sessionID string) *TokenUsage {
+	cs.sessionTokenUsageMu.RLock()
+	defer cs.sessionTokenUsageMu.RUnlock()
+	if usage, exists := cs.sessionTokenUsage[sessionID]; exists {
+		return usage
+	}
+	return &TokenUsage{}
+}
+
+// formatMessageForSummary writes a single message's content to the builder for summarization.
+func formatMessageForSummary(sb *strings.Builder, msg entity.Message) {
+	fmt.Fprintf(sb, "[%s]: ", msg.Role)
+	if msg.Content != "" {
+		content := msg.Content
+		if len(content) > 2000 {
+			content = content[:2000] + "... (truncated)"
+		}
+		sb.WriteString(content)
+	}
+	formatToolCallsForSummary(sb, msg.ToolCalls)
+	formatToolResultsForSummary(sb, msg.ToolResults)
+	sb.WriteString("\n\n")
+}
+
+// formatToolCallsForSummary appends tool call names to the builder.
+func formatToolCallsForSummary(sb *strings.Builder, toolCalls []entity.ToolCall) {
+	if len(toolCalls) == 0 {
+		return
+	}
+	sb.WriteString(" [Tool calls: ")
+	for i, tc := range toolCalls {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(tc.ToolName)
+	}
+	sb.WriteString("]")
+}
+
+// formatToolResultsForSummary appends truncated tool results to the builder.
+func formatToolResultsForSummary(sb *strings.Builder, toolResults []entity.ToolResult) {
+	for _, tr := range toolResults {
+		result := tr.Result
+		if len(result) > 200 {
+			result = result[:200] + "..."
+		}
+		fmt.Fprintf(sb, " [Tool result: %s]", result)
+	}
+}
+
+// buildSummaryRequest formats conversation messages into a prompt for the AI to summarize.
+func (cs *ConversationService) buildSummaryRequest(messages []entity.Message) []port.MessageParam {
+	var sb strings.Builder
+	sb.WriteString("Please provide a detailed summary of the following conversation. ")
+	sb.WriteString("Preserve key decisions, code changes, file paths, error messages, and any important context. ")
+	sb.WriteString("The summary should allow the conversation to continue without losing critical information.\n\n")
+	sb.WriteString("=== CONVERSATION TO SUMMARIZE ===\n\n")
+
+	for _, msg := range messages {
+		formatMessageForSummary(&sb, msg)
+	}
+
+	sb.WriteString("=== END CONVERSATION ===\n\n")
+	sb.WriteString("Provide a comprehensive summary that captures all important details:")
+
+	return []port.MessageParam{
+		{
+			Role:    entity.RoleUser,
+			Content: sb.String(),
+		},
+	}
+}
+
+// compactConversation summarizes the conversation via an AI call and replaces history with the summary.
+func (cs *ConversationService) compactConversation(sessionID string, conversation *entity.Conversation) error {
+	messages := conversation.GetMessages()
+	if len(messages) == 0 {
+		return nil
+	}
+
+	summaryMessages := cs.buildSummaryRequest(messages)
+
+	summaryResponse, _, err := cs.aiProvider.SendMessage(context.Background(), summaryMessages, nil)
+	if err != nil {
+		return fmt.Errorf("failed to generate conversation summary: %w", err)
+	}
+
+	conversation.Clear()
+
+	summaryContent := "[CONVERSATION SUMMARY - Auto-compacted]\n\n" + summaryResponse.Content
+	summaryMsg, err := entity.NewMessage(entity.RoleUser, summaryContent)
+	if err != nil {
+		return fmt.Errorf("failed to create summary message: %w", err)
+	}
+
+	if err := conversation.AddMessage(*summaryMsg); err != nil {
+		return fmt.Errorf("failed to add summary message: %w", err)
+	}
+
+	// Reset token counter based on summary size
+	cs.sessionTokenUsageMu.Lock()
+	cs.sessionTokenUsage[sessionID] = &TokenUsage{
+		TotalInputTokens:  summaryResponse.InputTokens,
+		TotalOutputTokens: summaryResponse.OutputTokens,
+	}
+	cs.sessionTokenUsageMu.Unlock()
+
+	fmt.Fprintf(
+		os.Stderr,
+		"[ConversationService] Auto-compacted conversation %s: %d messages → 1 summary message\n",
+		sessionID,
+		len(messages),
+	)
+
+	return nil
 }

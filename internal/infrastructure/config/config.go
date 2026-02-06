@@ -86,6 +86,11 @@ type Config struct {
 	// replace the defaults entirely (true) or extend them (false).
 	// Only applies in whitelist mode. Defaults to false.
 	CommandWhitelistOverride bool
+
+	// CompactionThreshold is the total token count at which the conversation
+	// is automatically compacted (summarized) to manage context window size.
+	// Defaults to 160000.
+	CompactionThreshold int64
 }
 
 // Defaults returns a Config struct with all default values set.
@@ -105,6 +110,7 @@ func Defaults() *Config {
 		CommandWhitelistJSON:     "",
 		AskLLMOnUnknown:          true,
 		CommandWhitelistOverride: false,
+		CompactionThreshold:      160000,
 	}
 }
 
@@ -193,5 +199,20 @@ func LoadConfig() *Config {
 		cfg.CommandWhitelistOverride = viper.GetBool("command_whitelist_override")
 	}
 
+	cfg.CompactionThreshold = loadCompactionThreshold(cfg.CompactionThreshold)
+
 	return cfg
+}
+
+// loadCompactionThreshold reads the compaction threshold from viper, returning
+// the provided default if not set or invalid.
+func loadCompactionThreshold(defaultVal int64) int64 {
+	if !viper.IsSet("compaction_threshold") {
+		return defaultVal
+	}
+	threshold := viper.GetInt64("compaction_threshold")
+	if threshold > 0 {
+		return threshold
+	}
+	return defaultVal
 }

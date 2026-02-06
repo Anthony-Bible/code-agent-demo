@@ -165,7 +165,7 @@ func NewContainer(cfg *Config) (*Container, error) {
 
 	// Step 2: Create domain service (ConversationService)
 	// Note: ConversationService directly uses concrete adapter types
-	convService, err := service.NewConversationService(aiAdapter, toolExecutor)
+	convService, err := service.NewConversationService(aiAdapter, toolExecutor, cfg.CompactionThreshold)
 	if err != nil {
 		return nil, err
 	}
