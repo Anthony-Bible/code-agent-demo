@@ -1740,7 +1740,6 @@ func TestSubagentRunner_ModelSwitch_SetsModel(t *testing.T) {
 
 			// Act
 			result, err := runner.Run(context.Background(), agent, "Task", "subagent-"+tt.sessionSuffix)
-
 			// Assert
 			if err != nil {
 				t.Errorf("Run() error = %v, want nil", err)

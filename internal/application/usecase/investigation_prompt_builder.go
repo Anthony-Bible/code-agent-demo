@@ -41,11 +41,11 @@ func GenerateToolsHeader(tools []entity.Tool) string {
 
 	var sb strings.Builder
 	for i, tool := range tools {
-		sb.WriteString(fmt.Sprintf("%d. **%s** - %s\n", i+1, tool.Name, tool.Description))
+		fmt.Fprintf(&sb, "%d. **%s** - %s\n", i+1, tool.Name, tool.Description)
 
 		// Add simple example based on tool name
 		if example := getToolExample(tool.Name); example != "" {
-			sb.WriteString(fmt.Sprintf("   Example: %s\n", example))
+			fmt.Fprintf(&sb, "   Example: %s\n", example)
 		}
 		sb.WriteString("\n")
 	}
@@ -80,8 +80,8 @@ func GenerateSkillsHeader(skills []port.SkillInfo) string {
 	sb.WriteString("<available_skills>\n")
 	for _, skill := range skills {
 		sb.WriteString("  <skill>\n")
-		sb.WriteString(fmt.Sprintf("    <name>%s</name>\n", skill.Name))
-		sb.WriteString(fmt.Sprintf("    <description>%s</description>\n", skill.Description))
+		fmt.Fprintf(&sb, "    <name>%s</name>\n", skill.Name)
+		fmt.Fprintf(&sb, "    <description>%s</description>\n", skill.Description)
 		sb.WriteString("  </skill>\n")
 	}
 	sb.WriteString("</available_skills>\n")
@@ -205,12 +205,12 @@ You are an intelligent systems investigator. Analyze the alert below and use the
 
 	// Alert context section with ALL information
 	sb.WriteString("## Alert Context\n\n")
-	sb.WriteString(fmt.Sprintf("- **ID**: %s\n", alert.ID()))
-	sb.WriteString(fmt.Sprintf("- **Source**: %s\n", alert.Source()))
-	sb.WriteString(fmt.Sprintf("- **Severity**: %s\n", alert.Severity()))
-	sb.WriteString(fmt.Sprintf("- **Title**: %s\n", alert.Title()))
+	fmt.Fprintf(&sb, "- **ID**: %s\n", alert.ID())
+	fmt.Fprintf(&sb, "- **Source**: %s\n", alert.Source())
+	fmt.Fprintf(&sb, "- **Severity**: %s\n", alert.Severity())
+	fmt.Fprintf(&sb, "- **Title**: %s\n", alert.Title())
 	if alert.Description() != "" {
-		sb.WriteString(fmt.Sprintf("- **Description**: %s\n", alert.Description()))
+		fmt.Fprintf(&sb, "- **Description**: %s\n", alert.Description())
 	}
 	sb.WriteString("\n")
 
@@ -231,7 +231,7 @@ You are an intelligent systems investigator. Analyze the alert below and use the
 			}
 		}
 		for _, k := range keys {
-			sb.WriteString(fmt.Sprintf("- `%s`: %s\n", k, labels[k]))
+			fmt.Fprintf(&sb, "- `%s`: %s\n", k, labels[k])
 		}
 		sb.WriteString("\n")
 	}

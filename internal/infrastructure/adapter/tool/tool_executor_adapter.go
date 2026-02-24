@@ -673,7 +673,7 @@ func formatLinesWithNumbers(content string, startLine, endLine *int) string {
 	// Build output with line numbers
 	var result strings.Builder
 	for i := startIdx; i < endIdx; i++ {
-		result.WriteString(fmt.Sprintf("%d: %s\n", i+1, lines[i]))
+		fmt.Fprintf(&result, "%d: %s\n", i+1, lines[i])
 	}
 
 	return result.String()
@@ -1137,7 +1137,11 @@ func validateURL(rawURL string) error {
 		// Check all resolved IP addresses
 		for _, ip := range ips {
 			if isPrivateIP(ip) {
-				return fmt.Errorf("hostname %s resolves to private IP address %s and is blocked for security", host, ip.String())
+				return fmt.Errorf(
+					"hostname %s resolves to private IP address %s and is blocked for security",
+					host,
+					ip.String(),
+				)
 			}
 		}
 
@@ -1381,20 +1385,20 @@ func (a *ExecutorAdapter) executeActivateSkill(ctx context.Context, input json.R
 
 	// Build result with frontmatter and content
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("---\nname: %s\ndescription: %s", skill.Name, skill.Description))
+	fmt.Fprintf(&result, "---\nname: %s\ndescription: %s", skill.Name, skill.Description)
 	if skill.License != "" {
-		result.WriteString(fmt.Sprintf("\nlicense: %s", skill.License))
+		fmt.Fprintf(&result, "\nlicense: %s", skill.License)
 	}
 	if skill.Compatibility != "" {
-		result.WriteString(fmt.Sprintf("\ncompatibility: %s", skill.Compatibility))
+		fmt.Fprintf(&result, "\ncompatibility: %s", skill.Compatibility)
 	}
 	if len(skill.AllowedTools) > 0 {
-		result.WriteString(fmt.Sprintf("\nallowed-tools: %s", strings.Join(skill.AllowedTools, " ")))
+		fmt.Fprintf(&result, "\nallowed-tools: %s", strings.Join(skill.AllowedTools, " "))
 	}
 	if len(skill.Metadata) > 0 {
 		result.WriteString("\nmetadata:")
 		for key, value := range skill.Metadata {
-			result.WriteString(fmt.Sprintf("\n  %s: %s", key, value))
+			fmt.Fprintf(&result, "\n  %s: %s", key, value)
 		}
 	}
 	result.WriteString("\n---\n")

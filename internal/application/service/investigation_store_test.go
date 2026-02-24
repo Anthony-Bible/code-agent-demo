@@ -515,8 +515,20 @@ func TestInMemoryInvestigationStore_Query_ByTimeRange(t *testing.T) {
 			now := time.Now()
 
 			invs := []*InvestigationRecord{
-				{id: "inv-old", alertID: "a1", sessionID: "s1", status: tt.oldStatus, startedAt: now.Add(-2 * time.Hour)},
-				{id: "inv-recent", alertID: "a2", sessionID: "s2", status: tt.recentStatus, startedAt: now.Add(-30 * time.Minute)},
+				{
+					id:        "inv-old",
+					alertID:   "a1",
+					sessionID: "s1",
+					status:    tt.oldStatus,
+					startedAt: now.Add(-2 * time.Hour),
+				},
+				{
+					id:        "inv-recent",
+					alertID:   "a2",
+					sessionID: "s2",
+					status:    tt.recentStatus,
+					startedAt: now.Add(-30 * time.Minute),
+				},
 			}
 			for _, inv := range invs {
 				if err := store.Store(ctx, inv); err != nil {

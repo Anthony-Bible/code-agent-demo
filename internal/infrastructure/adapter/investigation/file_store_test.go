@@ -791,17 +791,21 @@ func TestFileInvestigationStore_Query_ByTimeRange(t *testing.T) {
 			name:         "by Since filter",
 			oldStatus:    "started",
 			recentStatus: "running",
-			buildQuery:   func(now time.Time) service.InvestigationQuery { return service.InvestigationQuery{Since: now.Add(-1 * time.Hour)} },
-			wantLen:      1,
-			errMsg:       "Query(Since=1h ago) len = %v, want 1",
+			buildQuery: func(now time.Time) service.InvestigationQuery {
+				return service.InvestigationQuery{Since: now.Add(-1 * time.Hour)}
+			},
+			wantLen: 1,
+			errMsg:  "Query(Since=1h ago) len = %v, want 1",
 		},
 		{
 			name:         "by Until filter",
 			oldStatus:    "completed",
 			recentStatus: "running",
-			buildQuery:   func(now time.Time) service.InvestigationQuery { return service.InvestigationQuery{Until: now.Add(-1 * time.Hour)} },
-			wantLen:      1,
-			errMsg:       "Query(Until=1h ago) len = %v, want 1",
+			buildQuery: func(now time.Time) service.InvestigationQuery {
+				return service.InvestigationQuery{Until: now.Add(-1 * time.Hour)}
+			},
+			wantLen: 1,
+			errMsg:  "Query(Until=1h ago) len = %v, want 1",
 		},
 	}
 

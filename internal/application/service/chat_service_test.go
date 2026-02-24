@@ -191,25 +191,25 @@ func TestChatService_HandleModeCommand(t *testing.T) {
 
 func TestChatService_PlanModeResponse(t *testing.T) {
 	tests := []struct {
-		name              string
-		planModeEnabled   bool
-		responseContent   string
-		userMessage       string
-		expectPlanPrefix  bool
+		name             string
+		planModeEnabled  bool
+		responseContent  string
+		userMessage      string
+		expectPlanPrefix bool
 	}{
 		{
-			name:              "assistant response prefixed with [PLAN MODE] when plan mode active",
-			planModeEnabled:   true,
-			responseContent:   "I will help you with that task.",
-			userMessage:       "Help me with a task",
-			expectPlanPrefix:  true,
+			name:             "assistant response prefixed with [PLAN MODE] when plan mode active",
+			planModeEnabled:  true,
+			responseContent:  "I will help you with that task.",
+			userMessage:      "Help me with a task",
+			expectPlanPrefix: true,
 		},
 		{
-			name:              "no [PLAN MODE] prefix when in normal mode",
-			planModeEnabled:   false,
-			responseContent:   "Here is my response.",
-			userMessage:       "Hello",
-			expectPlanPrefix:  false,
+			name:             "no [PLAN MODE] prefix when in normal mode",
+			planModeEnabled:  false,
+			responseContent:  "Here is my response.",
+			userMessage:      "Hello",
+			expectPlanPrefix: false,
 		},
 	}
 
@@ -229,7 +229,13 @@ func TestChatService_PlanModeResponse(t *testing.T) {
 			}
 
 			convService, _ := serviceDomain.NewConversationService(aiProvider, toolExecutor)
-			chatService, _ := NewChatServiceFromDomain(convService, userInterface, aiProvider, toolExecutor, fileManager)
+			chatService, _ := NewChatServiceFromDomain(
+				convService,
+				userInterface,
+				aiProvider,
+				toolExecutor,
+				fileManager,
+			)
 
 			ctx := context.Background()
 			startResp, _ := chatService.StartSession(ctx, "")

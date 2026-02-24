@@ -856,12 +856,12 @@ func TestBatchTool_StopOnError_True(t *testing.T) {
 
 func TestBatchTool_StopOnError_ContinuesModes(t *testing.T) {
 	tests := []struct {
-		name            string
-		testFile        string
-		input           string
-		wantResults     int
-		wantSuccess     int
-		wantFailed      int
+		name             string
+		testFile         string
+		input            string
+		wantResults      int
+		wantSuccess      int
+		wantFailed       int
 		wantStoppedEarly bool
 	}{
 		{
@@ -919,7 +919,8 @@ func TestBatchTool_StopOnError_ContinuesModes(t *testing.T) {
 				t.Fatalf("Failed to unmarshal result: %v", err)
 			}
 
-			if len(output.Results) != tt.wantResults || output.SuccessCount != tt.wantSuccess || output.FailedCount != tt.wantFailed {
+			if len(output.Results) != tt.wantResults || output.SuccessCount != tt.wantSuccess ||
+				output.FailedCount != tt.wantFailed {
 				t.Errorf("Expected %d results (%d success, %d fail), got results=%d success=%d failed=%d",
 					tt.wantResults, tt.wantSuccess, tt.wantFailed,
 					len(output.Results), output.SuccessCount, output.FailedCount)

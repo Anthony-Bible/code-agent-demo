@@ -142,7 +142,9 @@ func runChat(cmd *cobra.Command, args []string) error {
 				// Display current mode status
 				convSvc := container.ConversationService()
 				if isPlanMode, _ := convSvc.IsPlanMode(sessionID); isPlanMode {
-					_ = uiAdapter.DisplaySystemMessage("Plan mode enabled: Tools will write plans to files instead of executing.")
+					_ = uiAdapter.DisplaySystemMessage(
+						"Plan mode enabled: Tools will write plans to files instead of executing.",
+					)
 				} else {
 					_ = uiAdapter.DisplaySystemMessage("Plan mode disabled: Tools will execute normally.")
 				}

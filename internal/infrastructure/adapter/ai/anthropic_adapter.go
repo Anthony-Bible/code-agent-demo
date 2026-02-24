@@ -241,14 +241,14 @@ func (a *AnthropicAdapter) buildBasePromptWithSkills() string {
 
 	for _, skill := range skills.Skills {
 		sb.WriteString("  <skill>\n")
-		sb.WriteString(fmt.Sprintf("    <name>%s</name>\n", skill.Name))
-		sb.WriteString(fmt.Sprintf("    <description>%s</description>\n", skill.Description))
+		fmt.Fprintf(&sb, "    <name>%s</name>\n", skill.Name)
+		fmt.Fprintf(&sb, "    <description>%s</description>\n", skill.Description)
 		if skill.DirectoryPath != "" {
 			location := skill.DirectoryPath
 			if absDir, err := filepath.Abs(skill.DirectoryPath); err == nil {
 				location = absDir
 			}
-			sb.WriteString(fmt.Sprintf("    <location>%s</location>\n", filepath.Join(location, "SKILL.md")))
+			fmt.Fprintf(&sb, "    <location>%s</location>\n", filepath.Join(location, "SKILL.md"))
 		}
 		sb.WriteString("  </skill>\n")
 	}
@@ -266,8 +266,8 @@ func (a *AnthropicAdapter) buildBasePromptWithSkills() string {
 			sb.WriteString("Use the 'task' tool to delegate work to these specialized agents:\n")
 			for _, agent := range agents.Subagents {
 				sb.WriteString("  <agent>\n")
-				sb.WriteString(fmt.Sprintf("    <name>%s</name>\n", agent.Name))
-				sb.WriteString(fmt.Sprintf("    <description>%s</description>\n", agent.Description))
+				fmt.Fprintf(&sb, "    <name>%s</name>\n", agent.Name)
+				fmt.Fprintf(&sb, "    <description>%s</description>\n", agent.Description)
 				sb.WriteString("  </agent>\n")
 			}
 			sb.WriteString("</available_subagents>\n")
