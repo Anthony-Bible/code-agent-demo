@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 // =============================================================================
@@ -1812,10 +1813,16 @@ func TestCompleteInvestigationTool_ConcurrentCompletions(t *testing.T) {
 		}(i)
 	}
 
+	timeout := time.After(5 * time.Second)
 	successCount := 0
-	for range numGoroutines {
-		if err := <-errChan; err == nil {
-			successCount++
+	for i := range numGoroutines {
+		select {
+		case err := <-errChan:
+			if err == nil {
+				successCount++
+			}
+		case <-timeout:
+			t.Fatalf("test timed out waiting for goroutine results (received %d/%d)", i, numGoroutines)
 		}
 	}
 
@@ -1857,10 +1864,16 @@ func TestEscalateInvestigationTool_ConcurrentEscalations(t *testing.T) {
 		}(i)
 	}
 
+	timeout := time.After(5 * time.Second)
 	successCount := 0
-	for range numGoroutines {
-		if err := <-errChan; err == nil {
-			successCount++
+	for i := range numGoroutines {
+		select {
+		case err := <-errChan:
+			if err == nil {
+				successCount++
+			}
+		case <-timeout:
+			t.Fatalf("test timed out waiting for goroutine results (received %d/%d)", i, numGoroutines)
 		}
 	}
 

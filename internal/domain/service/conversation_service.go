@@ -28,6 +28,8 @@ type ConversationService struct {
 	processing             map[string]bool
 	sessionModes           map[string]bool
 	sessionModesMu         sync.RWMutex // Protects sessionModes map for concurrent access
+	sessionThinkingModes   map[string]port.ThinkingModeInfo
+	sessionThinkingModesMu sync.RWMutex // Protects sessionThinkingModes map for concurrent access
 	sessionSystemPrompts   map[string]string
 	sessionSystemPromptsMu sync.RWMutex // Protects sessionSystemPrompts map for concurrent access
 }
@@ -48,6 +50,7 @@ func NewConversationService(aiProvider port.AIProvider, toolExecutor port.ToolEx
 		conversations:        make(map[string]*entity.Conversation),
 		processing:           make(map[string]bool),
 		sessionModes:         make(map[string]bool),
+		sessionThinkingModes: make(map[string]port.ThinkingModeInfo),
 		sessionSystemPrompts: make(map[string]string),
 	}, nil
 }
@@ -129,19 +132,71 @@ func (cs *ConversationService) ProcessAssistantResponse(
 	ctx context.Context,
 	sessionID string,
 ) (*entity.Message, []port.ToolCallInfo, error) {
+	// Prepare context and parameters
+	conversation, messageParams, toolParams, preparedCtx, err := cs.prepareAIRequest(ctx, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Send to AI provider
+	response, toolCalls, err := cs.aiProvider.SendMessage(preparedCtx, messageParams, toolParams)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Finalize response
+	return cs.finalizeAIResponse(sessionID, conversation, response, toolCalls)
+}
+
+// ProcessAssistantResponseStreaming processes an AI assistant response with streaming support.
+// It calls the provided callback for each text chunk as it arrives from the AI provider.
+func (cs *ConversationService) ProcessAssistantResponseStreaming(
+	ctx context.Context,
+	sessionID string,
+	textCallback port.StreamCallback,
+	thinkingCallback port.ThinkingCallback,
+) (*entity.Message, []port.ToolCallInfo, error) {
+	// Prepare context and parameters
+	conversation, messageParams, toolParams, preparedCtx, err := cs.prepareAIRequest(ctx, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Send to AI provider with streaming
+	response, toolCalls, err := cs.aiProvider.SendMessageStreaming(
+		preparedCtx,
+		messageParams,
+		toolParams,
+		textCallback,
+		thinkingCallback,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Finalize response
+	return cs.finalizeAIResponse(sessionID, conversation, response, toolCalls)
+}
+
+// prepareAIRequest prepares the context, message parameters, and tool parameters for an AI request.
+// This is shared logic between streaming and non-streaming requests.
+func (cs *ConversationService) prepareAIRequest(
+	ctx context.Context,
+	sessionID string,
+) (*entity.Conversation, []port.MessageParam, []port.ToolParam, context.Context, error) {
 	select {
 	case <-ctx.Done():
-		return nil, nil, fmt.Errorf("context cancelled before AI call: %w", ctx.Err())
+		return nil, nil, nil, nil, fmt.Errorf("context cancelled before AI call: %w", ctx.Err())
 	default:
 	}
 
 	conversation, exists := cs.conversations[sessionID]
 	if !exists {
-		return nil, nil, ErrConversationNotFound
+		return nil, nil, nil, nil, ErrConversationNotFound
 	}
 
 	// Get conversation history for AI provider
-	messages := conversation.GetMessages()
+	messages := conversation.Messages
 	messageParams := make([]port.MessageParam, len(messages))
 	for i, msg := range messages {
 		// Convert ToolCalls from entity to port
@@ -150,9 +205,10 @@ func (cs *ConversationService) ProcessAssistantResponse(
 			toolCallParams = make([]port.ToolCallParam, len(msg.ToolCalls))
 			for j, tc := range msg.ToolCalls {
 				toolCallParams[j] = port.ToolCallParam{
-					ToolID:   tc.ToolID,
-					ToolName: tc.ToolName,
-					Input:    tc.Input,
+					ToolID:           tc.ToolID,
+					ToolName:         tc.ToolName,
+					Input:            tc.Input,
+					ThoughtSignature: tc.ThoughtSignature, // Preserve Gemini thought signature
 				}
 			}
 		}
@@ -163,25 +219,30 @@ func (cs *ConversationService) ProcessAssistantResponse(
 			toolResultParams = make([]port.ToolResultParam, len(msg.ToolResults))
 			for j, tr := range msg.ToolResults {
 				toolResultParams[j] = port.ToolResultParam{
-					ToolID:  tr.ToolID,
-					Result:  tr.Result,
-					IsError: tr.IsError,
+					ToolID:           tr.ToolID,
+					Result:           tr.Result,
+					IsError:          tr.IsError,
+					ThoughtSignature: tr.ThoughtSignature, // Preserve Gemini thought signature
 				}
 			}
 		}
 
+		// Convert ThinkingBlocks from entity to port
+		thinkingBlockParams := port.ConvertEntityThinkingBlocksToParams(msg.ThinkingBlocks)
+
 		messageParams[i] = port.MessageParam{
-			Role:        msg.Role,
-			Content:     msg.Content,
-			ToolCalls:   toolCallParams,
-			ToolResults: toolResultParams,
+			Role:           msg.Role,
+			Content:        msg.Content,
+			ToolCalls:      toolCallParams,
+			ToolResults:    toolResultParams,
+			ThinkingBlocks: thinkingBlockParams,
 		}
 	}
 
 	// Get available tools
 	tools, err := cs.toolExecutor.ListTools()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	toolParams := make([]port.ToolParam, len(tools))
@@ -212,14 +273,24 @@ func (cs *ConversationService) ProcessAssistantResponse(
 		})
 	}
 
-	// Send to AI provider
-	response, toolCalls, err := cs.aiProvider.SendMessage(ctx, messageParams, toolParams)
-	if err != nil {
-		return nil, nil, err
+	// Add thinking mode info to context if enabled
+	if thinkingInfo, err := cs.GetThinkingMode(sessionID); err == nil && thinkingInfo.Enabled {
+		ctx = port.WithThinkingMode(ctx, thinkingInfo)
 	}
 
+	return conversation, messageParams, toolParams, ctx, nil
+}
+
+// finalizeAIResponse adds the AI response to the conversation and updates processing state.
+// This is shared logic between streaming and non-streaming requests.
+func (cs *ConversationService) finalizeAIResponse(
+	sessionID string,
+	conversation *entity.Conversation,
+	response *entity.Message,
+	toolCalls []port.ToolCallInfo,
+) (*entity.Message, []port.ToolCallInfo, error) {
 	// Add response to conversation
-	err = conversation.AddMessage(*response)
+	err := conversation.AddMessage(*response)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -318,10 +389,23 @@ func (cs *ConversationService) EndConversation(ctx context.Context, sessionID st
 	delete(cs.sessionModes, sessionID)
 	cs.sessionModesMu.Unlock()
 
+	// Remove thinking mode state
+	cs.sessionThinkingModesMu.Lock()
+	delete(cs.sessionThinkingModes, sessionID)
+	cs.sessionThinkingModesMu.Unlock()
+
 	// Remove custom system prompt
 	cs.sessionSystemPromptsMu.Lock()
 	delete(cs.sessionSystemPrompts, sessionID)
 	cs.sessionSystemPromptsMu.Unlock()
+
+	// Clean up session state in tool executor if it supports it
+	if cleaner, ok := cs.toolExecutor.(port.SessionCleaner); ok {
+		cleaner.CleanupSession(sessionID)
+	}
+
+	// Remove conversation from map to prevent memory leak
+	delete(cs.conversations, sessionID)
 
 	return nil
 }
@@ -406,6 +490,33 @@ func (cs *ConversationService) IsPlanMode(sessionID string) (bool, error) {
 	cs.sessionModesMu.RLock()
 	defer cs.sessionModesMu.RUnlock()
 	return cs.sessionModes[sessionID], nil
+}
+
+// SetThinkingMode sets the extended thinking mode configuration for a session.
+// The configuration includes whether thinking is enabled, the token budget, and display settings.
+// The operation is thread-safe.
+func (cs *ConversationService) SetThinkingMode(sessionID string, info port.ThinkingModeInfo) error {
+	_, exists := cs.conversations[sessionID]
+	if !exists {
+		return ErrConversationNotFound
+	}
+	cs.sessionThinkingModesMu.Lock()
+	cs.sessionThinkingModes[sessionID] = info
+	cs.sessionThinkingModesMu.Unlock()
+	return nil
+}
+
+// GetThinkingMode returns the extended thinking mode configuration for a session.
+// Returns zero-value ThinkingModeInfo for non-existent sessions or if not set.
+// The operation is thread-safe for concurrent reads.
+func (cs *ConversationService) GetThinkingMode(sessionID string) (port.ThinkingModeInfo, error) {
+	_, exists := cs.conversations[sessionID]
+	if !exists {
+		return port.ThinkingModeInfo{}, ErrConversationNotFound
+	}
+	cs.sessionThinkingModesMu.RLock()
+	defer cs.sessionThinkingModesMu.RUnlock()
+	return cs.sessionThinkingModes[sessionID], nil
 }
 
 // SetCustomSystemPrompt sets a custom system prompt for a session.

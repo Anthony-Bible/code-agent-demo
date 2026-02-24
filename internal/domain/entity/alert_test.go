@@ -146,23 +146,24 @@ func TestNewAlert_Validation(t *testing.T) {
 				if tt.expectedErr != nil && !errors.Is(err, tt.expectedErr) {
 					t.Errorf("NewAlert() error = %v, expected %v", err, tt.expectedErr)
 				}
-			} else {
-				if got == nil {
-					t.Error("NewAlert() returned nil alert without error")
-					return
-				}
-				if got.ID() != tt.id {
-					t.Errorf("NewAlert() ID = %v, want %v", got.ID(), tt.id)
-				}
-				if got.Source() != tt.source {
-					t.Errorf("NewAlert() Source = %v, want %v", got.Source(), tt.source)
-				}
-				if got.Severity() != tt.severity {
-					t.Errorf("NewAlert() Severity = %v, want %v", got.Severity(), tt.severity)
-				}
-				if got.Title() != tt.title {
-					t.Errorf("NewAlert() Title = %v, want %v", got.Title(), tt.title)
-				}
+				return
+			}
+
+			if got == nil {
+				t.Error("NewAlert() returned nil alert without error")
+				return
+			}
+			if got.ID() != tt.id {
+				t.Errorf("NewAlert() ID = %v, want %v", got.ID(), tt.id)
+			}
+			if got.Source() != tt.source {
+				t.Errorf("NewAlert() Source = %v, want %v", got.Source(), tt.source)
+			}
+			if got.Severity() != tt.severity {
+				t.Errorf("NewAlert() Severity = %v, want %v", got.Severity(), tt.severity)
+			}
+			if got.Title() != tt.title {
+				t.Errorf("NewAlert() Title = %v, want %v", got.Title(), tt.title)
 			}
 		})
 	}
@@ -366,7 +367,7 @@ func TestAlert_WithLabels(t *testing.T) {
 
 		// Should not panic, labels might be nil or empty map
 		labels := alert.Labels()
-		if labels != nil && len(labels) != 0 {
+		if len(labels) != 0 {
 			t.Errorf("Labels() should be nil or empty after setting nil, got %v", labels)
 		}
 	})

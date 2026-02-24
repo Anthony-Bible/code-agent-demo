@@ -58,12 +58,16 @@ func (h *InterruptHandler) Start() {
 
 	signal.Notify(h.sigCh, os.Interrupt, syscall.SIGTERM)
 
+	// Capture channel references to avoid race with Stop() setting them to nil
+	sigCh := h.sigCh
+	stopCh := h.stopCh
+
 	go func() {
 		for {
 			select {
-			case <-h.stopCh:
+			case <-stopCh:
 				return
-			case <-h.sigCh:
+			case <-sigCh:
 				h.handleInterrupt()
 			}
 		}

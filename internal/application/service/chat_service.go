@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 )
@@ -208,21 +209,94 @@ func (cs *ChatService) SendMessage(
 		Message:   message,
 	}
 
-	// Process the user message
-	resp, err := cs.messageProcessUseCase.ProcessUserMessage(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to process message: %w", err)
+	// Add thinking mode to context if enabled for this session
+	thinkingInfo, _ := cs.conversationService.GetThinkingMode(sessionID)
+	if thinkingInfo.Enabled {
+		ctx = port.WithThinkingMode(ctx, thinkingInfo)
 	}
 
-	// Display the assistant message if there is text content
-	if resp.AssistantMsg != nil && resp.AssistantMsg.Content != "" {
-		displayContent := resp.AssistantMsg.Content
-		// Add [PLAN MODE] prefix if in plan mode
-		isPlanMode, _ := cs.conversationService.IsPlanMode(sessionID)
-		if isPlanMode {
-			displayContent = "[PLAN MODE] " + displayContent
+	// Add user message to conversation
+	_, err := cs.conversationService.AddUserMessage(ctx, req.SessionID, req.Message)
+	if err != nil {
+		return nil, fmt.Errorf("failed to add user message: %w", err)
+	}
+
+	// Get conversation for state info
+	conv, err := cs.conversationService.GetConversation(req.SessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get conversation: %w", err)
+	}
+
+	// Begin streaming response with color setup
+	if err := cs.userInterface.BeginStreamingResponse(); err != nil {
+		// Log error but continue - color setup is not critical
+		fmt.Fprintf(os.Stderr, "Warning: failed to begin streaming response: %v\n", err)
+	}
+
+	// Ensure we always clean up terminal state, even on errors
+	defer func() {
+		if err := cs.userInterface.EndStreamingResponse(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to end streaming response: %v\n", err)
 		}
-		_ = cs.userInterface.DisplayMessage(displayContent, entity.RoleAssistant)
+	}()
+
+	// Display [PLAN MODE] prefix if in plan mode (before streaming starts)
+	isPlanMode, _ := cs.conversationService.IsPlanMode(sessionID)
+	if isPlanMode {
+		if err := cs.userInterface.DisplayStreamingText("[PLAN MODE] "); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to display plan mode prefix: %v\n", err)
+		}
+	}
+
+	// Create streaming callback that displays text as it arrives
+	textCallback := func(text string) error {
+		// Reset and set assistant color for regular text
+		return cs.userInterface.DisplayStreamingText("\x1b[0m\x1b[93m" + text)
+	}
+
+	// Create thinking callback if ShowThinking is enabled
+	// Thinking is streamed inline, so we don't redisplay after completion
+	var thinkingCallback port.ThinkingCallback
+	thinkingHeaderDisplayed := false
+	if thinkingInfo.ShowThinking {
+		thinkingCallback = func(thinking string) error {
+			// Display header once when thinking starts
+			if !thinkingHeaderDisplayed {
+				thinkingHeaderDisplayed = true
+				// Reset, show "Claude (thinking)" header in magenta, continue with thinking color
+				if err := cs.userInterface.DisplayStreamingText(
+					"\x1b[0m\x1b[95mClaude (thinking)\x1b[0m: \x1b[95m",
+				); err != nil {
+					return err
+				}
+			}
+			return cs.userInterface.DisplayStreamingText(thinking)
+		}
+	}
+
+	// Process the assistant message with streaming
+	assistantMsg, toolCalls, err := cs.messageProcessUseCase.ProcessAssistantMessageStreaming(
+		ctx,
+		sessionID,
+		textCallback,
+		thinkingCallback,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process assistant message: %w", err)
+	}
+
+	// Note: Thinking blocks are now streamed inline via thinkingCallback, so we don't redisplay them here
+
+	// Check if processing (has tools)
+	isProcessing, _ := cs.conversationService.IsProcessing(req.SessionID)
+
+	resp := &dto.SendMessageResponse{
+		SessionID:    req.SessionID,
+		AssistantMsg: assistantMsg,
+		HasTools:     isProcessing,
+		ToolCalls:    toolCalls,
+		IsFinished:   !isProcessing,
+		MessageCount: conv.MessageCount(),
 	}
 
 	// Handle tool requests if present
@@ -364,9 +438,10 @@ func (cs *ChatService) addToolResultsToConversation(
 			result = toolResults[i].Error
 		}
 		toolResult := entity.ToolResult{
-			ToolID:  toolCall.ToolID,
-			Result:  result,
-			IsError: toolResults[i].Error != "",
+			ToolID:           toolCall.ToolID,
+			Result:           result,
+			IsError:          toolResults[i].Error != "",
+			ThoughtSignature: toolCall.ThoughtSignature, // Copy Gemini thought_signature from original tool call
 		}
 
 		entityToolResults = append(entityToolResults, toolResult)
@@ -380,33 +455,86 @@ func (cs *ChatService) addToolResultsToConversation(
 	return cs.conversationService.AddToolResultMessage(ctx, sessionID, entityToolResults)
 }
 
-// continueAfterToolExecution continues the chat after tool execution.
+// continueAfterToolExecution continues the chat after tool execution with streaming support.
 func (cs *ChatService) continueAfterToolExecution(
 	ctx context.Context,
 	sessionID string,
 ) (*dto.SendMessageResponse, error) {
-	contResp, err := cs.messageProcessUseCase.ContinueChat(ctx, sessionID)
+	// Add thinking mode to context if enabled for this session
+	thinkingInfo, _ := cs.conversationService.GetThinkingMode(sessionID)
+	if thinkingInfo.Enabled {
+		ctx = port.WithThinkingMode(ctx, thinkingInfo)
+	}
+
+	// Begin streaming response with color setup
+	if err := cs.userInterface.BeginStreamingResponse(); err != nil {
+		// Log error but continue - color setup is not critical
+		fmt.Fprintf(os.Stderr, "Warning: failed to begin streaming response: %v\n", err)
+	}
+
+	// Ensure we always clean up terminal state, even on errors
+	defer func() {
+		if err := cs.userInterface.EndStreamingResponse(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to end streaming response: %v\n", err)
+		}
+	}()
+
+	// Display [PLAN MODE] prefix if in plan mode (before streaming starts)
+	isPlanMode, _ := cs.conversationService.IsPlanMode(sessionID)
+	if isPlanMode {
+		if err := cs.userInterface.DisplayStreamingText("[PLAN MODE] "); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to display plan mode prefix: %v\n", err)
+		}
+	}
+
+	// Create streaming callback that displays text as it arrives
+	textCallback := func(text string) error {
+		// Reset and set assistant color for regular text
+		return cs.userInterface.DisplayStreamingText("\x1b[0m\x1b[93m" + text)
+	}
+
+	// Create thinking callback if ShowThinking is enabled
+	// Thinking is streamed inline, so we don't redisplay after completion
+	var thinkingCallback port.ThinkingCallback
+	thinkingHeaderDisplayed := false
+	if thinkingInfo.ShowThinking {
+		thinkingCallback = func(thinking string) error {
+			// Display header once when thinking starts
+			if !thinkingHeaderDisplayed {
+				thinkingHeaderDisplayed = true
+				// Reset, show "Claude (thinking)" header in magenta, continue with thinking color
+				if err := cs.userInterface.DisplayStreamingText(
+					"\x1b[0m\x1b[95mClaude (thinking)\x1b[0m: \x1b[95m",
+				); err != nil {
+					return err
+				}
+			}
+			return cs.userInterface.DisplayStreamingText(thinking)
+		}
+	}
+
+	// Process the assistant message with streaming
+	assistantMsg, toolCalls, err := cs.messageProcessUseCase.ProcessAssistantMessageStreaming(
+		ctx,
+		sessionID,
+		textCallback,
+		thinkingCallback,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to continue chat after tool execution: %w", err)
 	}
 
-	// Display the assistant message if there is text content
-	if contResp.AssistantMsg != nil && contResp.AssistantMsg.Content != "" {
-		displayContent := contResp.AssistantMsg.Content
-		// Add [PLAN MODE] prefix if in plan mode
-		isPlanMode, _ := cs.conversationService.IsPlanMode(sessionID)
-		if isPlanMode {
-			displayContent = "[PLAN MODE] " + displayContent
-		}
-		_ = cs.userInterface.DisplayMessage(displayContent, entity.RoleAssistant)
-	}
+	// Note: Thinking blocks are now streamed inline via thinkingCallback, so we don't redisplay them here
+
+	// Check if processing (has tools)
+	isProcessing, _ := cs.conversationService.IsProcessing(sessionID)
 
 	return &dto.SendMessageResponse{
 		SessionID:    sessionID,
-		AssistantMsg: contResp.AssistantMsg,
-		HasTools:     contResp.HasTools,
-		IsFinished:   contResp.IsFinished,
-		ToolCalls:    contResp.ToolCalls,
+		AssistantMsg: assistantMsg,
+		HasTools:     isProcessing,
+		IsFinished:   !isProcessing,
+		ToolCalls:    toolCalls,
 	}, nil
 }
 
@@ -550,7 +678,7 @@ func (cs *ChatService) SetAIModel(model string) error {
 //
 // Returns:
 //   - error: An error if the command is invalid
-func (cs *ChatService) HandleModeCommand(ctx context.Context, sessionID string, mode string) error {
+func (cs *ChatService) HandleModeCommand(_ context.Context, sessionID string, mode string) error {
 	// Validate session exists first
 	_, err := cs.messageProcessUseCase.GetConversationState(sessionID)
 	if err != nil {
@@ -595,6 +723,56 @@ func (cs *ChatService) HandleModeCommand(ctx context.Context, sessionID string, 
 		return nil
 	default:
 		return errors.New("invalid mode: must be 'plan', 'normal', or 'toggle'")
+	}
+}
+
+// HandleThinkingCommand handles the :thinking command for toggling extended thinking mode.
+//
+// Parameters:
+//   - ctx: Context for the operation
+//   - sessionID: The session ID
+//   - mode: The mode to set ("on", "off", or "toggle")
+//
+// Returns:
+//   - error: An error if the command is invalid
+func (cs *ChatService) HandleThinkingCommand(_ context.Context, sessionID string, mode string) error {
+	// Validate session exists first
+	_, err := cs.messageProcessUseCase.GetConversationState(sessionID)
+	if err != nil {
+		return errors.New("session not found")
+	}
+
+	// Normalize mode to lowercase
+	modeLower := strings.ToLower(mode)
+
+	switch modeLower {
+	case "on", "enable":
+		// Enable thinking mode with defaults
+		info := port.ThinkingModeInfo{
+			Enabled:      true,
+			BudgetTokens: 10000, // Default budget
+			ShowThinking: false, // Hidden by default
+		}
+		return cs.conversationService.SetThinkingMode(sessionID, info)
+	case "off", "disable":
+		// Disable thinking mode
+		info := port.ThinkingModeInfo{
+			Enabled:      false,
+			BudgetTokens: 0,
+			ShowThinking: false,
+		}
+		return cs.conversationService.SetThinkingMode(sessionID, info)
+	case "toggle":
+		// Toggle current thinking mode
+		currentInfo, _ := cs.conversationService.GetThinkingMode(sessionID)
+		newInfo := port.ThinkingModeInfo{
+			Enabled:      !currentInfo.Enabled,
+			BudgetTokens: 10000, // Use default budget
+			ShowThinking: currentInfo.ShowThinking,
+		}
+		return cs.conversationService.SetThinkingMode(sessionID, newInfo)
+	default:
+		return errors.New("invalid thinking mode: must be 'on', 'off', or 'toggle'")
 	}
 }
 

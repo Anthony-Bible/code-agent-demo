@@ -19,7 +19,7 @@ import (
 
 // ErrInvalidTransition is expected to be defined in investigation.go
 // for invalid state transitions.
-var _ = errors.New("placeholder for compile check")
+var _ = errors.New("placeholder for compile check") //nolint:staticcheck // Red phase placeholder
 
 // =============================================================================
 // TransitionTo Tests - Valid Transitions

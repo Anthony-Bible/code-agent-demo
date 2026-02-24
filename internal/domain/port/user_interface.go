@@ -18,6 +18,7 @@ type ColorScheme struct {
 	Error     string `json:"error"`     // Color for error messages
 	Tool      string `json:"tool"`      // Color for tool results
 	Prompt    string `json:"prompt"`    // Color for user prompt
+	Thinking  string `json:"thinking"`  // Color for thinking content
 }
 
 // UserInterface defines the interface for CLI interactions.
@@ -31,6 +32,19 @@ type UserInterface interface {
 	// DisplayMessage displays a message with the specified role.
 	DisplayMessage(message string, messageRole string) error
 
+	// BeginStreamingResponse starts a streaming response with appropriate color setup.
+	// Call this before streaming text chunks. Returns an error if setup fails.
+	BeginStreamingResponse() error
+
+	// EndStreamingResponse ends a streaming response with appropriate color teardown.
+	// Call this after all streaming text chunks have been displayed.
+	EndStreamingResponse() error
+
+	// DisplayStreamingText displays a chunk of streaming text without a newline.
+	// This is used to show text as it arrives in real-time from the AI provider.
+	// Call BeginStreamingResponse before the first chunk and EndStreamingResponse after the last.
+	DisplayStreamingText(text string) error
+
 	// DisplayError displays an error message.
 	DisplayError(err error) error
 
@@ -39,6 +53,11 @@ type UserInterface interface {
 
 	// DisplaySystemMessage displays a system message.
 	DisplaySystemMessage(message string) error
+
+	// DisplayThinking displays extended thinking content from the AI.
+	// Used when extended thinking mode is enabled with ShowThinking flag.
+	// The content contains the AI's internal reasoning process before generating a response.
+	DisplayThinking(content string) error
 
 	// DisplaySubagentStatus displays a status message for subagent execution.
 	// Used to show when subagents start, complete, or execute tools during delegated tasks.

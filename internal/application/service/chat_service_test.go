@@ -327,8 +327,8 @@ func TestChatService_ModeIntegration(t *testing.T) {
 		toolCall := port.ToolCallInfo{
 			ToolID:    "tool_123",
 			ToolName:  "bash",
-			Input:     map[string]interface{}{"command": "ls -la"},
-			InputJSON: `{"command":"ls -la"}`,
+			Input:     map[string]interface{}{"command": "ls -la", "dangerous": false},
+			InputJSON: `{"command":"ls -la","dangerous":false}`,
 		}
 
 		aiProvider := &mockAIProviderForChat{
@@ -637,6 +637,29 @@ func (m *mockAIProviderForChat) SendMessage(
 	_ []port.ToolParam,
 ) (*entity.Message, []port.ToolCallInfo, error) {
 	defer func() { m.callCount++ }()
+
+	// Return tool calls on the first call (or up to maxToolCalls if configured)
+	if m.callCount < m.maxToolCalls || (m.maxToolCalls == 0 && m.callCount == 0) {
+		return m.response, m.toolCalls, nil
+	}
+	// On subsequent calls, return a normal response without tool calls
+	return m.response, nil, nil
+}
+
+// SendMessageStreaming returns the configured response and tool calls with streaming support.
+func (m *mockAIProviderForChat) SendMessageStreaming(
+	_ context.Context,
+	_ []port.MessageParam,
+	_ []port.ToolParam,
+	textCallback port.StreamCallback,
+	_ port.ThinkingCallback,
+) (*entity.Message, []port.ToolCallInfo, error) {
+	defer func() { m.callCount++ }()
+
+	// Call the text callback with the message content if provided
+	if textCallback != nil && m.response != nil {
+		_ = textCallback(m.response.Content)
+	}
 
 	// Return tool calls on the first call (or up to maxToolCalls if configured)
 	if m.callCount < m.maxToolCalls || (m.maxToolCalls == 0 && m.callCount == 0) {

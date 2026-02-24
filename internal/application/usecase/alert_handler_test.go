@@ -278,7 +278,6 @@ func TestAlertHandler_Handle_RespectsMaxConcurrent(t *testing.T) {
 	// Arrange
 	ucConfig := AlertInvestigationUseCaseConfig{
 		MaxConcurrent: 2, // Only allow 2 concurrent investigations
-		AllowedTools:  []string{"bash"},
 	}
 	uc := NewAlertInvestigationUseCaseWithConfig(ucConfig)
 	if uc == nil {

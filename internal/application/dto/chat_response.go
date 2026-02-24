@@ -19,19 +19,27 @@ type SendMessageResponse struct {
 
 // AssistantMessage contains details about the AI's response.
 type AssistantMessage struct {
-	ID        string    `json:"id"`        // Unique message identifier
-	Content   string    `json:"content"`   // The message content (text and/or tool info)
-	Role      string    `json:"role"`      // The message role (always "assistant")
-	Timestamp time.Time `json:"timestamp"` // When the message was created
+	ID             string          `json:"id"`                        // Unique message identifier
+	Content        string          `json:"content"`                   // The message content (text and/or tool info)
+	Role           string          `json:"role"`                      // The message role (always "assistant")
+	Timestamp      time.Time       `json:"timestamp"`                 // When the message was created
+	ThinkingBlocks []ThinkingBlock `json:"thinking_blocks,omitempty"` // Extended thinking blocks from AI
+}
+
+// ThinkingBlock represents a thinking content block from extended thinking responses.
+type ThinkingBlock struct {
+	Thinking  string `json:"thinking"`  // The thinking/reasoning content
+	Signature string `json:"signature"` // Cryptographic signature (must be preserved)
 }
 
 // ToolCallInfo contains information about a tool that was requested by the AI.
 type ToolCallInfo struct {
-	ToolID       string      `json:"tool_id"`       // The tool identifier
-	ToolName     string      `json:"tool_name"`     // The human-readable tool name
-	Input        interface{} `json:"input"`         // The input parameters passed to the tool
-	InputJSON    string      `json:"input_json"`    // JSON representation of the input
-	CallPriority int         `json:"call_priority"` // Order of execution (0-indexed)
+	ToolID           string      `json:"tool_id"`                     // The tool identifier
+	ToolName         string      `json:"tool_name"`                   // The human-readable tool name
+	Input            interface{} `json:"input"`                       // The input parameters passed to the tool
+	InputJSON        string      `json:"input_json"`                  // JSON representation of the input
+	CallPriority     int         `json:"call_priority"`               // Order of execution (0-indexed)
+	ThoughtSignature string      `json:"thought_signature,omitempty"` // Gemini thought signature (via Bifrost)
 }
 
 // StartChatResponse represents the response when starting a new chat session.
@@ -104,11 +112,25 @@ func NewAssistantMessageFromEntity(msg *entity.Message) *AssistantMessage {
 	if msg == nil {
 		return nil
 	}
+
+	// Convert thinking blocks from entity to DTO
+	var thinkingBlocks []ThinkingBlock
+	if len(msg.ThinkingBlocks) > 0 {
+		thinkingBlocks = make([]ThinkingBlock, len(msg.ThinkingBlocks))
+		for i, block := range msg.ThinkingBlocks {
+			thinkingBlocks[i] = ThinkingBlock{
+				Thinking:  block.Thinking,
+				Signature: block.Signature,
+			}
+		}
+	}
+
 	return &AssistantMessage{
-		ID:        generateMessageID(),
-		Content:   msg.Content,
-		Role:      msg.Role,
-		Timestamp: msg.Timestamp,
+		ID:             generateMessageID(),
+		Content:        msg.Content,
+		Role:           msg.Role,
+		Timestamp:      msg.Timestamp,
+		ThinkingBlocks: thinkingBlocks,
 	}
 }
 

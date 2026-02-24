@@ -5,10 +5,10 @@ import (
 	"code-editing-agent/internal/domain/port"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +22,9 @@ const (
 	KeyShiftTab = "shift+tab"
 )
 
+// defaultMaxHistoryEntries is the default number of history entries to store.
+const defaultMaxHistoryEntries = 100
+
 // CLIAdapter implements the UserInterface port using the command line.
 type CLIAdapter struct {
 	input              io.Reader
@@ -33,7 +36,6 @@ type CLIAdapter struct {
 	useInteractive     bool
 	historyFile        string
 	maxHistoryEntries  int
-	historyManager     *HistoryManager // Command history for interactive mode
 	readlineInstance   *readline.Instance
 	modeToggleCallback func()
 	planMode           bool
@@ -50,6 +52,7 @@ func defaultColorScheme() port.ColorScheme {
 		Error:     "\x1b[91m", // Red
 		Tool:      "\x1b[92m", // Green
 		Prompt:    "\x1b[94m", // Blue
+		Thinking:  "\x1b[95m", // Bright Magenta
 	}
 }
 
@@ -78,20 +81,14 @@ func NewCLIAdapterWithIO(input io.Reader, output io.Writer) *CLIAdapter {
 
 // NewCLIAdapterWithHistory creates a new CLIAdapter configured for interactive
 // mode with command history support. The historyFile parameter specifies the
-// path to the file where command history will be persisted. The maxEntries
-// parameter specifies the maximum number of history entries to store.
+// path to the file where command history will be persisted.
 //
 // If historyFile is empty, history will not be persisted to disk.
-// If maxEntries is <= 0, a default value will be used.
 //
 // The returned adapter is always in interactive mode (IsInteractive() returns true).
-func NewCLIAdapterWithHistory(historyFile string, maxEntries int) *CLIAdapter {
-	if maxEntries <= 0 {
-		maxEntries = 1000
-	}
-
-	// Expand ~ in history file path
-	expandedPath := ExpandPath(historyFile)
+func NewCLIAdapterWithHistory(historyFile string) *CLIAdapter {
+	// Expand tilde in history file path if present
+	expandedPath := expandPath(historyFile)
 
 	return &CLIAdapter{
 		input:             os.Stdin,
@@ -100,10 +97,47 @@ func NewCLIAdapterWithHistory(historyFile string, maxEntries int) *CLIAdapter {
 		colors:            defaultColorScheme(),
 		truncationConfig:  DefaultTruncationConfig(),
 		useInteractive:    true,
-		historyFile:       historyFile,
-		maxHistoryEntries: maxEntries,
-		historyManager:    NewHistoryManager(expandedPath, maxEntries),
+		historyFile:       expandedPath,
+		maxHistoryEntries: defaultMaxHistoryEntries,
 	}
+}
+
+// expandPath expands a tilde prefix to the user's home directory.
+// It handles two cases:
+//   - "~" alone expands to the home directory
+//   - "~/..." expands to home directory joined with the rest of the path
+//
+// Paths without a leading tilde, or with ~username format, are returned unchanged.
+// If the home directory cannot be determined, the original path is returned.
+func expandPath(path string) string {
+	if path == "" {
+		return ""
+	}
+
+	if path == "~" {
+		return getHomeDir(path)
+	}
+
+	if strings.HasPrefix(path, "~/") {
+		homeDir := getHomeDir(path)
+		if homeDir == path {
+			// getHomeDir returned original path due to error
+			return path
+		}
+		// Use filepath.Join for cross-platform path concatenation
+		return filepath.Join(homeDir, path[2:])
+	}
+
+	return path
+}
+
+// getHomeDir returns the user's home directory, or the fallback value if unavailable.
+func getHomeDir(fallback string) string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fallback
+	}
+	return homeDir
 }
 
 // GetUserInput gets input from the user with context support.
@@ -119,7 +153,7 @@ func (c *CLIAdapter) GetUserInput(ctx context.Context) (string, bool) {
 	}
 
 	// Use readline for interactive mode with history support
-	if c.useInteractive && c.historyManager != nil {
+	if c.useInteractive && c.historyFile != "" {
 		return c.getInteractiveInput(ctx)
 	}
 
@@ -169,12 +203,6 @@ func (c *CLIAdapter) getInteractiveInput(ctx context.Context) (string, bool) {
 		if res.err != nil {
 			// EOF or error
 			return "", false
-		}
-
-		// Add to history if not empty
-		input := strings.TrimSpace(res.line)
-		if input != "" && c.historyManager != nil {
-			_ = c.historyManager.Add(input)
 		}
 
 		return res.line, true
@@ -246,8 +274,62 @@ func (c *CLIAdapter) DisplayMessage(message string, messageRole string) error {
 		color = c.colors.User
 	}
 
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	_, err := fmt.Fprintf(c.output, "%s%s\x1b[0m\n", color, message)
 	return err
+}
+
+// BeginStreamingResponse starts a streaming response with color setup.
+func (c *CLIAdapter) BeginStreamingResponse() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, err := fmt.Fprint(c.output, c.colors.Assistant)
+	return err
+}
+
+// EndStreamingResponse ends a streaming response with color teardown and newline.
+func (c *CLIAdapter) EndStreamingResponse() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, err := fmt.Fprint(c.output, "\x1b[0m\n")
+	return err
+}
+
+// DisplayStreamingText displays a chunk of streaming text without a newline.
+// This is used to show text as it arrives in real-time from the AI provider.
+// The text is displayed without color codes - the caller should handle color setup/teardown.
+func (c *CLIAdapter) DisplayStreamingText(text string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// Use direct write to avoid any potential buffering from fmt package
+	_, err := c.output.Write([]byte(text))
+	if err != nil {
+		return err
+	}
+
+	// Flush the output to ensure streaming text appears immediately
+	// This is needed because stdout is typically line-buffered when connected to a terminal
+	return c.flushOutput()
+}
+
+// flushOutput attempts to flush the output writer if it supports flushing.
+// For *os.File (like os.Stdout), this is a no-op since we can't reliably flush C stdio buffers from Go.
+// However, this works for bufio.Writer and other flushable writers.
+func (c *CLIAdapter) flushOutput() error {
+	type flusher interface {
+		Flush() error
+	}
+
+	if f, ok := c.output.(flusher); ok {
+		return f.Flush()
+	}
+
+	// For os.File/os.Stdout, we can't force a flush of the C library's stdio buffers
+	// from Go code. However, writes to os.Stdout are typically unbuffered or line-buffered,
+	// and calling Write() should make the data available to the OS immediately.
+	// The buffering issue is at the C stdio layer, not the Go layer.
+	return nil
 }
 
 // DisplayError displays an error message.
@@ -256,6 +338,8 @@ func (c *CLIAdapter) DisplayError(err error) error {
 		return nil
 	}
 
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	_, writeErr := fmt.Fprintf(c.output, "%sError: %s\x1b[0m\n", c.colors.Error, err.Error())
 	if writeErr != nil {
 		return writeErr
@@ -273,24 +357,58 @@ func (c *CLIAdapter) DisplayError(err error) error {
 // File read operations (read_file, list_files) display compact indicators like
 // read(path) or list(path) instead of full contents to keep the screen clean.
 func (c *CLIAdapter) DisplayToolResult(toolName string, input string, result string) error {
+	// Build output string before acquiring lock to minimize lock hold time.
+	// c.colors is safe to read without lock - it's set during initialization and never modified.
+	var output string
+
 	// Compact display for file/directory read operations
 	switch toolName {
 	case "read_file":
-		return c.displayCompactFileRead(input)
+		output = c.buildCompactFileReadOutput(input)
 	case "list_files":
-		return c.displayCompactListFiles(input)
+		output = c.buildCompactListFilesOutput(input)
+	default:
+		// Default behavior for other tools
+		truncatedResult := c.truncateToolOutput(toolName, result)
+		output = fmt.Sprintf("%sTool [%s] on %s\x1b[0m\n%s\x1b[0m\n",
+			c.colors.Tool, toolName, input, truncatedResult)
 	}
 
-	// Default behavior for other tools
-	truncatedResult := c.truncateToolOutput(toolName, result)
-	_, err := fmt.Fprintf(c.output, "%sTool [%s] on %s\x1b[0m\n%s\x1b[0m\n",
-		c.colors.Tool, toolName, input, truncatedResult)
+	// Lock only for single atomic write
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, err := c.output.Write([]byte(output))
 	return err
 }
 
 // DisplaySystemMessage displays a system message.
 func (c *CLIAdapter) DisplaySystemMessage(message string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	_, err := fmt.Fprintf(c.output, "%sSystem: %s\x1b[0m\n", c.colors.System, message)
+	return err
+}
+
+// DisplayThinking displays extended thinking content from the AI.
+// Uses thinking color from the color scheme to distinguish from regular responses.
+func (c *CLIAdapter) DisplayThinking(content string) error {
+	// Build output string before acquiring lock to minimize lock hold time.
+	// c.colors is safe to read without lock - it's set during initialization and never modified.
+	var buf strings.Builder
+	buf.WriteString(c.colors.Thinking + "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n")
+	buf.WriteString(c.colors.Thinking + "Claude is thinking...\x1b[0m\n")
+	buf.WriteString(c.colors.Thinking + "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n")
+	// Indent the thinking content for better visual separation
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		buf.WriteString(c.colors.Thinking + "  " + line + "\x1b[0m\n")
+	}
+	buf.WriteString(c.colors.Thinking + "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n\n")
+
+	// Lock only for single atomic write
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, err := c.output.Write([]byte(buf.String()))
 	return err
 }
 
@@ -302,6 +420,8 @@ func (c *CLIAdapter) DisplaySubagentStatus(agentName string, status string, deta
 	if details != "" {
 		msg += " - " + details
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	// Magenta color for subagent status
 	_, err := fmt.Fprintf(c.output, "\x1b[35m%s\x1b[0m\n", msg)
 	return err
@@ -327,7 +447,7 @@ func (c *CLIAdapter) ClearScreen() error {
 func (c *CLIAdapter) SetColorScheme(scheme port.ColorScheme) error {
 	// Basic validation - ensure at least one color is set
 	if scheme.User == "" && scheme.Assistant == "" && scheme.System == "" &&
-		scheme.Error == "" && scheme.Tool == "" && scheme.Prompt == "" {
+		scheme.Error == "" && scheme.Tool == "" && scheme.Prompt == "" && scheme.Thinking == "" {
 		return port.ErrInvalidColor
 	}
 
@@ -350,6 +470,9 @@ func (c *CLIAdapter) SetColorScheme(scheme port.ColorScheme) error {
 	if scheme.Prompt != "" {
 		c.colors.Prompt = scheme.Prompt
 	}
+	if scheme.Thinking != "" {
+		c.colors.Thinking = scheme.Thinking
+	}
 
 	return nil
 }
@@ -365,9 +488,10 @@ func (c *CLIAdapter) truncateToolOutput(toolName, result string) string {
 	return truncated
 }
 
-// displayCompactFileRead displays a compact indicator for file read operations.
+// buildCompactFileReadOutput builds a compact indicator string for file read operations.
 // Shows "read(path)" or "read(path:start-end)" for line ranges.
-func (c *CLIAdapter) displayCompactFileRead(input string) error {
+// Does not acquire any locks - safe to call before locking for output.
+func (c *CLIAdapter) buildCompactFileReadOutput(input string) string {
 	var readInput struct {
 		Path      string `json:"path"`
 		StartLine *int   `json:"start_line,omitempty"`
@@ -375,8 +499,7 @@ func (c *CLIAdapter) displayCompactFileRead(input string) error {
 	}
 
 	if err := json.Unmarshal([]byte(input), &readInput); err != nil {
-		_, err := fmt.Fprintf(c.output, "%sread(%s)\x1b[0m\n", c.colors.Tool, input)
-		return err
+		return fmt.Sprintf("%sread(%s)\x1b[0m\n", c.colors.Tool, input)
 	}
 
 	display := readInput.Path
@@ -392,24 +515,22 @@ func (c *CLIAdapter) displayCompactFileRead(input string) error {
 		display = fmt.Sprintf("%s:%d-%s", readInput.Path, start, end)
 	}
 
-	_, err := fmt.Fprintf(c.output, "%sread(%s)\x1b[0m\n", c.colors.Tool, display)
-	return err
+	return fmt.Sprintf("%sread(%s)\x1b[0m\n", c.colors.Tool, display)
 }
 
-// displayCompactListFiles displays a compact indicator for directory listing operations.
+// buildCompactListFilesOutput builds a compact indicator string for directory listing operations.
 // Shows "list(path)" instead of the full directory contents.
-func (c *CLIAdapter) displayCompactListFiles(input string) error {
+// Does not acquire any locks - safe to call before locking for output.
+func (c *CLIAdapter) buildCompactListFilesOutput(input string) string {
 	var listInput struct {
 		Path string `json:"path"`
 	}
 
 	if err := json.Unmarshal([]byte(input), &listInput); err != nil {
-		_, err := fmt.Fprintf(c.output, "%slist(%s)\x1b[0m\n", c.colors.Tool, input)
-		return err
+		return fmt.Sprintf("%slist(%s)\x1b[0m\n", c.colors.Tool, input)
 	}
 
-	_, err := fmt.Fprintf(c.output, "%slist(%s)\x1b[0m\n", c.colors.Tool, listInput.Path)
-	return err
+	return fmt.Sprintf("%slist(%s)\x1b[0m\n", c.colors.Tool, listInput.Path)
 }
 
 // SetTruncationConfig sets the truncation configuration for tool output display.
@@ -490,7 +611,6 @@ func (c *CLIAdapter) GetHistoryFile() string {
 }
 
 // GetMaxHistoryEntries returns the maximum number of history entries to store.
-// Returns 0 if using the default value.
 func (c *CLIAdapter) GetMaxHistoryEntries() int {
 	return c.maxHistoryEntries
 }
@@ -526,7 +646,7 @@ func (c *CLIAdapter) ConfirmBashCommand(command string, isDangerous bool, reason
 	var input string
 
 	// Use go-prompt for interactive mode, bufio.Scanner for non-interactive
-	if c.useInteractive && c.historyManager != nil {
+	if c.useInteractive && c.historyFile != "" {
 		// Interactive mode: use go-prompt to avoid stdin conflict
 		input = c.getInteractiveConfirmation()
 	} else {
@@ -545,72 +665,11 @@ func (c *CLIAdapter) ConfirmBashCommand(command string, isDangerous bool, reason
 	return input == "y" || input == "yes"
 }
 
-// GetHistoryManager returns the HistoryManager for interactive adapters.
-// The HistoryManager provides command history functionality for go-prompt integration,
-// including persistent storage and navigation through previous commands.
-//
-// Returns nil for non-interactive adapters (those created with NewCLIAdapterWithIO).
-// For interactive adapters (those created with NewCLIAdapterWithHistory), returns
-// a pointer to the internal HistoryManager that can be used to query or modify history.
-//
-// The returned pointer is the same instance on subsequent calls (not a copy).
-func (c *CLIAdapter) GetHistoryManager() *HistoryManager {
-	return c.historyManager
-}
-
-// AddToHistory adds an entry to the command history.
-// The entry is trimmed of leading/trailing whitespace before storage.
-//
-// Returns an error in the following cases:
-//   - Non-interactive adapter: "history not available in non-interactive mode"
-//   - Empty or whitespace-only entry: ErrEmptyEntry
-//   - Entry contains embedded newlines: ErrEmbeddedNewline
-//   - Entry matches the most recent entry: ErrConsecutiveDuplicate
-//
-// On success, the entry is persisted to the history file (if configured)
-// and will be available for go-prompt history navigation.
-func (c *CLIAdapter) AddToHistory(entry string) error {
-	if c.historyManager == nil {
-		return errors.New("history not available in non-interactive mode")
-	}
-	return c.historyManager.Add(entry)
-}
-
-// ClearHistory clears all command history entries from both memory and the history file.
-// This operation is idempotent and safe to call on non-interactive adapters (no-op).
-// After calling ClearHistory, GetHistoryCallback will return an empty slice until
-// new entries are added via AddToHistory.
-func (c *CLIAdapter) ClearHistory() {
-	if c.historyManager != nil {
-		c.historyManager.Clear()
-	}
-}
-
 // GetPromptPrefix returns the current prompt prefix string displayed before user input.
 // This is the string set via SetPrompt, or the default "> " if not explicitly set.
 // The prompt prefix is used by go-prompt to display the input prompt in interactive mode.
 func (c *CLIAdapter) GetPromptPrefix() string {
 	return c.prompt
-}
-
-// GetHistoryCallback returns a callback function compatible with go-prompt's history option.
-// The callback returns a slice of all history entries in order added (oldest first),
-// suitable for arrow key navigation in interactive mode.
-//
-// Returns nil for non-interactive adapters. The returned callback reflects live updates;
-// entries added via AddToHistory or cleared via ClearHistory are immediately visible.
-//
-// Example usage with go-prompt:
-//
-//	p := prompt.New(executor, completer,
-//	    prompt.OptionHistory(adapter.GetHistoryCallback()()))
-func (c *CLIAdapter) GetHistoryCallback() func() []string {
-	if c.historyManager == nil {
-		return nil
-	}
-	return func() []string {
-		return c.historyManager.History()
-	}
 }
 
 // SetModeToggleCallback sets the callback function to invoke when Shift+Tab is pressed.

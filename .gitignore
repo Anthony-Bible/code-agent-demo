@@ -1,2 +1,26 @@
-agent
+# Agent working directory
+.agent/
 .agent/investigations/
+
+# Binary artifacts
+code-editing-agent
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+
+# IDE
+.idea/
+
+# Database files
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Log files
+*.log
+logs/*.log
+
+# Code review files
+REVIEW-*.md

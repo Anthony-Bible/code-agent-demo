@@ -1,7 +1,6 @@
 package config
 
 import (
-	"os"
 	"testing"
 )
 
@@ -23,14 +22,7 @@ import (
 func createTestConfig(t *testing.T) *Config {
 	t.Helper()
 
-	tmpDir, err := os.MkdirTemp("", "container-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	t.Cleanup(func() {
-		os.RemoveAll(tmpDir)
-	})
-
+	tmpDir := t.TempDir()
 	return &Config{
 		AIModel:           "test-model",
 		WorkingDir:        tmpDir,

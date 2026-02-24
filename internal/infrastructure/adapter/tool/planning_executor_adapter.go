@@ -68,6 +68,14 @@ func (p *PlanningExecutorAdapter) SetPlanMode(sessionID string, enabled bool) {
 	}
 }
 
+// CleanupSession removes session-specific state from the adapter.
+// This implements the port.SessionCleaner interface.
+func (p *PlanningExecutorAdapter) CleanupSession(sessionID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.sessionModes, sessionID)
+}
+
 // IsPlanMode returns whether plan mode is enabled for a given session.
 func (p *PlanningExecutorAdapter) IsPlanMode(sessionID string) bool {
 	p.mu.RLock()

@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	appsvc "code-editing-agent/internal/application/service"
+	"code-editing-agent/internal/domain/port"
 	"code-editing-agent/internal/infrastructure/config"
 	"context"
 	"errors"
@@ -33,6 +35,76 @@ type inputResult struct {
 	ok   bool
 }
 
+// handleModeCommand handles the :mode command to toggle plan mode.
+func handleModeCommand(
+	ctx context.Context,
+	sessionID, cmdText string,
+	chatService *appsvc.ChatService,
+	container *config.Container,
+	uiAdapter port.UserInterface,
+) bool {
+	if !strings.HasPrefix(cmdText, ":mode") {
+		return false
+	}
+
+	parts := strings.Fields(cmdText)
+	mode := "toggle"
+	if len(parts) > 1 {
+		mode = parts[1]
+	}
+
+	if err := chatService.HandleModeCommand(ctx, sessionID, mode); err != nil {
+		_ = uiAdapter.DisplayError(err)
+		return true
+	}
+
+	// Display current mode status
+	convSvc := container.ConversationService()
+	if isPlanMode, _ := convSvc.IsPlanMode(sessionID); isPlanMode {
+		_ = uiAdapter.DisplaySystemMessage(
+			"Plan mode enabled: Tools will write plans to files instead of executing.",
+		)
+	} else {
+		_ = uiAdapter.DisplaySystemMessage("Plan mode disabled: Tools will execute normally.")
+	}
+	return true
+}
+
+// handleThinkingCommand handles the :thinking command to toggle extended thinking mode.
+func handleThinkingCommand(
+	ctx context.Context,
+	sessionID, cmdText string,
+	chatService *appsvc.ChatService,
+	container *config.Container,
+	uiAdapter port.UserInterface,
+) bool {
+	if !strings.HasPrefix(cmdText, ":thinking") {
+		return false
+	}
+
+	parts := strings.Fields(cmdText)
+	mode := "toggle"
+	if len(parts) > 1 {
+		mode = parts[1]
+	}
+
+	if err := chatService.HandleThinkingCommand(ctx, sessionID, mode); err != nil {
+		_ = uiAdapter.DisplayError(err)
+		return true
+	}
+
+	// Display current thinking mode status
+	convSvc := container.ConversationService()
+	if thinkingInfo, _ := convSvc.GetThinkingMode(sessionID); thinkingInfo.Enabled {
+		_ = uiAdapter.DisplaySystemMessage(
+			fmt.Sprintf("Extended thinking enabled: Budget %d tokens", thinkingInfo.BudgetTokens),
+		)
+	} else {
+		_ = uiAdapter.DisplaySystemMessage("Extended thinking disabled")
+	}
+	return true
+}
+
 // runChat executes the chat command.
 func runChat(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
@@ -54,6 +126,17 @@ func runChat(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to start chat session: %w", err)
 	}
 	sessionID := startResp.SessionID
+
+	// Initialize thinking mode from config if enabled
+	if cfg.ExtendedThinking {
+		convSvc := container.ConversationService()
+		thinkingInfo := port.ThinkingModeInfo{
+			Enabled:      true,
+			BudgetTokens: cfg.ThinkingBudget,
+			ShowThinking: cfg.ShowThinking,
+		}
+		_ = convSvc.SetThinkingMode(sessionID, thinkingInfo)
+	}
 
 	// Discover and display available subagents
 	if subagentManager != nil {
@@ -128,28 +211,12 @@ func runChat(cmd *cobra.Command, args []string) error {
 		}
 
 		// Check for :mode command to toggle plan mode
-		if strings.HasPrefix(result.text, ":mode") {
-			parts := strings.Fields(result.text)
-			var mode string
-			if len(parts) > 1 {
-				mode = parts[1]
-			} else {
-				mode = "toggle"
-			}
-			if err := chatService.HandleModeCommand(ctx, sessionID, mode); err != nil {
-				_ = uiAdapter.DisplayError(err)
-			} else {
-				// Display current mode status
-				convSvc := container.ConversationService()
-				if isPlanMode, _ := convSvc.IsPlanMode(sessionID); isPlanMode {
-					_ = uiAdapter.DisplaySystemMessage(
-						"Plan mode enabled: Tools will write plans to files instead of executing.",
-					)
-				} else {
-					_ = uiAdapter.DisplaySystemMessage("Plan mode disabled: Tools will execute normally.")
-				}
-			}
-			// Continue to next iteration (don't send to AI)
+		if handleModeCommand(ctx, sessionID, result.text, chatService, container, uiAdapter) {
+			continue
+		}
+
+		// Check for :thinking command to toggle extended thinking mode
+		if handleThinkingCommand(ctx, sessionID, result.text, chatService, container, uiAdapter) {
 			continue
 		}
 

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 	"time"
 )
@@ -18,9 +17,17 @@ type ConversationServiceInterface interface {
 	StartConversation(ctx context.Context) (string, error)
 	AddUserMessage(ctx context.Context, sessionID, content string) (*entity.Message, error)
 	ProcessAssistantResponse(ctx context.Context, sessionID string) (*entity.Message, []port.ToolCallInfo, error)
+	ProcessAssistantResponseStreaming(
+		ctx context.Context,
+		sessionID string,
+		textCallback port.StreamCallback,
+		thinkingCallback port.ThinkingCallback,
+	) (*entity.Message, []port.ToolCallInfo, error)
 	AddToolResultMessage(ctx context.Context, sessionID string, toolResults []entity.ToolResult) error
 	EndConversation(ctx context.Context, sessionID string) error
 	SetCustomSystemPrompt(ctx context.Context, sessionID, prompt string) error
+	SetThinkingMode(sessionID string, info port.ThinkingModeInfo) error
+	GetThinkingMode(sessionID string) (port.ThinkingModeInfo, error)
 }
 
 // SafetyEnforcer defines the interface for safety checks during investigations.
@@ -30,6 +37,7 @@ type SafetyEnforcer interface {
 	CheckCommandAllowed(cmd string) error
 	CheckActionBudget(currentActions int) error
 	CheckTimeout(ctx context.Context) error
+	GetMaxActions() int
 }
 
 // InvestigationRecordData is the interface for investigation persistence.
@@ -175,17 +183,15 @@ type InvestigationResult struct {
 }
 
 // AlertInvestigationUseCaseConfig holds configuration for the investigation use case.
-// It defines operational limits and safety constraints for investigations.
+// It defines operational settings for investigations. Safety settings (allowed tools,
+// blocked commands, action limits, timeouts) are now managed by SafetyEnforcer.
 type AlertInvestigationUseCaseConfig struct {
-	MaxActions           int           // Maximum tool executions per investigation
-	MaxDuration          time.Duration // Maximum investigation time
-	MaxConcurrent        int           // Maximum simultaneous investigations
-	AllowedTools         []string      // Tools that investigations may use
-	BlockedCommands      []string      // Command patterns that are blocked
-	EscalateOnConfidence float64       // Escalate when confidence is below this value
-	EscalateOnErrors     int           // Escalate after this many consecutive errors
-	AutoStartForCritical bool          // Automatically start investigations for critical alerts
-	EnableSafetyChecks   bool          // Enable command safety validation
+	// Operational settings only - safety settings come from SafetyEnforcer
+	MaxConcurrent        int   // Maximum simultaneous investigations
+	AutoStartForCritical bool  // Automatically start investigations for critical alerts
+	ExtendedThinking     bool  // Enable extended thinking for investigations
+	ThinkingBudget       int64 // Token budget for thinking (default: 10000)
+	ShowThinking         bool  // Display thinking output in logs
 }
 
 // AlertInvestigationUseCase orchestrates AI-driven alert investigations.
@@ -204,6 +210,7 @@ type AlertInvestigationUseCase struct {
 	convService           ConversationServiceInterface    // Conversation service for AI interaction
 	toolExecutor          port.ToolExecutor               // Tool executor for running tools
 	skillManager          port.SkillManager               // Skill manager for discovering skills
+	uiAdapter             port.UserInterface              // User interface for displaying output
 	shutdown              bool                            // True after Shutdown is called
 	idCounter             int64                           // Counter for generating unique IDs
 }
@@ -218,23 +225,14 @@ type activeInvestigation struct {
 
 // NewAlertInvestigationUseCase creates a new use case with sensible defaults.
 // Default configuration includes:
-//   - MaxActions: 20 (prevents runaway investigations)
-//   - MaxDuration: 15 minutes
 //   - MaxConcurrent: 5 simultaneous investigations
-//   - AllowedTools: bash, read_file, list_files (safe investigation tools)
-//   - BlockedCommands: rm -rf, dd, mkfs (destructive commands)
+//
+// Safety settings (allowed tools, blocked commands, action limits, timeouts)
+// are configured via SetSafetyEnforcer().
 func NewAlertInvestigationUseCase() *AlertInvestigationUseCase {
 	return &AlertInvestigationUseCase{
 		config: AlertInvestigationUseCaseConfig{
-			MaxActions:    20,
-			MaxDuration:   15 * time.Minute,
 			MaxConcurrent: 5,
-			AllowedTools:  []string{"bash", "read_file", "list_files"},
-			BlockedCommands: []string{
-				"rm -rf",
-				"dd if=",
-				"mkfs",
-			},
 		},
 		activeInvestigations: make(map[string]*activeInvestigation),
 		alertToInvestigation: make(map[string]string),
@@ -299,44 +297,16 @@ func (uc *AlertInvestigationUseCase) RunInvestigation(
 		uc.mu.Unlock()
 	}()
 
-	// Check if safety enforcer blocks all investigation tools
-	uc.mu.RLock()
-	enforcer := uc.safetyEnforcer
-	allowedTools := uc.config.AllowedTools
-	uc.mu.RUnlock()
-
-	if enforcer != nil && len(allowedTools) > 0 {
-		allBlocked := true
-		for _, tool := range allowedTools {
-			if enforcer.CheckToolAllowed(tool) == nil {
-				allBlocked = false
-				break
-			}
-		}
-		if allBlocked {
-			// All tools are blocked - escalate
-			return &InvestigationResult{
-				InvestigationID: invID,
-				AlertID:         alert.ID(),
-				Status:          "failed",
-				Findings:        []string{},
-				ActionsTaken:    0,
-				Duration:        time.Since(time.Now()),
-				Confidence:      0.0,
-				Escalated:       true,
-				EscalateReason:  "all investigation tools are blocked by safety policy",
-			}, nil
-		}
-	}
-
 	// Run actual investigation using InvestigationRunner
 	uc.mu.RLock()
 	convService := uc.convService
 	toolExecutor := uc.toolExecutor
 	promptBuilder := uc.promptBuilderRegistry
 	skillManager := uc.skillManager
+	uiAdapter := uc.uiAdapter
 	config := uc.config
 	store := uc.investigationStore
+	enforcer := uc.safetyEnforcer
 	uc.mu.RUnlock()
 
 	if convService == nil || toolExecutor == nil {
@@ -351,6 +321,7 @@ func (uc *AlertInvestigationUseCase) RunInvestigation(
 		enforcer,
 		promptBuilder,
 		skillManager,
+		uiAdapter,
 		config,
 	)
 	result, err := runner.Run(ctx, alert, invID)
@@ -570,32 +541,39 @@ func (uc *AlertInvestigationUseCase) SetSkillManager(sm port.SkillManager) {
 	uc.skillManager = sm
 }
 
-// IsToolAllowed checks if a tool name is in the allowed list.
-// Returns false if the tool is not explicitly allowed.
-func (uc *AlertInvestigationUseCase) IsToolAllowed(tool string) bool {
-	uc.mu.RLock()
-	defer uc.mu.RUnlock()
-
-	for _, t := range uc.config.AllowedTools {
-		if t == tool {
-			return true
-		}
-	}
-	return false
+// SetUIAdapter configures the user interface adapter for displaying output.
+func (uc *AlertInvestigationUseCase) SetUIAdapter(ui port.UserInterface) {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
+	uc.uiAdapter = ui
 }
 
-// IsCommandBlocked checks if a command contains any blocked pattern.
-// Returns true if the command should be rejected for safety reasons.
+// IsToolAllowed checks if a tool name is allowed by the safety enforcer.
+// Returns true if no safety enforcer is configured (permissive default).
+// Returns false if the tool is not explicitly allowed by the enforcer.
+func (uc *AlertInvestigationUseCase) IsToolAllowed(tool string) bool {
+	uc.mu.RLock()
+	enforcer := uc.safetyEnforcer
+	uc.mu.RUnlock()
+
+	if enforcer == nil {
+		return true // No enforcer = allow all tools
+	}
+	return enforcer.CheckToolAllowed(tool) == nil
+}
+
+// IsCommandBlocked checks if a command is blocked by the safety enforcer.
+// Returns false if no safety enforcer is configured (permissive default).
+// Returns true if the command matches a blocked pattern.
 func (uc *AlertInvestigationUseCase) IsCommandBlocked(cmd string) bool {
 	uc.mu.RLock()
-	defer uc.mu.RUnlock()
+	enforcer := uc.safetyEnforcer
+	uc.mu.RUnlock()
 
-	for _, blocked := range uc.config.BlockedCommands {
-		if strings.Contains(cmd, blocked) {
-			return true
-		}
+	if enforcer == nil {
+		return false // No enforcer = no blocking
 	}
-	return false
+	return enforcer.CheckCommandAllowed(cmd) != nil
 }
 
 // Shutdown gracefully shuts down the use case.

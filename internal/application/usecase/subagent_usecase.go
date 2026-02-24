@@ -156,7 +156,7 @@ func (uc *SubagentUseCase) SpawnDynamicSubagent(
 	// 2. Apply defaults
 	model := config.Model
 	if model == "" {
-		model = "inherit"
+		model = defaultModelInherit
 	}
 
 	maxActions := config.MaxActions
@@ -195,6 +195,8 @@ func validateDynamicConfig(config DynamicSubagentConfig, taskPrompt string) erro
 	}
 	return nil
 }
+
+const defaultModelInherit = "inherit"
 
 // SubagentRequest represents a single subagent spawn request for batch operations.
 //
@@ -315,7 +317,8 @@ func (uc *SubagentUseCase) SpawnSubagentAsync(
 }
 
 // executeInBackground runs the subagent task and sends the result to the appropriate channel.
-// Both channels are closed after sending to signal completion and prevent goroutine leaks.
+// Only the channel that receives a value is closed to ensure the select statement
+// in the caller receives the correct value (not nil from a closed channel).
 //
 // This method is extracted from SpawnSubagentAsync to improve code organization and testability.
 func (uc *SubagentUseCase) executeInBackground(
@@ -326,14 +329,15 @@ func (uc *SubagentUseCase) executeInBackground(
 	prompt string,
 	subagentID string,
 ) {
-	defer close(resultChan)
-	defer close(errorChan)
-
 	result, err := uc.subagentRunner.Run(ctx, agent, prompt, subagentID)
 	if err != nil {
 		errorChan <- err
+		close(errorChan)
+		// Don't close resultChan since we didn't send to it
 	} else {
 		resultChan <- result
+		close(resultChan)
+		// Don't close errorChan since we didn't send to it
 	}
 }
 

@@ -30,6 +30,7 @@ type InvestigationRunner struct {
 	promptBuilder  PromptBuilderRegistry
 	skillManager   port.SkillManager
 	store          InvestigationStoreWriter
+	uiAdapter      port.UserInterface
 	config         AlertInvestigationUseCaseConfig
 }
 
@@ -41,6 +42,7 @@ type InvestigationRunner struct {
 //   - safetyEnforcer: Enforcer for safety policies during investigation (optional, can be nil)
 //   - promptBuilder: Registry for building investigation prompts
 //   - skillManager: Manager for discovering and loading skills (optional, can be nil)
+//   - uiAdapter: User interface for displaying thinking and messages (optional, can be nil)
 //   - config: Configuration for investigation limits and behavior
 //
 // Panics if required dependencies (convService, toolExecutor, promptBuilder) are nil.
@@ -50,6 +52,7 @@ func NewInvestigationRunner(
 	safetyEnforcer SafetyEnforcer,
 	promptBuilder PromptBuilderRegistry,
 	skillManager port.SkillManager,
+	uiAdapter port.UserInterface,
 	config AlertInvestigationUseCaseConfig,
 ) *InvestigationRunner {
 	if convService == nil {
@@ -61,7 +64,7 @@ func NewInvestigationRunner(
 	if promptBuilder == nil {
 		panic("promptBuilder cannot be nil")
 	}
-	// safetyEnforcer and skillManager are optional and can be nil
+	// safetyEnforcer, skillManager, and uiAdapter are optional and can be nil
 
 	return &InvestigationRunner{
 		convService:    convService,
@@ -69,6 +72,7 @@ func NewInvestigationRunner(
 		safetyEnforcer: safetyEnforcer,
 		promptBuilder:  promptBuilder,
 		skillManager:   skillManager,
+		uiAdapter:      uiAdapter,
 		config:         config,
 	}
 }
@@ -81,6 +85,7 @@ func NewInvestigationRunner(
 //   - safetyEnforcer: Enforcer for safety policies during investigation (optional, can be nil)
 //   - promptBuilder: Registry for building investigation prompts
 //   - skillManager: Manager for discovering and loading skills (optional, can be nil)
+//   - uiAdapter: User interface for displaying thinking and messages (optional, can be nil)
 //   - store: Store for persisting investigation state
 //   - config: Configuration for investigation limits and behavior
 //
@@ -91,6 +96,7 @@ func NewInvestigationRunnerWithStore(
 	safetyEnforcer SafetyEnforcer,
 	promptBuilder PromptBuilderRegistry,
 	skillManager port.SkillManager,
+	uiAdapter port.UserInterface,
 	store InvestigationStoreWriter,
 	config AlertInvestigationUseCaseConfig,
 ) *InvestigationRunner {
@@ -103,7 +109,7 @@ func NewInvestigationRunnerWithStore(
 	if promptBuilder == nil {
 		panic("promptBuilder cannot be nil")
 	}
-	// safetyEnforcer and skillManager are optional and can be nil
+	// safetyEnforcer, skillManager, and uiAdapter are optional and can be nil
 
 	return &InvestigationRunner{
 		convService:    convService,
@@ -111,6 +117,7 @@ func NewInvestigationRunnerWithStore(
 		safetyEnforcer: safetyEnforcer,
 		promptBuilder:  promptBuilder,
 		skillManager:   skillManager,
+		uiAdapter:      uiAdapter,
 		store:          store,
 		config:         config,
 	}
@@ -161,14 +168,14 @@ func (r *InvestigationRunner) checkToolSafety(tc port.ToolCallInfo) error {
 	}
 
 	if err := r.safetyEnforcer.CheckToolAllowed(tc.ToolName); err != nil {
-		return errors.New("Tool blocked: " + err.Error())
+		return fmt.Errorf("tool blocked: %w", err)
 	}
 
 	// For bash tools, also check command safety
 	if tc.ToolName == toolBash {
 		if cmd := extractCommandFromInput(tc.Input); cmd != "" {
 			if err := r.safetyEnforcer.CheckCommandAllowed(cmd); err != nil {
-				return errors.New("Command blocked: " + err.Error())
+				return fmt.Errorf("command blocked: %w", err)
 			}
 		}
 	}
@@ -239,15 +246,18 @@ func (r *InvestigationRunner) Run(
 		return r.validationFailedResult(investigationID, alert, err), err
 	}
 
+	// Determine maxActions from SafetyEnforcer if available, otherwise use default
+	maxActions := 50
+	if r.safetyEnforcer != nil {
+		maxActions = r.safetyEnforcer.GetMaxActions()
+	}
+
 	rc := &runContext{
 		ctx:             ctx,
 		alert:           alert,
 		investigationID: investigationID,
 		startTime:       time.Now(),
-		maxActions:      r.config.MaxActions,
-	}
-	if rc.maxActions == 0 {
-		rc.maxActions = 20
+		maxActions:      maxActions,
 	}
 
 	sessionID, err := r.convService.StartConversation(ctx)
@@ -257,6 +267,20 @@ func (r *InvestigationRunner) Run(
 	rc.sessionID = sessionID
 	defer func() { _ = r.convService.EndConversation(ctx, sessionID) }()
 
+	// Configure extended thinking mode if enabled
+	if r.config.ExtendedThinking {
+		thinkingBudget := r.config.ThinkingBudget
+		if thinkingBudget == 0 {
+			thinkingBudget = 10000 // Default budget
+		}
+		thinkingInfo := port.ThinkingModeInfo{
+			Enabled:      true,
+			BudgetTokens: thinkingBudget,
+			ShowThinking: r.config.ShowThinking,
+		}
+		_ = r.convService.SetThinkingMode(rc.sessionID, thinkingInfo)
+	}
+
 	if err := r.sendInitialPrompt(rc); err != nil {
 		return rc.failedResult(err), err
 	}
@@ -265,7 +289,7 @@ func (r *InvestigationRunner) Run(
 
 	// Persist result to store if configured
 	if r.store != nil && result != nil {
-		stub := &investigationRecordForStore{
+		stub := &simpleInvestigationRecord{
 			id:             result.InvestigationID,
 			alertID:        result.AlertID,
 			sessionID:      rc.sessionID,
@@ -291,37 +315,6 @@ func (r *InvestigationRunner) Run(
 
 	return result, err
 }
-
-// investigationRecordForStore implements InvestigationRecordData for persistence.
-type investigationRecordForStore struct {
-	id, alertID, sessionID, status string
-	startedAt                      time.Time
-	completedAt                    time.Time
-	findings                       []string
-	actionsTaken                   int
-	durationNanos                  int64
-	confidence                     float64
-	escalated                      bool
-	escalateReason                 string
-}
-
-func (s *investigationRecordForStore) ID() string        { return s.id }
-func (s *investigationRecordForStore) AlertID() string   { return s.alertID }
-func (s *investigationRecordForStore) SessionID() string { return s.sessionID }
-func (s *investigationRecordForStore) Status() string    { return s.status }
-func (s *investigationRecordForStore) StartedAt() time.Time {
-	if s.startedAt.IsZero() {
-		return time.Now()
-	}
-	return s.startedAt
-}
-func (s *investigationRecordForStore) CompletedAt() time.Time  { return s.completedAt }
-func (s *investigationRecordForStore) Findings() []string      { return s.findings }
-func (s *investigationRecordForStore) ActionsTaken() int       { return s.actionsTaken }
-func (s *investigationRecordForStore) Duration() time.Duration { return time.Duration(s.durationNanos) }
-func (s *investigationRecordForStore) Confidence() float64     { return s.confidence }
-func (s *investigationRecordForStore) Escalated() bool         { return s.escalated }
-func (s *investigationRecordForStore) EscalateReason() string  { return s.escalateReason }
 
 func (r *InvestigationRunner) validateInputs(ctx context.Context, alert *AlertForInvestigation, invID string) error {
 	if alert == nil {
@@ -412,27 +405,22 @@ func (r *InvestigationRunner) formatTriggerMessage(alert *AlertForInvestigation)
 }
 
 // getInvestigationTools returns the filtered list of tools for investigation prompts.
-// It filters based on the AllowedTools configuration.
+// It filters based on the SafetyEnforcer's allowed tools policy.
 func (r *InvestigationRunner) getInvestigationTools() ([]entity.Tool, error) {
 	allTools, err := r.toolExecutor.ListTools()
 	if err != nil {
 		return nil, err
 	}
 
-	// If no allowed tools configured, return all tools
-	if len(r.config.AllowedTools) == 0 {
+	// If no safety enforcer, return all tools
+	if r.safetyEnforcer == nil {
 		return allTools, nil
 	}
 
-	// Filter to only allowed tools
-	allowedSet := make(map[string]bool, len(r.config.AllowedTools))
-	for _, t := range r.config.AllowedTools {
-		allowedSet[t] = true
-	}
-
+	// Filter to only tools allowed by safety enforcer
 	filtered := make([]entity.Tool, 0, len(allTools))
 	for _, tool := range allTools {
-		if allowedSet[tool.Name] {
+		if r.safetyEnforcer.CheckToolAllowed(tool.Name) == nil {
 			filtered = append(filtered, tool)
 		}
 	}
@@ -528,46 +516,12 @@ func (r *InvestigationRunner) checkSafetyBudget(rc *runContext) error {
 
 // checkConfidenceEscalation checks if the AI's confidence is below the escalation threshold.
 // Returns an escalation result if confidence is low, nil otherwise.
-func (r *InvestigationRunner) checkConfidenceEscalation(rc *runContext, msg *entity.Message) *InvestigationResult {
-	if r.config.EscalateOnConfidence <= 0 || msg == nil {
-		return nil
-	}
-
-	confidence := parseConfidenceFromMessage(msg.Content)
-	if confidence >= 0 && confidence < r.config.EscalateOnConfidence {
-		result := rc.completedResult()
-		result.Escalated = true
-		result.Confidence = confidence
-		result.EscalateReason = "confidence below threshold"
-		return result
-	}
+// NOTE: Confidence-based escalation is currently disabled as it requires policy configuration
+// that is not part of the SafetyEnforcer interface. This can be re-enabled by extending
+// the interface or adding a separate escalation policy.
+func (r *InvestigationRunner) checkConfidenceEscalation(_ *runContext, _ *entity.Message) *InvestigationResult {
+	// Confidence-based escalation disabled - safety enforcement handles action limits
 	return nil
-}
-
-// parseConfidenceFromMessage extracts a confidence value from message text.
-// Looks for patterns like "Confidence: 0.5" or "confidence: 0.5".
-// Returns -1 if no confidence found.
-func parseConfidenceFromMessage(content string) float64 {
-	// Look for "Confidence: X.X" pattern (case-insensitive)
-	lower := strings.ToLower(content)
-	idx := strings.Index(lower, "confidence:")
-	if idx == -1 {
-		return -1
-	}
-
-	// Extract the number after "confidence:"
-	remaining := strings.TrimSpace(content[idx+len("confidence:"):])
-	var confidence float64
-	_, err := fmt.Sscanf(remaining, "%f", &confidence)
-	if err != nil {
-		return -1
-	}
-
-	// Validate range
-	if confidence < 0 || confidence > 1 {
-		return -1
-	}
-	return confidence
 }
 
 // escalatedResult creates a failed result with escalation info.
@@ -684,10 +638,41 @@ func (r *InvestigationRunner) handleMaxActionsReached(rc *runContext) error {
 	return nil
 }
 
+// displayThinkingContent outputs thinking content to the UI adapter or stderr.
+func (r *InvestigationRunner) displayThinkingContent(content string) {
+	if content == "" {
+		return
+	}
+	if r.uiAdapter != nil {
+		_ = r.uiAdapter.DisplayThinking(content)
+		return
+	}
+	// Fallback to stderr if no UI adapter (for backward compatibility)
+	fmt.Fprintf(os.Stderr, "\x1b[95m[THINKING]\x1b[0m %s\n", content)
+}
+
 // getNextToolCalls retrieves and limits the next batch of tool calls.
 // Also returns the AI message for confidence analysis.
+// When ShowThinking is enabled, uses streaming to display thinking output.
 func (r *InvestigationRunner) getNextToolCalls(rc *runContext) (*entity.Message, []port.ToolCallInfo, error) {
-	msg, toolCalls, err := r.convService.ProcessAssistantResponse(rc.ctx, rc.sessionID)
+	var msg *entity.Message
+	var toolCalls []port.ToolCallInfo
+	var err error
+
+	if r.config.ShowThinking {
+		var thinkingContent strings.Builder
+		thinkingCallback := func(thinking string) error {
+			thinkingContent.WriteString(thinking)
+			return nil
+		}
+		msg, toolCalls, err = r.convService.ProcessAssistantResponseStreaming(
+			rc.ctx, rc.sessionID, nil, thinkingCallback,
+		)
+		r.displayThinkingContent(thinkingContent.String())
+	} else {
+		msg, toolCalls, err = r.convService.ProcessAssistantResponse(rc.ctx, rc.sessionID)
+	}
+
 	if err != nil {
 		return nil, nil, err
 	}
@@ -746,21 +731,12 @@ func (r *InvestigationRunner) limitToolCalls(rc *runContext, toolCalls []port.To
 	return toolCalls
 }
 
-// isToolCallAllowed checks if a tool call is allowed based on config's AllowedTools.
+// isToolCallAllowed checks if a tool call is allowed based on SafetyEnforcer policy.
 func (r *InvestigationRunner) isToolCallAllowed(tc port.ToolCallInfo) bool {
-	if r.config.AllowedTools == nil {
-		return true // nil = allow all
+	if r.safetyEnforcer == nil {
+		return true // No enforcer = allow all tools
 	}
-	if len(r.config.AllowedTools) == 0 {
-		return false // empty slice = block all
-	}
-
-	for _, allowed := range r.config.AllowedTools {
-		if allowed == tc.ToolName {
-			return true
-		}
-	}
-	return false
+	return r.safetyEnforcer.CheckToolAllowed(tc.ToolName) == nil
 }
 
 // buildTurnWarningMessage generates a warning message based on remaining actions.

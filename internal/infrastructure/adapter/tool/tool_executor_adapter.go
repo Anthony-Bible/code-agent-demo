@@ -1,22 +1,24 @@
 package tool
 
 import (
+	"bufio"
 	"bytes"
 	"code-editing-agent/internal/application/usecase"
 	"code-editing-agent/internal/domain/entity"
 	"code-editing-agent/internal/domain/port"
+	"code-editing-agent/internal/domain/safety"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -62,6 +64,7 @@ type CommandConfirmationCallback func(command string, isDangerous bool, reason s
 type ExecutorAdapter struct {
 	fileManager                 port.FileManager
 	skillManager                port.SkillManager
+	subagentManager             port.SubagentManager
 	subagentUseCase             SubagentUseCaseInterface
 	tools                       map[string]entity.Tool
 	mu                          sync.RWMutex
@@ -69,6 +72,16 @@ type ExecutorAdapter struct {
 	commandConfirmationCallback CommandConfirmationCallback
 	investigationStates         map[string]string // tracks investigation_id -> status
 	investigationMu             sync.Mutex
+
+	// Command validation - uses sync.Once to ensure immutability after first use.
+	// This prevents race conditions where SetValidationMode could swap the validator
+	// while checkCommandConfirmation is using it.
+	commandValidator     safety.CommandValidator
+	validatorOnce        sync.Once
+	pendingValidatorMode safety.CommandValidationMode
+	pendingWhitelist     *safety.CommandWhitelist
+	pendingAskLLM        bool
+	validatorConfigured  bool // true if SetValidationMode was called before first use
 }
 
 // toRawMessage converts various input types to json.RawMessage for validation.
@@ -97,16 +110,14 @@ func wrapFileOperationError(operation string, err error) error {
 
 	// Check for path traversal error in the error chain
 	if errors.Is(err, fileadapter.ErrPathTraversal) {
-		// Print a security warning to stderr
-		fmt.Fprintf(os.Stderr, "\x1b[91m[SECURITY WARNING] Path traversal attempt detected and blocked!\x1b[0m\n")
+		slog.Error("path traversal attempt detected and blocked") //nolint:sloglint // security warning must always log
 		return fmt.Errorf("%s blocked due to potential security threat: %w", operation, err)
 	}
 
 	// Check for PathValidationError which has detailed reason
 	var pathErr *fileadapter.PathValidationError
 	if errors.As(err, &pathErr) && pathErr.Reason == "path traversal attempt detected" {
-		// Print a security warning to stderr
-		fmt.Fprintf(os.Stderr, "\x1b[91m[SECURITY WARNING] Path traversal attempt detected and blocked!\x1b[0m\n")
+		slog.Error("path traversal attempt detected and blocked") //nolint:sloglint // security warning must always log
 		return fmt.Errorf("%s blocked due to potential security threat: %w", operation, err)
 	}
 
@@ -115,11 +126,13 @@ func wrapFileOperationError(operation string, err error) error {
 
 // NewExecutorAdapter creates a new ExecutorAdapter with the provided FileManager.
 // SkillManager can be provided via SetSkillManager for skill-related functionality.
+// SubagentManager can be provided via SetSubagentManager for subagent-related functionality.
 // It also registers the default tools (read_file, list_files, edit_file, bash, fetch, activate_skill).
 func NewExecutorAdapter(fileManager port.FileManager) *ExecutorAdapter {
 	adapter := &ExecutorAdapter{
 		fileManager:         fileManager,
 		skillManager:        nil,
+		subagentManager:     nil,
 		tools:               make(map[string]entity.Tool),
 		investigationStates: make(map[string]string),
 	}
@@ -132,8 +145,37 @@ func NewExecutorAdapter(fileManager port.FileManager) *ExecutorAdapter {
 
 // SetSkillManager sets the skill manager for skill-related functionality.
 // This should be called after creation to enable skill activation features.
+// It also rebuilds the activate_skill tool to include available skills in its description.
+//
+// This method is thread-safe but blocks tool operations momentarily while updating.
+// Call once during initialization before starting the main execution loop.
 func (a *ExecutorAdapter) SetSkillManager(sm port.SkillManager) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.skillManager = sm
+	// Rebuild activate_skill tool with skill manager for dynamic description
+	a.rebuildActivateSkillToolLocked()
+}
+
+// SetSubagentManager sets the subagent manager for agent discovery functionality.
+// This should be called after creation to enable dynamic agent listing in tool descriptions.
+// The subagent manager is used to discover available agents and include them in the task tool description.
+//
+// Blocking Behavior:
+// This method is thread-safe but blocks ALL tool operations while executing. It acquires a write lock
+// on the internal mutex, preventing concurrent access to ExecuteTool, ListTools, GetTool,
+// ValidateToolInput, and SetSubagentUseCase. The method holds the lock while calling registerTaskTool(),
+// which may perform I/O operations (DiscoverAgents) that could be slow.
+//
+// WARNING: Set the subagent manager once during initialization. Avoid calling this method frequently
+// in hot paths or during active tool execution, as it will block all tool operations until complete.
+// For optimal performance, configure the subagent manager before starting the main execution loop.
+func (a *ExecutorAdapter) SetSubagentManager(sm port.SubagentManager) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.subagentManager = sm
+	// Re-register the task tool with updated agent list
+	a.registerTaskTool()
 }
 
 // SetSubagentUseCase sets the subagent use case for task delegation.
@@ -153,12 +195,52 @@ func (a *ExecutorAdapter) SetSubagentUseCase(uc SubagentUseCaseInterface) {
 
 // SetDangerousCommandCallback sets the callback for dangerous command confirmation.
 func (a *ExecutorAdapter) SetDangerousCommandCallback(cb DangerousCommandCallback) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.dangerousCommandCallback = cb
 }
 
 // SetCommandConfirmationCallback sets the callback for all command confirmation.
 func (a *ExecutorAdapter) SetCommandConfirmationCallback(cb CommandConfirmationCallback) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.commandConfirmationCallback = cb
+}
+
+// SetValidationMode configures command validation mode and whitelist.
+// mode: "blacklist" (default) or "whitelist"
+// whitelist: the CommandWhitelist to use when mode is "whitelist" (can be nil for blacklist mode)
+// askLLMOnUnknown: whether to ask LLM before blocking non-whitelisted commands (only for whitelist mode).
+//
+// IMPORTANT: This must be called during initialization, before any command validation occurs.
+// Once the validator is initialized (on first use), subsequent calls will log a warning and be ignored
+// to prevent race conditions.
+//
+// Returns an error if whitelist mode is specified but no whitelist is provided.
+func (a *ExecutorAdapter) SetValidationMode(
+	mode safety.CommandValidationMode,
+	whitelist *safety.CommandWhitelist,
+	askLLMOnUnknown bool,
+) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Check if validator has already been initialized (first use has occurred)
+	if a.commandValidator != nil {
+		//nolint:sloglint // security warning about potential race condition must always log
+		slog.Warn(
+			"SetValidationMode called after validator was already initialized; ignoring to prevent race condition",
+			"mode", mode,
+		)
+		return nil
+	}
+
+	// Store the pending configuration - will be used on first validation
+	a.pendingValidatorMode = mode
+	a.pendingWhitelist = whitelist
+	a.pendingAskLLM = askLLMOnUnknown
+	a.validatorConfigured = true
+	return nil
 }
 
 // RegisterTool registers a new tool with the executor.
@@ -264,7 +346,7 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 			"properties": map[string]interface{}{
 				"path": map[string]interface{}{
 					"type":        "string",
-					"description": "The relative path to the file to read in the working directory..",
+					"description": "The relative path to the file to read in the working directory.",
 				},
 				"start_line": map[string]interface{}{
 					"type":        "integer",
@@ -330,7 +412,7 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 	bashTool := entity.Tool{
 		ID:          "bash",
 		Name:        "bash",
-		Description: "Executes shell commands and returns stdout, stderr, and exit code. Dangerous commands require user confirmation.",
+		Description: "Executes shell commands and returns stdout, stderr, and exit code. You MUST assess whether each command is dangerous and set the dangerous field accordingly. Dangerous commands require user confirmation.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -348,12 +430,12 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 				},
 				"dangerous": map[string]interface{}{
 					"type":        "boolean",
-					"description": "Whether this command is potentially dangerous",
+					"description": "REQUIRED: You must assess if this command is potentially dangerous. Set to true for commands that: delete/modify files (rm, mv), use elevated privileges (sudo, su), modify system config, execute untrusted input, or could cause data loss. Set to false for safe read-only commands (ls, cat, grep, echo).",
 				},
 			},
-			"required": []string{"command"},
+			"required": []string{"command", "dangerous"},
 		},
-		RequiredFields: []string{"command"},
+		RequiredFields: []string{"command", "dangerous"},
 	}
 	a.tools[bashTool.Name] = bashTool
 
@@ -380,17 +462,17 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 	}
 	a.tools[fetchTool.Name] = fetchTool
 
-	// Register activate_skill tool
+	// Register activate_skill tool (will be rebuilt with dynamic description if SetSkillManager is called)
 	activateSkillTool := entity.Tool{
 		ID:          "activate_skill",
 		Name:        "activate_skill",
-		Description: "Activates a skill by name and returns its full content. Use this to load detailed instructions for specific capabilities like code review, testing, migrations, etc.",
+		Description: "Activates a skill by name and returns its full content. Use this to load detailed instructions for specific capabilities.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"skill_name": map[string]interface{}{
 					"type":        "string",
-					"description": "The name of the skill to activate (e.g., code-review, test-skill)",
+					"description": "The name of the skill to activate",
 				},
 			},
 			"required": []string{"skill_name"},
@@ -498,28 +580,8 @@ The tool returns aggregated results showing success/failure counts and individua
 	}
 	a.tools[batchToolTool.Name] = batchToolTool
 
-	// Register task tool
-	taskTool := entity.Tool{
-		ID:          "task",
-		Name:        "task",
-		Description: "Spawns a subagent to handle a delegated task. Returns the subagent's result when complete. Cannot be called from within a subagent (prevents recursion).",
-		InputSchema: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"agent_name": map[string]interface{}{
-					"type":        "string",
-					"description": "Name of the subagent to spawn (e.g., 'code-reviewer', 'test-writer')",
-				},
-				"prompt": map[string]interface{}{
-					"type":        "string",
-					"description": "Task description/instructions for the subagent to execute",
-				},
-			},
-			"required": []string{"agent_name", "prompt"},
-		},
-		RequiredFields: []string{"agent_name", "prompt"},
-	}
-	a.tools[taskTool.Name] = taskTool
+	// Register task tool (dynamically includes available agents if subagentManager is set)
+	a.registerTaskTool()
 
 	// Register delegate tool
 	delegateTool := entity.Tool{
@@ -596,6 +658,87 @@ Output format: [expected structure]"`,
 	a.registerInvestigationTools()
 }
 
+// rebuildActivateSkillToolLocked updates the activate_skill tool definition.
+// REQUIRES: a.mu must be held by the caller.
+func (a *ExecutorAdapter) rebuildActivateSkillToolLocked() {
+	// Build description with available skills
+	description := a.buildActivateSkillDescription()
+
+	// Update the activate_skill tool with new description
+	activateSkillTool := entity.Tool{
+		ID:          "activate_skill",
+		Name:        "activate_skill",
+		Description: description,
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"skill_name": map[string]interface{}{
+					"type":        "string",
+					"description": "The name of the skill to activate",
+				},
+			},
+			"required": []string{"skill_name"},
+		},
+		RequiredFields: []string{"skill_name"},
+	}
+	a.tools[activateSkillTool.Name] = activateSkillTool
+}
+
+// buildActivateSkillDescription builds the description for the activate_skill tool.
+// If a skill manager is available, it includes available skills in the description.
+func (a *ExecutorAdapter) buildActivateSkillDescription() string {
+	baseDescription := "Execute a skill within the main conversation\n\n" +
+		"When users ask you to perform tasks, check if any of the available skills below can help complete the task more effectively. " +
+		"Skills provide specialized capabilities and domain knowledge.\n\n" +
+		"Use this tool to load the full content of a skill when its capabilities are needed for the task at hand."
+
+	// If no skill manager, return base description
+	if a.skillManager == nil {
+		return baseDescription
+	}
+
+	// Try to discover skills with timeout to prevent blocking indefinitely
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	skills, err := a.skillManager.DiscoverSkills(ctx)
+	if err != nil {
+		//nolint:sloglint // operational warning without context
+		slog.Warn("failed to discover skills for tool description", "error", err)
+		return baseDescription
+	}
+	if len(skills.Skills) == 0 {
+		return baseDescription
+	}
+
+	// Build skills section following the example format
+	var sb strings.Builder
+	sb.WriteString(baseDescription)
+	sb.WriteString("\n\n## Available Skills\n\n")
+
+	for _, skill := range skills.Skills {
+		// Include source type to help AI understand where skill scripts are located
+		sourceLabel := ""
+		switch skill.SourceType {
+		case entity.SkillSourceUser:
+			sourceLabel = " (user)"
+		case entity.SkillSourceProject:
+			sourceLabel = " (project)"
+		case entity.SkillSourceProjectClaude:
+			sourceLabel = " (project-claude)"
+		}
+		fmt.Fprintf(&sb, "- **%s**%s: %s\n", skill.Name, sourceLabel, skill.Description)
+	}
+
+	sb.WriteString("\nActivate a skill by providing its name to load detailed instructions and capabilities.")
+	sb.WriteString("\n\nSkill source types indicate where scripts are located:")
+	sb.WriteString("\n- (project): ./skills/skill-name/ - highest priority")
+	sb.WriteString("\n- (project-claude): ./.claude/skills/skill-name/")
+	sb.WriteString("\n- (user): ~/.claude/skills/skill-name/ - user global skills")
+
+	return sb.String()
+}
+
 // executeByName executes the appropriate tool function based on the tool name.
 func (a *ExecutorAdapter) executeByName(ctx context.Context, name string, input json.RawMessage) (string, error) {
 	switch name {
@@ -650,36 +793,40 @@ func (in *readFileInput) validateLineRange() error {
 	return nil
 }
 
-// formatLinesWithNumbers formats file content as numbered lines within the specified range.
-// startLine and endLine are 1-based line numbers. If nil, they default to the beginning and end of the file.
-func formatLinesWithNumbers(content string, startLine, endLine *int) string {
-	lines := strings.Split(content, "\n")
-	// Remove trailing empty line if content ends with newline
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
+// maxReadFileLines is the default line cap when no explicit range is requested.
+// Prevents sending excessively large outputs to the LLM.
+const maxReadFileLines = 2000
 
-	// Determine start and end indices (1-based to 0-based), clamped to valid range
-	startIdx := 0
-	if startLine != nil {
-		startIdx = min(*startLine-1, len(lines))
+// preAllocBuilder pre-allocates a strings.Builder based on file size, capped at 10MB.
+func preAllocBuilder(b *strings.Builder, f *os.File) {
+	const maxPreAlloc = 10 << 20
+	if info, err := f.Stat(); err == nil {
+		preAlloc := int(info.Size()) + 1024
+		if preAlloc > maxPreAlloc {
+			preAlloc = maxPreAlloc
+		}
+		b.Grow(preAlloc)
 	}
+}
 
-	endIdx := len(lines)
-	if endLine != nil {
-		endIdx = min(*endLine, len(lines))
+// appendTruncationNotice counts remaining lines via scanner and appends a truncation message.
+func appendTruncationNotice(result *strings.Builder, scanner *bufio.Scanner, linesRead int) {
+	totalLines := linesRead
+	for scanner.Scan() {
+		totalLines++
 	}
-
-	// Build output with line numbers
-	var result strings.Builder
-	for i := startIdx; i < endIdx; i++ {
-		fmt.Fprintf(&result, "%d: %s\n", i+1, lines[i])
-	}
-
-	return result.String()
+	fmt.Fprintf(
+		result,
+		"\n--- Output truncated at %d lines (file has %d total). Use start_line/end_line to read more. ---\n",
+		maxReadFileLines,
+		totalLines,
+	)
 }
 
 // executeReadFile executes the read_file tool.
+// It streams lines from the file to avoid loading the entire file into memory,
+// only keeping the requested line range. When no range is specified, output is
+// capped at maxReadFileLines with a truncation notice.
 func (a *ExecutorAdapter) executeReadFile(input json.RawMessage) (string, error) {
 	var in readFileInput
 	if err := json.Unmarshal(input, &in); err != nil {
@@ -690,12 +837,56 @@ func (a *ExecutorAdapter) executeReadFile(input json.RawMessage) (string, error)
 		return "", err
 	}
 
-	content, err := a.fileManager.ReadFile(in.Path)
+	path, err := a.fileManager.ResolvePath(in.Path)
 	if err != nil {
 		return "", wrapFileOperationError("Failed to read file", err)
 	}
 
-	return formatLinesWithNumbers(content, in.StartLine, in.EndLine), nil
+	f, err := os.Open(path)
+	if err != nil {
+		return "", wrapFileOperationError("Failed to read file", err)
+	}
+	defer f.Close()
+
+	startIdx := 1
+	if in.StartLine != nil {
+		startIdx = *in.StartLine
+	}
+	endIdx := 0 // 0 means "read to end"
+	if in.EndLine != nil {
+		endIdx = *in.EndLine
+	}
+
+	// Apply default cap when no explicit range is given
+	noExplicitRange := in.StartLine == nil && in.EndLine == nil
+	if noExplicitRange {
+		endIdx = maxReadFileLines
+	}
+
+	var result strings.Builder
+	preAllocBuilder(&result, f)
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024) // up to 1MB lines
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		if lineNum < startIdx {
+			continue
+		}
+		if endIdx > 0 && lineNum > endIdx {
+			break
+		}
+		fmt.Fprintf(&result, "%d: %s\n", lineNum, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return "", wrapFileOperationError("Failed to read file", err)
+	}
+
+	if noExplicitRange && lineNum > maxReadFileLines {
+		appendTruncationNotice(&result, scanner, lineNum)
+	}
+
+	return result.String(), nil
 }
 
 // listFilesInput represents the input for the list_files tool.
@@ -746,7 +937,12 @@ type editFileInput struct {
 	NewStr string `json:"new_str"`
 }
 
+// maxEditFileSize is the maximum file size (in bytes) that edit_file will process.
+// Files larger than this should be handled differently (e.g., targeted line-range edits).
+const maxEditFileSize = 50 << 20 // 50MB
+
 // executeEditFile executes the edit_file tool.
+// Uses []byte throughout to avoid the string([]byte) copy that doubles memory.
 func (a *ExecutorAdapter) executeEditFile(input json.RawMessage) (string, error) {
 	var in editFileInput
 	if err := json.Unmarshal(input, &in); err != nil {
@@ -758,33 +954,57 @@ func (a *ExecutorAdapter) executeEditFile(input json.RawMessage) (string, error)
 		return "", errors.New("invalid input parameters: path is required and old_str must differ from new_str")
 	}
 
-	// Check if file exists
-	exists, err := a.fileManager.FileExists(in.Path)
-	if err != nil {
-		return "", wrapFileOperationError("Failed to check if file exists", err)
+	// Handle empty old_str: only valid for creating new files.
+	// Must check before FileExists/ReadFile to avoid unnecessary I/O,
+	// and before ReplaceAll which would OOM inserting new_str at every position.
+	if in.OldStr == "" {
+		exists, err := a.fileManager.FileExists(in.Path)
+		if err != nil {
+			return "", wrapFileOperationError("Failed to check if file exists", err)
+		}
+		if !exists {
+			return a.createNewFile(in.Path, in.NewStr)
+		}
+		return "", errors.New("old_str must not be empty when editing an existing file")
 	}
 
-	// If file doesn't exist and old_str is empty, create a new file
-	if !exists && in.OldStr == "" {
-		return a.createNewFile(in.Path, in.NewStr)
-	}
-
-	// Read existing file content
-	content, err := a.fileManager.ReadFile(in.Path)
+	// Resolve and validate the path
+	path, err := a.fileManager.ResolvePath(in.Path)
 	if err != nil {
 		return "", wrapFileOperationError("Failed to read file", err)
 	}
 
-	oldContent := content
-	newContent := strings.ReplaceAll(oldContent, in.OldStr, in.NewStr)
+	// Check file size before reading to prevent OOM on huge files
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", wrapFileOperationError("Failed to read file", err)
+	}
+	if info.IsDir() {
+		return "", wrapFileOperationError("Failed to read file", fileadapter.ErrIsDirectory)
+	}
+	if info.Size() > maxEditFileSize {
+		return "", fmt.Errorf(
+			"file too large for edit_file (%dMB > %dMB limit); use targeted line-range reads and smaller edits",
+			info.Size()/(1024*1024),
+			maxEditFileSize/(1024*1024),
+		)
+	}
+
+	// Read as []byte directly to avoid string conversion copy
+	oldContent, err := os.ReadFile(path)
+	if err != nil {
+		return "", wrapFileOperationError("Failed to read file", err)
+	}
+
+	newContent := bytes.ReplaceAll(oldContent, []byte(in.OldStr), []byte(in.NewStr))
 
 	// Check if replacement occurred
-	if oldContent == newContent && in.OldStr != "" {
+	if bytes.Equal(oldContent, newContent) {
 		return "", errors.New("old string not found in file")
 	}
 
-	// Write the modified content
-	if err := a.fileManager.WriteFile(in.Path, newContent); err != nil {
+	// Write the modified content directly to avoid []byte→string→[]byte round-trip
+	if err := os.WriteFile(path, newContent, info.Mode().Perm()); err != nil {
 		return "", wrapFileOperationError("Failed to write file", err)
 	}
 
@@ -889,68 +1109,130 @@ const defaultBashTimeout = 30 * time.Second
 // maxBatchInvocations is the maximum number of tool invocations allowed in a single batch.
 const maxBatchInvocations = 20
 
-// dangerousPattern represents a pattern that indicates a dangerous command.
-type dangerousPattern struct {
-	pattern *regexp.Regexp
-	reason  string
-}
-
-// dangerousPatterns contains patterns for detecting dangerous commands.
-//
-//nolint:gochecknoglobals // This is intentionally a package-level constant for dangerous command detection
-var dangerousPatterns = []dangerousPattern{
-	// Matches rm with any flags followed by dangerous paths (/, ~, *)
-	{regexp.MustCompile(`rm\s+(-\w+\s+)*[/~*]`), "destructive rm command"},
-	{regexp.MustCompile(`sudo\s+`), "sudo command"},
-	{regexp.MustCompile(`chmod\s+777`), "insecure chmod"},
-	{regexp.MustCompile(`mkfs\.`), "filesystem format"},
-	{regexp.MustCompile(`dd\s+if=`), "low-level disk operation"},
-	{regexp.MustCompile(`>\s*/dev/`), "write to device"},
-}
-
-// isDangerousCommand checks if a command matches any dangerous patterns.
-// Special case: writing to /dev/null is allowed.
-func isDangerousCommand(cmd string) (bool, string) {
-	for _, dp := range dangerousPatterns {
-		if dp.pattern.MatchString(cmd) {
-			// Allow writes to /dev/null (common pattern for suppressing output)
-			if dp.reason == "write to device" && strings.Contains(cmd, "/dev/null") {
-				continue
-			}
-			return true, dp.reason
-		}
-	}
-	return false, ""
-}
-
 // checkCommandConfirmation checks if a command should be allowed to execute.
+// The llmDangerous parameter indicates whether the LLM assessed the command as dangerous.
+// Uses the CommandValidator to determine whether to allow, block, or confirm the command.
 func (a *ExecutorAdapter) checkCommandConfirmation(command string, description string, llmDangerous bool) error {
-	isDangerous, reason := isDangerousCommand(command)
+	// Initialize validator exactly once using sync.Once to prevent race conditions.
+	// This ensures the validator is immutable after first use, even if SetValidationMode
+	// is called concurrently (which would be a programming error, but we handle it safely).
+	a.validatorOnce.Do(func() {
+		a.mu.Lock()
+		defer a.mu.Unlock()
 
-	// Combine: dangerous if either patterns match OR LLM says so
-	if llmDangerous && !isDangerous {
-		isDangerous = true
-		reason = "marked dangerous by AI"
+		// Use pending configuration if SetValidationMode was called, otherwise use defaults
+		if a.validatorConfigured {
+			// Error can only occur if whitelist mode without whitelist, which SetValidationMode prevents
+			a.commandValidator, _ = safety.NewCommandValidator(
+				a.pendingValidatorMode,
+				a.pendingWhitelist,
+				a.pendingAskLLM,
+			)
+		} else {
+			// Default to blacklist mode - error is ignored because blacklist with nil whitelist is always valid
+			a.commandValidator, _ = safety.NewCommandValidator(safety.ModeBlacklist, nil, false)
+		}
+	})
+
+	// Read validator and callbacks under lock (validator is now immutable, but callbacks may change)
+	a.mu.Lock()
+	validator := a.commandValidator
+	confirmCallback := a.commandConfirmationCallback
+	dangerousCallback := a.dangerousCommandCallback
+	a.mu.Unlock()
+
+	// Validate outside lock (validator is immutable after creation)
+	result := validator.Validate(command, llmDangerous)
+
+	// Determine whitelist mode from validator's actual mode, not from stale nil check
+	// This prevents TOCTOU race where another thread could change the validator
+	validatorImpl, isImpl := validator.(*safety.CommandValidatorImpl)
+	isWhitelistMode := isImpl && validatorImpl.Mode() == safety.ModeWhitelist
+
+	// If not allowed and doesn't need confirmation, it's a hard block (whitelist strict mode)
+	if !result.Allowed && !result.NeedsConfirm {
+		return fmt.Errorf(safety.ErrFmtWhitelistBlocked, command)
 	}
 
-	switch {
-	case a.commandConfirmationCallback != nil:
-		if !a.commandConfirmationCallback(command, isDangerous, reason, description) {
-			if isDangerous {
-				return fmt.Errorf("dangerous command denied by user: %s (%s)", reason, command)
-			}
-			return fmt.Errorf("command denied by user: %s", command)
-		}
-	case a.dangerousCommandCallback != nil && isDangerous:
-		// Backward compatibility: use old callback for dangerous commands
-		if !a.dangerousCommandCallback(command, reason) {
-			return fmt.Errorf("dangerous command denied by user: %s (%s)", reason, command)
-		}
-	case isDangerous:
-		// No callback set and command is dangerous - block it
-		return fmt.Errorf("dangerous command blocked: %s (%s)", reason, command)
+	// In whitelist mode: whitelisted commands bypass the callback entirely
+	// In blacklist mode: safe commands should still go through the callback
+	isWhitelisted := result.Allowed && !result.NeedsConfirm && !result.IsDangerous
+
+	if isWhitelistMode && isWhitelisted {
+		return nil
+	}
+
+	// If CommandConfirmationCallback is set, call it
+	// In blacklist mode, this is called for ALL commands (even safe ones)
+	// isWhitelistFallback indicates this is a non-whitelisted command in whitelist mode
+	isWhitelistFallback := isWhitelistMode && !isWhitelisted
+	if confirmCallback != nil {
+		return a.handleWithConfirmCallback(command, description, result, confirmCallback, isWhitelistFallback)
+	}
+
+	// No general callback - check if dangerous command needs confirmation
+	if result.IsDangerous {
+		return a.handleDangerousOnly(command, result, dangerousCallback)
+	}
+
+	// Safe command with no callback - allow execution
+	return nil
+}
+
+// handleDangerousOnly handles confirmation for dangerous commands using the dangerous callback.
+func (a *ExecutorAdapter) handleDangerousOnly(
+	command string,
+	result safety.ValidationResult,
+	callback DangerousCommandCallback,
+) error {
+	if callback != nil {
+		return a.handleWithDangerousCallback(command, result, callback)
+	}
+	// No callback available for dangerous command - block it
+	if result.IsDangerous {
+		return fmt.Errorf(safety.ErrFmtDangerousBlocked, result.Reason, command)
 	}
 	return nil
+}
+
+// handleWithConfirmCallback processes confirmation using the general confirmation callback.
+func (a *ExecutorAdapter) handleWithConfirmCallback(
+	command, description string,
+	result safety.ValidationResult,
+	callback CommandConfirmationCallback,
+	isWhitelistFallback bool,
+) error {
+	if callback(command, result.IsDangerous, result.Reason, description) {
+		return nil
+	}
+	return a.buildDeniedError(command, result, isWhitelistFallback)
+}
+
+// handleWithDangerousCallback processes confirmation using the dangerous command callback.
+func (a *ExecutorAdapter) handleWithDangerousCallback(
+	command string,
+	result safety.ValidationResult,
+	callback DangerousCommandCallback,
+) error {
+	if callback(command, result.Reason) {
+		return nil
+	}
+	return fmt.Errorf(safety.ErrFmtDangerousDenied, result.Reason, command)
+}
+
+// buildDeniedError constructs the appropriate denial error based on context.
+func (a *ExecutorAdapter) buildDeniedError(
+	command string,
+	result safety.ValidationResult,
+	isWhitelistFallback bool,
+) error {
+	if isWhitelistFallback {
+		return fmt.Errorf(safety.ErrFmtWhitelistDenied, command)
+	}
+	if result.IsDangerous {
+		return fmt.Errorf(safety.ErrFmtDangerousDenied, result.Reason, command)
+	}
+	return fmt.Errorf(safety.ErrFmtCommandDenied, command)
 }
 
 // executeBash executes a bash command and returns the output.
@@ -1127,27 +1409,28 @@ func validateURL(rawURL string) error {
 				hostIP.String(),
 			)
 		}
-	} else {
-		// Hostname - resolve to IPs and check each one
-		ips, err := net.LookupIP(host)
-		if err != nil {
-			return fmt.Errorf("failed to resolve hostname %s: %w", host, err)
-		}
+		return nil
+	}
 
-		// Check all resolved IP addresses
-		for _, ip := range ips {
-			if isPrivateIP(ip) {
-				return fmt.Errorf(
-					"hostname %s resolves to private IP address %s and is blocked for security",
-					host,
-					ip.String(),
-				)
-			}
-		}
+	// Hostname - resolve to IPs and check each one
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("failed to resolve hostname %s: %w", host, err)
+	}
 
-		// If no IPs resolve, block the request
-		if len(ips) == 0 {
-			return fmt.Errorf("hostname %s does not resolve to any IP address", host)
+	// If no IPs resolve, block the request
+	if len(ips) == 0 {
+		return fmt.Errorf("hostname %s does not resolve to any IP address", host)
+	}
+
+	// Check all resolved IP addresses
+	for _, ip := range ips {
+		if isPrivateIP(ip) {
+			return fmt.Errorf(
+				"hostname %s resolves to private IP address %s and is blocked for security",
+				host,
+				ip.String(),
+			)
 		}
 	}
 
@@ -1192,6 +1475,9 @@ func htmlToText(htmlContent string) (string, error) {
 			for c := n.FirstChild; c != nil; c = c.NextSibling {
 				extractText(c)
 			}
+		case html.ErrorNode, html.CommentNode, html.DoctypeNode, html.RawNode:
+			// Skip these node types - they don't contain text content
+			return
 		}
 	}
 
@@ -1395,6 +1681,10 @@ func (a *ExecutorAdapter) executeActivateSkill(ctx context.Context, input json.R
 	if len(skill.AllowedTools) > 0 {
 		fmt.Fprintf(&result, "\nallowed-tools: %s", strings.Join(skill.AllowedTools, " "))
 	}
+	// Include source_type to indicate if skill is user, project, or project-claude
+	fmt.Fprintf(&result, "\nsource_type: %s", skill.SourceType)
+	// Include directory_path for script execution context
+	fmt.Fprintf(&result, "\ndirectory_path: %s", skill.OriginalPath)
 	if len(skill.Metadata) > 0 {
 		result.WriteString("\nmetadata:")
 		for key, value := range skill.Metadata {
@@ -1423,12 +1713,15 @@ func (a *ExecutorAdapter) registerInvestigationTools() {
 				},
 				"confidence": map[string]interface{}{
 					"type":        "number",
-					"minimum":     float64(0),
-					"maximum":     float64(1),
+					"minimum":     safety.ConfidenceMin,
+					"maximum":     safety.ConfidenceMax,
 					"description": "Confidence level from 0 to 1",
 				},
 				"findings": map[string]interface{}{
-					"type":        "array",
+					"type": "array",
+					"items": map[string]interface{}{
+						"type": "string",
+					},
 					"description": "List of findings from the investigation",
 				},
 				"root_cause": map[string]interface{}{
@@ -1436,7 +1729,10 @@ func (a *ExecutorAdapter) registerInvestigationTools() {
 					"description": "The identified root cause (optional)",
 				},
 				"recommended_actions": map[string]interface{}{
-					"type":        "array",
+					"type": "array",
+					"items": map[string]interface{}{
+						"type": "string",
+					},
 					"description": "List of recommended actions (optional)",
 				},
 				"severity": map[string]interface{}{
@@ -1477,7 +1773,10 @@ func (a *ExecutorAdapter) registerInvestigationTools() {
 					"description": "Priority level for escalation",
 				},
 				"partial_findings": map[string]interface{}{
-					"type":        "array",
+					"type": "array",
+					"items": map[string]interface{}{
+						"type": "string",
+					},
 					"description": "Partial findings gathered so far (optional)",
 				},
 				"blocking": map[string]interface{}{
@@ -1513,8 +1812,8 @@ func (a *ExecutorAdapter) registerInvestigationTools() {
 				},
 				"progress": map[string]interface{}{
 					"type":        "number",
-					"minimum":     float64(0),
-					"maximum":     float64(100),
+					"minimum":     float64(safety.ProgressMin),
+					"maximum":     float64(safety.ProgressMax),
 					"description": "Progress percentage from 0 to 100",
 				},
 			},
@@ -1525,12 +1824,65 @@ func (a *ExecutorAdapter) registerInvestigationTools() {
 	a.tools[reportInvestigationTool.Name] = reportInvestigationTool
 }
 
+// registerTaskTool registers the task tool with dynamic agent listing.
+// If a subagentManager is available, it discovers agents and includes them in the tool description.
+// This method is called during initialization and when SetSubagentManager is invoked.
+func (a *ExecutorAdapter) registerTaskTool() {
+	baseDescription := "Spawns a subagent to handle a delegated task. Returns the subagent's result when complete. Cannot be called from within a subagent (prevents recursion)."
+
+	// Try to discover available agents if subagentManager is set
+	var fullDescription strings.Builder
+	fullDescription.WriteString(baseDescription)
+
+	if a.subagentManager != nil {
+		agents, err := a.subagentManager.DiscoverAgents(context.Background())
+		if err == nil && agents.TotalCount > 0 {
+			fullDescription.WriteString("\n\nAvailable agents:\n")
+			for _, agent := range agents.Subagents {
+				fmt.Fprintf(&fullDescription, "- %s: %s\n", agent.Name, agent.Description)
+			}
+		}
+	}
+
+	taskTool := entity.Tool{
+		ID:          "task",
+		Name:        "task",
+		Description: fullDescription.String(),
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"agent_name": map[string]interface{}{
+					"type":        "string",
+					"description": "Name of the subagent to spawn (e.g., 'code-reviewer', 'test-writer')",
+				},
+				"prompt": map[string]interface{}{
+					"type":        "string",
+					"description": "Task description/instructions for the subagent to execute",
+				},
+			},
+			"required": []string{"agent_name", "prompt"},
+		},
+		RequiredFields: []string{"agent_name", "prompt"},
+	}
+	a.tools[taskTool.Name] = taskTool
+}
+
 // Investigation status constants.
 const (
 	investigationStatusRunning   = "running"
 	investigationStatusCompleted = "completed"
 	investigationStatusEscalated = "escalated"
 )
+
+// isValidPriority checks if the given priority is a valid escalation priority.
+func isValidPriority(priority string) bool {
+	switch priority {
+	case "low", "medium", "high", "critical":
+		return true
+	default:
+		return false
+	}
+}
 
 // RegisterInvestigation registers an investigation ID so it can be completed or escalated.
 // This is primarily used for testing and by the investigation runner.
@@ -1592,6 +1944,37 @@ type reportInvestigationInput struct {
 	Progress        *float64 `json:"progress,omitempty"`
 }
 
+// validateInvestigationID validates that an investigation ID is non-empty.
+func validateInvestigationID(id string) error {
+	if id == "" || strings.TrimSpace(id) == "" {
+		return errors.New("investigation_id is required and cannot be empty")
+	}
+	return nil
+}
+
+// requireInvestigationExists checks if an investigation exists and returns an error if not.
+func (a *ExecutorAdapter) requireInvestigationExists(investigationID string) error {
+	a.investigationMu.Lock()
+	_, exists := a.investigationStates[investigationID]
+	a.investigationMu.Unlock()
+	if !exists {
+		return fmt.Errorf("investigation_id %q not found", investigationID)
+	}
+	return nil
+}
+
+// marshalInvestigationOutput marshals the output map to JSON, optionally adding investigation_id.
+func marshalInvestigationOutput(output map[string]any, investigationID string) (string, error) {
+	if investigationID != "" {
+		output["investigation_id"] = investigationID
+	}
+	result, err := json.Marshal(output)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal output: %w", err)
+	}
+	return string(result), nil
+}
+
 // executeCompleteInvestigation executes the complete_investigation tool.
 func (a *ExecutorAdapter) executeCompleteInvestigation(ctx context.Context, input json.RawMessage) (string, error) {
 	if err := ctx.Err(); err != nil {
@@ -1603,24 +1986,19 @@ func (a *ExecutorAdapter) executeCompleteInvestigation(ctx context.Context, inpu
 		return "", fmt.Errorf("failed to parse input: %w", err)
 	}
 
-	// Validate investigation_id
-	if in.InvestigationID == "" || strings.TrimSpace(in.InvestigationID) == "" {
-		return "", errors.New("investigation_id is required and cannot be empty")
+	if err := validateInvestigationID(in.InvestigationID); err != nil {
+		return "", err
 	}
 
-	// Check if investigation exists
-	a.investigationMu.Lock()
-	_, exists := a.investigationStates[in.InvestigationID]
-	a.investigationMu.Unlock()
-	if !exists {
-		return "", fmt.Errorf("investigation_id %q not found", in.InvestigationID)
+	if err := a.requireInvestigationExists(in.InvestigationID); err != nil {
+		return "", err
 	}
 
 	// Validate confidence
 	if in.Confidence == nil {
 		return "", errors.New("confidence is required")
 	}
-	if *in.Confidence < 0 || *in.Confidence > 1 {
+	if *in.Confidence < safety.ConfidenceMin || *in.Confidence > safety.ConfidenceMax {
 		return "", errors.New("confidence must be between 0 and 1")
 	}
 
@@ -1638,22 +2016,14 @@ func (a *ExecutorAdapter) executeCompleteInvestigation(ctx context.Context, inpu
 	}
 
 	// Build output
-	output := map[string]interface{}{
+	output := map[string]any{
 		"status":       investigationStatusCompleted,
 		"confidence":   *in.Confidence,
 		"findings":     in.Findings,
 		"completed_at": time.Now().UTC().Format(time.RFC3339),
 	}
-	if in.InvestigationID != "" {
-		output["investigation_id"] = in.InvestigationID
-	}
 
-	result, err := json.Marshal(output)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal output: %w", err)
-	}
-
-	return string(result), nil
+	return marshalInvestigationOutput(output, in.InvestigationID)
 }
 
 // executeEscalateInvestigation executes the escalate_investigation tool.
@@ -1667,17 +2037,12 @@ func (a *ExecutorAdapter) executeEscalateInvestigation(ctx context.Context, inpu
 		return "", fmt.Errorf("failed to parse input: %w", err)
 	}
 
-	// Validate investigation_id
-	if in.InvestigationID == "" || strings.TrimSpace(in.InvestigationID) == "" {
-		return "", errors.New("investigation_id is required and cannot be empty")
+	if err := validateInvestigationID(in.InvestigationID); err != nil {
+		return "", err
 	}
 
-	// Check if investigation exists
-	a.investigationMu.Lock()
-	_, exists := a.investigationStates[in.InvestigationID]
-	a.investigationMu.Unlock()
-	if !exists {
-		return "", fmt.Errorf("investigation_id %q not found", in.InvestigationID)
+	if err := a.requireInvestigationExists(in.InvestigationID); err != nil {
+		return "", err
 	}
 
 	// Validate reason
@@ -1686,8 +2051,7 @@ func (a *ExecutorAdapter) executeEscalateInvestigation(ctx context.Context, inpu
 	}
 
 	// Validate priority
-	validPriorities := map[string]bool{"low": true, "medium": true, "high": true, "critical": true}
-	if !validPriorities[in.Priority] {
+	if !isValidPriority(in.Priority) {
 		return "", errors.New("priority must be one of: low, medium, high, critical")
 	}
 
@@ -1701,23 +2065,15 @@ func (a *ExecutorAdapter) executeEscalateInvestigation(ctx context.Context, inpu
 	if in.InvestigationID != "" {
 		escalationID = fmt.Sprintf("esc-%s-%d", in.InvestigationID, time.Now().UnixNano())
 	}
-	output := map[string]interface{}{
+	output := map[string]any{
 		"status":        investigationStatusEscalated,
 		"escalation_id": escalationID,
 		"reason":        in.Reason,
 		"priority":      in.Priority,
 		"escalated_at":  time.Now().UTC().Format(time.RFC3339),
 	}
-	if in.InvestigationID != "" {
-		output["investigation_id"] = in.InvestigationID
-	}
 
-	result, err := json.Marshal(output)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal output: %w", err)
-	}
-
-	return string(result), nil
+	return marshalInvestigationOutput(output, in.InvestigationID)
 }
 
 // executeReportInvestigation executes the report_investigation tool.
@@ -1731,9 +2087,8 @@ func (a *ExecutorAdapter) executeReportInvestigation(ctx context.Context, input 
 		return "", fmt.Errorf("failed to parse input: %w", err)
 	}
 
-	// Validate investigation_id
-	if in.InvestigationID == "" || strings.TrimSpace(in.InvestigationID) == "" {
-		return "", errors.New("investigation_id is required and cannot be empty")
+	if err := validateInvestigationID(in.InvestigationID); err != nil {
+		return "", err
 	}
 
 	// Validate message
@@ -1743,7 +2098,7 @@ func (a *ExecutorAdapter) executeReportInvestigation(ctx context.Context, input 
 
 	// Validate progress if provided
 	if in.Progress != nil {
-		if *in.Progress < 0 || *in.Progress > 100 {
+		if *in.Progress < float64(safety.ProgressMin) || *in.Progress > float64(safety.ProgressMax) {
 			return "", errors.New("progress must be between 0 and 100")
 		}
 	}
@@ -1765,6 +2120,50 @@ func (a *ExecutorAdapter) executeReportInvestigation(ctx context.Context, input 
 	}
 
 	return string(result), nil
+}
+
+// checkSubagentPrerequisites validates that a subagent tool can be called.
+// It checks for recursion prevention and use case availability.
+func (a *ExecutorAdapter) checkSubagentPrerequisites(
+	ctx context.Context,
+	toolName string,
+) (SubagentUseCaseInterface, error) {
+	if port.IsSubagentContext(ctx) {
+		return nil, fmt.Errorf(
+			"%s tool cannot be called from within a subagent (prevents infinite recursion)",
+			toolName,
+		)
+	}
+	a.mu.RLock()
+	uc := a.subagentUseCase
+	a.mu.RUnlock()
+	if uc == nil {
+		return nil, errors.New("subagent use case not available")
+	}
+	return uc, nil
+}
+
+// formatSubagentResult formats a SubagentResult as indented JSON.
+func formatSubagentResult(result *usecase.SubagentResult) (string, error) {
+	if result == nil {
+		return "", errors.New("subagent execution returned nil result")
+	}
+	resultJSON := map[string]any{
+		"subagent_id":   result.SubagentID,
+		"agent_name":    result.AgentName,
+		"status":        result.Status,
+		"output":        result.Output,
+		"actions_taken": result.ActionsTaken,
+		"duration_ms":   result.Duration.Milliseconds(),
+	}
+	if result.Error != nil {
+		resultJSON["error"] = result.Error.Error()
+	}
+	resultBytes, err := json.MarshalIndent(resultJSON, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to format result: %w", err)
+	}
+	return string(resultBytes), nil
 }
 
 // executeTask spawns a subagent to handle a delegated task.
@@ -1789,18 +2188,9 @@ func (a *ExecutorAdapter) executeReportInvestigation(ctx context.Context, input 
 // The result JSON includes: subagent_id, agent_name, status, output, actions_taken,
 // duration_ms, and error (if the subagent encountered an error).
 func (a *ExecutorAdapter) executeTask(ctx context.Context, input json.RawMessage) (string, error) {
-	// Check for recursion (subagents cannot spawn subagents)
-	if port.IsSubagentContext(ctx) {
-		return "", errors.New("task tool cannot be called from within a subagent (prevents infinite recursion)")
-	}
-
-	// Check if use case is set
-	a.mu.RLock()
-	useCase := a.subagentUseCase
-	a.mu.RUnlock()
-
-	if useCase == nil {
-		return "", errors.New("subagent use case not available")
+	uc, err := a.checkSubagentPrerequisites(ctx, "task")
+	if err != nil {
+		return "", err
 	}
 
 	// Parse input
@@ -1818,51 +2208,19 @@ func (a *ExecutorAdapter) executeTask(ctx context.Context, input json.RawMessage
 	}
 
 	// Spawn subagent
-	result, err := useCase.SpawnSubagent(ctx, params.AgentName, params.Prompt)
+	result, err := uc.SpawnSubagent(ctx, params.AgentName, params.Prompt)
 	if err != nil {
 		return "", fmt.Errorf("subagent execution failed: %w", err)
 	}
 
-	if result == nil {
-		return "", errors.New("subagent execution returned nil result")
-	}
-
-	// Format result as JSON
-	resultJSON := map[string]interface{}{
-		"subagent_id":   result.SubagentID,
-		"agent_name":    result.AgentName,
-		"status":        result.Status,
-		"output":        result.Output,
-		"actions_taken": result.ActionsTaken,
-		"duration_ms":   result.Duration.Milliseconds(),
-	}
-
-	if result.Error != nil {
-		resultJSON["error"] = result.Error.Error()
-	}
-
-	resultBytes, err := json.MarshalIndent(resultJSON, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("failed to format result: %w", err)
-	}
-
-	return string(resultBytes), nil
+	return formatSubagentResult(result)
 }
 
 // executeDelegate executes the delegate tool to spawn a dynamic subagent.
 func (a *ExecutorAdapter) executeDelegate(ctx context.Context, input json.RawMessage) (string, error) {
-	// Check for recursion (subagents cannot spawn subagents)
-	if port.IsSubagentContext(ctx) {
-		return "", errors.New("delegate tool cannot be called from within a subagent (prevents infinite recursion)")
-	}
-
-	// Check if use case is set
-	a.mu.RLock()
-	useCase := a.subagentUseCase
-	a.mu.RUnlock()
-
-	if useCase == nil {
-		return "", errors.New("subagent use case not available")
+	uc, err := a.checkSubagentPrerequisites(ctx, "delegate")
+	if err != nil {
+		return "", err
 	}
 
 	// Parse input
@@ -1892,35 +2250,12 @@ func (a *ExecutorAdapter) executeDelegate(ctx context.Context, input json.RawMes
 	}
 
 	// Spawn dynamic subagent
-	result, err := useCase.SpawnDynamicSubagent(ctx, config, params.Task)
+	result, err := uc.SpawnDynamicSubagent(ctx, config, params.Task)
 	if err != nil {
 		return "", fmt.Errorf("dynamic subagent execution failed: %w", err)
 	}
 
-	if result == nil {
-		return "", errors.New("dynamic subagent execution returned nil result")
-	}
-
-	// Format result as JSON
-	resultJSON := map[string]interface{}{
-		"subagent_id":   result.SubagentID,
-		"agent_name":    result.AgentName,
-		"status":        result.Status,
-		"output":        result.Output,
-		"actions_taken": result.ActionsTaken,
-		"duration_ms":   result.Duration.Milliseconds(),
-	}
-
-	if result.Error != nil {
-		resultJSON["error"] = result.Error.Error()
-	}
-
-	resultBytes, err := json.MarshalIndent(resultJSON, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("failed to format result: %w", err)
-	}
-
-	return string(resultBytes), nil
+	return formatSubagentResult(result)
 }
 
 // executeBatchTool executes the batch_tool tool.

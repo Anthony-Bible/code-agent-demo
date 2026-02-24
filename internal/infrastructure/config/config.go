@@ -19,12 +19,12 @@ import (
 // Config holds all configuration values for the application.
 type Config struct {
 	// AIModel is the model identifier to use for AI requests.
-	// Defaults to "hf:zai-org/GLM-4.6"
+	// Defaults to "hf:zai-org/GLM-4.7"
 	AIModel string
 
 	// MaxTokens is the maximum number of tokens to generate in AI responses.
-	// Defaults to 1024
-	MaxTokens int
+	// Defaults to 20000
+	MaxTokens int64
 
 	// WorkingDir is the base directory for file operations.
 	// All file paths are resolved relative to this directory.
@@ -48,23 +48,63 @@ type Config struct {
 	// Defaults to 1000.
 	HistoryMaxEntries int
 
+	// ExtendedThinking enables extended thinking mode.
+	// Defaults to false.
+	ExtendedThinking bool
+
+	// ThinkingBudget is the token budget for extended thinking.
+	// Defaults to 10000.
+	ThinkingBudget int64
+
+	// ShowThinking determines whether to show thinking output.
+	// Defaults to false.
+	ShowThinking bool
+
 	// AutoApproveSafeCommands determines whether non-dangerous bash commands
 	// are automatically approved without user confirmation.
 	// Dangerous commands are still blocked.
 	// Defaults to false (all commands require confirmation).
 	AutoApproveSafeCommands bool
+
+	// CommandValidationMode determines how commands are validated.
+	// "blacklist" (default): blocks dangerous commands, allows everything else
+	// "whitelist": only allows explicitly whitelisted commands
+	CommandValidationMode string
+
+	// CommandWhitelistJSON is a JSON array of whitelist patterns with optional excludes.
+	// Format: [{"pattern": "regex", "exclude": "regex", "description": "text"}]
+	// Each entry must have a "pattern" field; "exclude" and "description" are optional.
+	CommandWhitelistJSON string
+
+	// AskLLMOnUnknown determines whether to ask the LLM to evaluate
+	// non-whitelisted commands before blocking them.
+	// Only applies in whitelist mode.
+	// Defaults to true.
+	AskLLMOnUnknown bool
+
+	// CommandWhitelistOverride determines whether custom whitelist patterns
+	// replace the defaults entirely (true) or extend them (false).
+	// Only applies in whitelist mode. Defaults to false.
+	CommandWhitelistOverride bool
 }
 
 // Defaults returns a Config struct with all default values set.
 func Defaults() *Config {
 	return &Config{
-		AIModel:           "hf:zai-org/GLM-4.6",
-		MaxTokens:         1024,
-		WorkingDir:        ".",
-		WelcomeMessage:    "Chat with Claude (use 'ctrl+c' to quit)",
-		GoodbyeMessage:    "Bye!",
-		HistoryFile:       "~/.code-editing-agent-history",
-		HistoryMaxEntries: 1000,
+		AIModel:                  "hf:zai-org/GLM-4.7",
+		MaxTokens:                20000,
+		WorkingDir:               ".",
+		WelcomeMessage:           "Chat with Claude (use 'ctrl+c' to quit)",
+		GoodbyeMessage:           "Bye!",
+		HistoryFile:              "~/.code-editing-agent-history",
+		HistoryMaxEntries:        1000,
+		ExtendedThinking:         false,
+		ThinkingBudget:           10000,
+		ShowThinking:             false,
+		CommandValidationMode:    "blacklist",
+		CommandWhitelistJSON:     "",
+		AskLLMOnUnknown:          true,
+		CommandWhitelistOverride: false,
 	}
 }
 
@@ -89,8 +129,8 @@ func LoadConfig() *Config {
 	if viper.IsSet("model") {
 		cfg.AIModel = viper.GetString("model")
 	}
-	if viper.IsSet("maxTokens") {
-		cfg.MaxTokens = viper.GetInt("maxTokens")
+	if viper.IsSet("max_tokens") {
+		cfg.MaxTokens = viper.GetInt64("max_tokens")
 	}
 	if viper.IsSet("workingDir") {
 		cfg.WorkingDir = viper.GetString("workingDir")
@@ -114,6 +154,43 @@ func LoadConfig() *Config {
 	}
 	if viper.IsSet("auto_approve_safe") {
 		cfg.AutoApproveSafeCommands = viper.GetBool("auto_approve_safe")
+	}
+	if viper.IsSet("thinking.enabled") {
+		cfg.ExtendedThinking = viper.GetBool("thinking.enabled")
+	}
+	if viper.IsSet("thinking.budget") {
+		budget := viper.GetInt64("thinking.budget")
+		switch {
+		case budget <= 0:
+			cfg.ThinkingBudget = 10000
+		case budget < 1024:
+			cfg.ThinkingBudget = 1024
+		default:
+			cfg.ThinkingBudget = budget
+		}
+	}
+	if viper.IsSet("thinking.show") {
+		cfg.ShowThinking = viper.GetBool("thinking.show")
+	}
+
+	// Command validation mode: "blacklist" (default) or "whitelist"
+	if viper.IsSet("command_validation_mode") {
+		cfg.CommandValidationMode = viper.GetString("command_validation_mode")
+	}
+
+	// Command whitelist: JSON array of patterns with optional excludes
+	if val, ok := os.LookupEnv("AGENT_COMMAND_WHITELIST_JSON"); ok && val != "" {
+		cfg.CommandWhitelistJSON = val
+	}
+
+	// Ask LLM on unknown: whether to ask LLM before blocking non-whitelisted commands
+	if viper.IsSet("ask_llm_on_unknown") {
+		cfg.AskLLMOnUnknown = viper.GetBool("ask_llm_on_unknown")
+	}
+
+	// Command whitelist override: whether custom patterns replace defaults
+	if viper.IsSet("command_whitelist_override") {
+		cfg.CommandWhitelistOverride = viper.GetBool("command_whitelist_override")
 	}
 
 	return cfg

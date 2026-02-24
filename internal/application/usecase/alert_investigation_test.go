@@ -1,6 +1,8 @@
 package usecase
 
 import (
+	"code-editing-agent/internal/domain/entity"
+	"code-editing-agent/internal/domain/port"
 	"context"
 	"errors"
 	"testing"
@@ -25,10 +27,7 @@ func TestNewAlertInvestigationUseCase_NotNil(t *testing.T) {
 
 func TestNewAlertInvestigationUseCaseWithConfig_NotNil(t *testing.T) {
 	config := AlertInvestigationUseCaseConfig{
-		MaxActions:    20,
-		MaxDuration:   15 * time.Minute,
 		MaxConcurrent: 5,
-		AllowedTools:  []string{"bash", "read_file"},
 	}
 
 	uc := NewAlertInvestigationUseCaseWithConfig(config)
@@ -112,8 +111,9 @@ func TestAlertInvestigationUseCase_HandleAlert_CancelledContext(t *testing.T) {
 }
 
 func TestAlertInvestigationUseCase_HandleAlert_Timeout(t *testing.T) {
+	// Timeout is now enforced by SafetyEnforcer, not config
 	config := AlertInvestigationUseCaseConfig{
-		MaxDuration: 1 * time.Millisecond, // Very short timeout
+		MaxConcurrent: 1,
 	}
 
 	uc := NewAlertInvestigationUseCaseWithConfig(config)
@@ -251,7 +251,6 @@ func TestAlertInvestigationUseCase_StartInvestigation_IncrementsActiveCount(t *t
 func TestAlertInvestigationUseCase_StartInvestigation_MaxConcurrent(t *testing.T) {
 	config := AlertInvestigationUseCaseConfig{
 		MaxConcurrent: 2,
-		MaxDuration:   1 * time.Hour, // Long duration so they stay active
 	}
 
 	uc := NewAlertInvestigationUseCaseWithConfig(config)
@@ -471,15 +470,15 @@ func TestAlertInvestigationUseCase_ListActiveInvestigations_WithActive(t *testin
 // Tool/Command Safety Tests
 // =============================================================================
 
-func TestAlertInvestigationUseCase_IsToolAllowed_InConfig(t *testing.T) {
-	config := AlertInvestigationUseCaseConfig{
-		AllowedTools: []string{"bash", "read_file", "list_files"},
+func TestAlertInvestigationUseCase_IsToolAllowed_WithEnforcer(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
 	}
 
-	uc := NewAlertInvestigationUseCaseWithConfig(config)
-	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
-	}
+	// Create mock enforcer that allows bash and read_file
+	enforcer := NewMockSafetyEnforcerWithAllowedTools([]string{"bash", "read_file", "list_files"})
+	uc.SetSafetyEnforcer(enforcer)
 
 	if !uc.IsToolAllowed("bash") {
 		t.Error("IsToolAllowed('bash') = false, want true")
@@ -489,15 +488,15 @@ func TestAlertInvestigationUseCase_IsToolAllowed_InConfig(t *testing.T) {
 	}
 }
 
-func TestAlertInvestigationUseCase_IsToolAllowed_NotInConfig(t *testing.T) {
-	config := AlertInvestigationUseCaseConfig{
-		AllowedTools: []string{"bash", "read_file"},
+func TestAlertInvestigationUseCase_IsToolAllowed_NotAllowedByEnforcer(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
 	}
 
-	uc := NewAlertInvestigationUseCaseWithConfig(config)
-	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
-	}
+	// Create mock enforcer that only allows bash and read_file
+	enforcer := NewMockSafetyEnforcerWithAllowedTools([]string{"bash", "read_file"})
+	uc.SetSafetyEnforcer(enforcer)
 
 	if uc.IsToolAllowed("edit_file") {
 		t.Error("IsToolAllowed('edit_file') = true, want false")
@@ -507,15 +506,27 @@ func TestAlertInvestigationUseCase_IsToolAllowed_NotInConfig(t *testing.T) {
 	}
 }
 
-func TestAlertInvestigationUseCase_IsCommandBlocked_DangerousCommands(t *testing.T) {
-	config := AlertInvestigationUseCaseConfig{
-		BlockedCommands: []string{"rm -rf", "dd if=", "mkfs"},
+func TestAlertInvestigationUseCase_IsToolAllowed_NoEnforcer(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
 	}
 
-	uc := NewAlertInvestigationUseCaseWithConfig(config)
-	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
+	// Without an enforcer, all tools should be allowed (permissive default)
+	if !uc.IsToolAllowed("any_tool") {
+		t.Error("IsToolAllowed('any_tool') = false, want true when no enforcer")
 	}
+}
+
+func TestAlertInvestigationUseCase_IsCommandBlocked_WithEnforcer(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
+	}
+
+	// Create mock enforcer that blocks dangerous commands
+	enforcer := NewMockSafetyEnforcerWithBlockedCommands([]string{"rm -rf", "dd if=", "mkfs"})
+	uc.SetSafetyEnforcer(enforcer)
 
 	if !uc.IsCommandBlocked("rm -rf /") {
 		t.Error("IsCommandBlocked('rm -rf /') = false, want true")
@@ -526,20 +537,32 @@ func TestAlertInvestigationUseCase_IsCommandBlocked_DangerousCommands(t *testing
 }
 
 func TestAlertInvestigationUseCase_IsCommandBlocked_SafeCommands(t *testing.T) {
-	config := AlertInvestigationUseCaseConfig{
-		BlockedCommands: []string{"rm -rf", "dd if="},
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
 	}
 
-	uc := NewAlertInvestigationUseCaseWithConfig(config)
-	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
-	}
+	// Create mock enforcer that blocks specific patterns
+	enforcer := NewMockSafetyEnforcerWithBlockedCommands([]string{"rm -rf", "dd if="})
+	uc.SetSafetyEnforcer(enforcer)
 
 	if uc.IsCommandBlocked("ls -la") {
 		t.Error("IsCommandBlocked('ls -la') = true, want false")
 	}
 	if uc.IsCommandBlocked("top -b -n 1") {
 		t.Error("IsCommandBlocked('top -b -n 1') = true, want false")
+	}
+}
+
+func TestAlertInvestigationUseCase_IsCommandBlocked_NoEnforcer(t *testing.T) {
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Skip("NewAlertInvestigationUseCase() returned nil")
+	}
+
+	// Without an enforcer, no commands should be blocked (permissive default)
+	if uc.IsCommandBlocked("rm -rf /") {
+		t.Error("IsCommandBlocked('rm -rf /') = true, want false when no enforcer")
 	}
 }
 
@@ -848,10 +871,7 @@ func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_BlockedCommand
 
 func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_ActionBudgetExhausted(t *testing.T) {
 	config := AlertInvestigationUseCaseConfig{
-		MaxActions:    3, // Very low action budget
-		MaxDuration:   15 * time.Minute,
 		MaxConcurrent: 5,
-		AllowedTools:  []string{"bash", "read_file"},
 	}
 
 	uc := NewAlertInvestigationUseCaseWithConfig(config)
@@ -859,7 +879,7 @@ func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_ActionBudgetEx
 		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
 	}
 
-	// Create a mock enforcer with the same low action budget
+	// Create a mock enforcer with low action budget (safety limits are now in SafetyEnforcer)
 	enforcer := NewMockSafetyEnforcerWithActionBudget(3)
 	if enforcer == nil {
 		t.Skip("NewMockSafetyEnforcerWithActionBudget() returned nil")
@@ -885,9 +905,7 @@ func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_ActionBudgetEx
 
 func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_Timeout(t *testing.T) {
 	config := AlertInvestigationUseCaseConfig{
-		MaxDuration:   50 * time.Millisecond, // Very short timeout
 		MaxConcurrent: 5,
-		AllowedTools:  []string{"bash", "read_file"},
 	}
 
 	uc := NewAlertInvestigationUseCaseWithConfig(config)
@@ -895,8 +913,8 @@ func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_Timeout(t *tes
 		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
 	}
 
-	// Create a mock enforcer that respects timeout
-	enforcer := NewMockSafetyEnforcer()
+	// Create a mock enforcer that triggers timeout (timeout is now enforced by SafetyEnforcer)
+	enforcer := NewMockSafetyEnforcerWithTimeout()
 	if enforcer == nil {
 		t.Skip("NewMockSafetyEnforcer() returned nil")
 	}
@@ -1241,9 +1259,7 @@ func TestAlertInvestigationUseCase_RunInvestigation_CleansUpTrackingOnError(t *t
 
 func TestAlertInvestigationUseCase_RunInvestigation_CleansUpTrackingOnTimeout(t *testing.T) {
 	config := AlertInvestigationUseCaseConfig{
-		MaxDuration:   1 * time.Millisecond, // Very short timeout to force timeout
 		MaxConcurrent: 5,
-		AllowedTools:  []string{"bash", "read_file"},
 	}
 
 	uc := NewAlertInvestigationUseCaseWithConfig(config)
@@ -1463,3 +1479,401 @@ func TestAlertInvestigationUseCase_WithEnforcerAndStore_Integration(t *testing.T
 // MockInvestigationStore is a test double for InvestigationStore interface.
 // It will be created in the GREEN phase.
 // func NewMockInvestigationStore() *MockInvestigationStore
+
+// =============================================================================
+// ConversationServiceInterface Thinking Mode Tests (RED PHASE - Step 11)
+// These tests verify that ConversationServiceInterface includes thinking mode methods.
+// =============================================================================
+
+// TestConversationServiceInterfaceHasThinkingMethods verifies that the
+// ConversationServiceInterface includes methods for managing thinking mode.
+// This test ensures the interface is complete for use by SubagentRunner.
+func TestConversationServiceInterfaceHasThinkingMethods(t *testing.T) {
+	t.Run("interface has SetThinkingMode method", func(t *testing.T) {
+		// This test will fail if SetThinkingMode is not in the interface
+		// because mockConversationServiceWithThinking won't satisfy the interface
+		var _ ConversationServiceInterface = &mockConversationServiceWithThinking{}
+	})
+
+	t.Run("interface has GetThinkingMode method", func(t *testing.T) {
+		// This test will fail if GetThinkingMode is not in the interface
+		// because mockConversationServiceWithThinking won't satisfy the interface
+		var _ ConversationServiceInterface = &mockConversationServiceWithThinking{}
+	})
+}
+
+// TestConversationServiceInterfaceThinkingMethodSignatures verifies that the
+// thinking mode methods have the correct signatures.
+func TestConversationServiceInterfaceThinkingMethodSignatures(t *testing.T) {
+	ctx := context.Background()
+	mock := &mockConversationServiceWithThinking{
+		thinkingModes: make(map[string]port.ThinkingModeInfo),
+	}
+
+	// Test SetThinkingMode signature
+	t.Run("SetThinkingMode accepts sessionID and ThinkingModeInfo", func(t *testing.T) {
+		sessionID := "test-session"
+		info := port.ThinkingModeInfo{
+			Enabled:      true,
+			BudgetTokens: 1000,
+			ShowThinking: true,
+		}
+
+		err := mock.SetThinkingMode(sessionID, info)
+		if err != nil {
+			t.Errorf("SetThinkingMode returned unexpected error: %v", err)
+		}
+	})
+
+	// Test GetThinkingMode signature
+	t.Run("GetThinkingMode accepts sessionID and returns ThinkingModeInfo", func(t *testing.T) {
+		sessionID := "test-session"
+		info := port.ThinkingModeInfo{
+			Enabled:      true,
+			BudgetTokens: 2000,
+			ShowThinking: false,
+		}
+
+		// Set the thinking mode first
+		_ = mock.SetThinkingMode(sessionID, info)
+
+		// Get the thinking mode
+		retrieved, err := mock.GetThinkingMode(sessionID)
+		if err != nil {
+			t.Errorf("GetThinkingMode returned unexpected error: %v", err)
+		}
+
+		// Verify the retrieved value matches what was set
+		if retrieved.Enabled != info.Enabled {
+			t.Errorf("GetThinkingMode Enabled = %v, want %v", retrieved.Enabled, info.Enabled)
+		}
+		if retrieved.BudgetTokens != info.BudgetTokens {
+			t.Errorf("GetThinkingMode BudgetTokens = %v, want %v", retrieved.BudgetTokens, info.BudgetTokens)
+		}
+		if retrieved.ShowThinking != info.ShowThinking {
+			t.Errorf("GetThinkingMode ShowThinking = %v, want %v", retrieved.ShowThinking, info.ShowThinking)
+		}
+	})
+
+	// Verify methods are accessible through the interface
+	t.Run("thinking mode methods accessible through interface", func(t *testing.T) {
+		var iface ConversationServiceInterface = mock
+		sessionID := "interface-test"
+		info := port.ThinkingModeInfo{
+			Enabled:      false,
+			BudgetTokens: 500,
+			ShowThinking: true,
+		}
+
+		// This will fail if methods aren't in the interface
+		err := iface.SetThinkingMode(sessionID, info)
+		if err != nil {
+			t.Errorf("SetThinkingMode through interface returned error: %v", err)
+		}
+
+		retrieved, err := iface.GetThinkingMode(sessionID)
+		if err != nil {
+			t.Errorf("GetThinkingMode through interface returned error: %v", err)
+		}
+
+		if retrieved.Enabled != info.Enabled {
+			t.Errorf("Retrieved Enabled = %v, want %v", retrieved.Enabled, info.Enabled)
+		}
+	})
+
+	// Ensure context is not used in these methods (unlike SetCustomSystemPrompt)
+	t.Run("thinking mode methods do not require context", func(t *testing.T) {
+		// SetThinkingMode and GetThinkingMode should NOT take context
+		// (unlike SetCustomSystemPrompt which does)
+		sessionID := "no-ctx-test"
+		info := port.ThinkingModeInfo{
+			Enabled:      true,
+			BudgetTokens: 100,
+			ShowThinking: false,
+		}
+
+		// Should work without passing context
+		_ = mock.SetThinkingMode(sessionID, info)
+		_, _ = mock.GetThinkingMode(sessionID)
+
+		// For comparison: SetCustomSystemPrompt requires context
+		_ = mock.SetCustomSystemPrompt(ctx, sessionID, "test prompt")
+	})
+}
+
+// TestThinkingModeMethodsBehavior tests the expected behavior of thinking mode methods.
+func TestThinkingModeMethodsBehavior(t *testing.T) {
+	tests := []struct {
+		name      string
+		sessionID string
+		info      port.ThinkingModeInfo
+		wantErr   bool
+	}{
+		{
+			name:      "enabled with budget",
+			sessionID: "session-1",
+			info: port.ThinkingModeInfo{
+				Enabled:      true,
+				BudgetTokens: 5000,
+				ShowThinking: true,
+			},
+			wantErr: false,
+		},
+		{
+			name:      "disabled with zero budget",
+			sessionID: "session-2",
+			info: port.ThinkingModeInfo{
+				Enabled:      false,
+				BudgetTokens: 0,
+				ShowThinking: false,
+			},
+			wantErr: false,
+		},
+		{
+			name:      "enabled without showing thinking",
+			sessionID: "session-3",
+			info: port.ThinkingModeInfo{
+				Enabled:      true,
+				BudgetTokens: 10000,
+				ShowThinking: false,
+			},
+			wantErr: false,
+		},
+		{
+			name:      "enabled with showing thinking but low budget",
+			sessionID: "session-4",
+			info: port.ThinkingModeInfo{
+				Enabled:      true,
+				BudgetTokens: 100,
+				ShowThinking: true,
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockConversationServiceWithThinking{
+				thinkingModes: make(map[string]port.ThinkingModeInfo),
+			}
+
+			// Set thinking mode
+			err := mock.SetThinkingMode(tt.sessionID, tt.info)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("SetThinkingMode() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr {
+				return
+			}
+
+			// Get thinking mode
+			retrieved, err := mock.GetThinkingMode(tt.sessionID)
+			if err != nil {
+				t.Errorf("GetThinkingMode() unexpected error = %v", err)
+				return
+			}
+
+			// Verify all fields match
+			if retrieved.Enabled != tt.info.Enabled {
+				t.Errorf("Enabled = %v, want %v", retrieved.Enabled, tt.info.Enabled)
+			}
+			if retrieved.BudgetTokens != tt.info.BudgetTokens {
+				t.Errorf("BudgetTokens = %v, want %v", retrieved.BudgetTokens, tt.info.BudgetTokens)
+			}
+			if retrieved.ShowThinking != tt.info.ShowThinking {
+				t.Errorf("ShowThinking = %v, want %v", retrieved.ShowThinking, tt.info.ShowThinking)
+			}
+		})
+	}
+}
+
+// TestThinkingModeIsolation verifies that thinking mode settings are isolated per session.
+func TestThinkingModeIsolation(t *testing.T) {
+	mock := &mockConversationServiceWithThinking{
+		thinkingModes: make(map[string]port.ThinkingModeInfo),
+	}
+
+	session1 := "session-1"
+	info1 := port.ThinkingModeInfo{
+		Enabled:      true,
+		BudgetTokens: 1000,
+		ShowThinking: true,
+	}
+
+	session2 := "session-2"
+	info2 := port.ThinkingModeInfo{
+		Enabled:      false,
+		BudgetTokens: 500,
+		ShowThinking: false,
+	}
+
+	// Set different thinking modes for different sessions
+	_ = mock.SetThinkingMode(session1, info1)
+	_ = mock.SetThinkingMode(session2, info2)
+
+	// Retrieve and verify each session has its own settings
+	retrieved1, err := mock.GetThinkingMode(session1)
+	if err != nil {
+		t.Fatalf("GetThinkingMode(session1) error = %v", err)
+	}
+
+	retrieved2, err := mock.GetThinkingMode(session2)
+	if err != nil {
+		t.Fatalf("GetThinkingMode(session2) error = %v", err)
+	}
+
+	// Verify session 1 settings
+	if retrieved1.Enabled != info1.Enabled || retrieved1.BudgetTokens != info1.BudgetTokens {
+		t.Errorf("Session 1 thinking mode not isolated: got %+v, want %+v", retrieved1, info1)
+	}
+
+	// Verify session 2 settings
+	if retrieved2.Enabled != info2.Enabled || retrieved2.BudgetTokens != info2.BudgetTokens {
+		t.Errorf("Session 2 thinking mode not isolated: got %+v, want %+v", retrieved2, info2)
+	}
+}
+
+// TestThinkingModeUpdateBehavior verifies that thinking mode can be updated multiple times.
+func TestThinkingModeUpdateBehavior(t *testing.T) {
+	mock := &mockConversationServiceWithThinking{
+		thinkingModes: make(map[string]port.ThinkingModeInfo),
+	}
+
+	sessionID := "update-test"
+
+	// Initial setting
+	initial := port.ThinkingModeInfo{
+		Enabled:      true,
+		BudgetTokens: 1000,
+		ShowThinking: true,
+	}
+	_ = mock.SetThinkingMode(sessionID, initial)
+
+	// Update to different values
+	updated := port.ThinkingModeInfo{
+		Enabled:      false,
+		BudgetTokens: 2000,
+		ShowThinking: false,
+	}
+	_ = mock.SetThinkingMode(sessionID, updated)
+
+	// Verify the update took effect
+	retrieved, err := mock.GetThinkingMode(sessionID)
+	if err != nil {
+		t.Fatalf("GetThinkingMode error = %v", err)
+	}
+
+	if retrieved.Enabled != updated.Enabled {
+		t.Errorf("After update: Enabled = %v, want %v", retrieved.Enabled, updated.Enabled)
+	}
+	if retrieved.BudgetTokens != updated.BudgetTokens {
+		t.Errorf("After update: BudgetTokens = %v, want %v", retrieved.BudgetTokens, updated.BudgetTokens)
+	}
+	if retrieved.ShowThinking != updated.ShowThinking {
+		t.Errorf("After update: ShowThinking = %v, want %v", retrieved.ShowThinking, updated.ShowThinking)
+	}
+}
+
+// TestGetThinkingModeDefaultBehavior verifies behavior when getting thinking mode
+// for a session where it was never set.
+func TestGetThinkingModeDefaultBehavior(t *testing.T) {
+	mock := &mockConversationServiceWithThinking{
+		thinkingModes: make(map[string]port.ThinkingModeInfo),
+	}
+
+	sessionID := "never-set"
+
+	// Get thinking mode for a session that never had it set
+	retrieved, err := mock.GetThinkingMode(sessionID)
+	// Should not error (similar to ConversationService behavior)
+	if err != nil {
+		t.Errorf("GetThinkingMode for unset session returned error: %v", err)
+	}
+
+	// Should return zero-value ThinkingModeInfo
+	var zero port.ThinkingModeInfo
+	if retrieved != zero {
+		t.Errorf("GetThinkingMode for unset session = %+v, want zero value %+v", retrieved, zero)
+	}
+}
+
+// =============================================================================
+// Mock Implementation with Thinking Mode Methods
+// =============================================================================
+
+// mockConversationServiceWithThinking is a mock that implements
+// ConversationServiceInterface including the thinking mode methods.
+// This mock will fail to compile if the interface doesn't have these methods.
+type mockConversationServiceWithThinking struct {
+	thinkingModes map[string]port.ThinkingModeInfo
+}
+
+func (m *mockConversationServiceWithThinking) StartConversation(ctx context.Context) (string, error) {
+	return "mock-session", nil
+}
+
+func (m *mockConversationServiceWithThinking) AddUserMessage(
+	ctx context.Context,
+	sessionID, content string,
+) (*entity.Message, error) {
+	return &entity.Message{
+		Role:      entity.RoleUser,
+		Content:   content,
+		Timestamp: time.Now(),
+	}, nil
+}
+
+func (m *mockConversationServiceWithThinking) ProcessAssistantResponse(
+	ctx context.Context,
+	sessionID string,
+) (*entity.Message, []port.ToolCallInfo, error) {
+	return nil, nil, nil
+}
+
+func (m *mockConversationServiceWithThinking) ProcessAssistantResponseStreaming(
+	_ context.Context,
+	_ string,
+	_ port.StreamCallback,
+	_ port.ThinkingCallback,
+) (*entity.Message, []port.ToolCallInfo, error) {
+	return nil, nil, nil
+}
+
+func (m *mockConversationServiceWithThinking) AddToolResultMessage(
+	ctx context.Context,
+	sessionID string,
+	toolResults []entity.ToolResult,
+) error {
+	return nil
+}
+
+func (m *mockConversationServiceWithThinking) EndConversation(ctx context.Context, sessionID string) error {
+	return nil
+}
+
+func (m *mockConversationServiceWithThinking) SetCustomSystemPrompt(
+	ctx context.Context,
+	sessionID, prompt string,
+) error {
+	return nil
+}
+
+// SetThinkingMode sets the thinking mode for a session.
+// This method MUST be in ConversationServiceInterface for the mock to compile.
+func (m *mockConversationServiceWithThinking) SetThinkingMode(sessionID string, info port.ThinkingModeInfo) error {
+	m.thinkingModes[sessionID] = info
+	return nil
+}
+
+// GetThinkingMode gets the thinking mode for a session.
+// This method MUST be in ConversationServiceInterface for the mock to compile.
+func (m *mockConversationServiceWithThinking) GetThinkingMode(sessionID string) (port.ThinkingModeInfo, error) {
+	info, exists := m.thinkingModes[sessionID]
+	if !exists {
+		// Return zero value if not set (matches ConversationService behavior)
+		return port.ThinkingModeInfo{}, nil
+	}
+	return info, nil
+}

@@ -6,12 +6,30 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/pprof"
 	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+// startPprof starts a pprof HTTP server on localhost:6060 using an explicit mux.
+func startPprof() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	srv := &http.Server{
+		Addr:              "localhost:6060",
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	go func() { _ = srv.ListenAndServe() }()
+}
 
 // global config shared between commands.
 var cfg *config.Config
@@ -81,6 +99,8 @@ refactoring options, and explanations.`,
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() error {
+	startPprof()
+
 	// Create interrupt handler with 2 second timeout for double-press detection
 	handler := signalhandler.NewInterruptHandler(2 * time.Second)
 	handler.Start()
@@ -106,9 +126,12 @@ func GetConfig(cmd *cobra.Command) *config.Config {
 
 func init() {
 	// Define flags
-	rootCmd.PersistentFlags().String("model", "hf:zai-org/GLM-4.6", "AI model to use for requests")
+	rootCmd.PersistentFlags().String("model", "hf:zai-org/GLM-4.7", "AI model to use for requests")
 	rootCmd.PersistentFlags().StringP("dir", "d", ".", "Working directory for file operations")
-	rootCmd.PersistentFlags().Int("max-tokens", 1024, "Maximum tokens to generate in AI responses")
+	rootCmd.PersistentFlags().Int("max-tokens", 20000, "Maximum tokens to generate in AI responses")
+	rootCmd.PersistentFlags().Bool("thinking", false, "Enable extended thinking")
+	rootCmd.PersistentFlags().Int("thinking-budget", 10000, "Token budget for thinking (min 1024)")
+	rootCmd.PersistentFlags().Bool("show-thinking", false, "Display thinking content")
 
 	// Bind flags to viper
 	if err := viper.BindPFlag("model", rootCmd.PersistentFlags().Lookup("model")); err != nil {
@@ -117,7 +140,16 @@ func init() {
 	if err := viper.BindPFlag("workingDir", rootCmd.PersistentFlags().Lookup("dir")); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to bind dir flag: %v\n", err)
 	}
-	if err := viper.BindPFlag("maxTokens", rootCmd.PersistentFlags().Lookup("max-tokens")); err != nil {
+	if err := viper.BindPFlag("max_tokens", rootCmd.PersistentFlags().Lookup("max-tokens")); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to bind max-tokens flag: %v\n", err)
+	}
+	if err := viper.BindPFlag("thinking.enabled", rootCmd.PersistentFlags().Lookup("thinking")); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to bind thinking flag: %v\n", err)
+	}
+	if err := viper.BindPFlag("thinking.budget", rootCmd.PersistentFlags().Lookup("thinking-budget")); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to bind thinking-budget flag: %v\n", err)
+	}
+	if err := viper.BindPFlag("thinking.show", rootCmd.PersistentFlags().Lookup("show-thinking")); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to bind show-thinking flag: %v\n", err)
 	}
 }
