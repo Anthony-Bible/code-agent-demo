@@ -727,7 +727,7 @@ func (a *ExecutorAdapter) buildActivateSkillDescription() string {
 		case entity.SkillSourceProjectClaude:
 			sourceLabel = " (project-claude)"
 		}
-		sb.WriteString(fmt.Sprintf("- **%s**%s: %s\n", skill.Name, sourceLabel, skill.Description))
+		fmt.Fprintf(&sb, "- **%s**%s: %s\n", skill.Name, sourceLabel, skill.Description)
 	}
 
 	sb.WriteString("\nActivate a skill by providing its name to load detailed instructions and capabilities.")
@@ -1671,24 +1671,24 @@ func (a *ExecutorAdapter) executeActivateSkill(ctx context.Context, input json.R
 
 	// Build result with frontmatter and content
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("---\nname: %s\ndescription: %s", skill.Name, skill.Description))
+	fmt.Fprintf(&result, "---\nname: %s\ndescription: %s", skill.Name, skill.Description)
 	if skill.License != "" {
-		result.WriteString(fmt.Sprintf("\nlicense: %s", skill.License))
+		fmt.Fprintf(&result, "\nlicense: %s", skill.License)
 	}
 	if skill.Compatibility != "" {
-		result.WriteString(fmt.Sprintf("\ncompatibility: %s", skill.Compatibility))
+		fmt.Fprintf(&result, "\ncompatibility: %s", skill.Compatibility)
 	}
 	if len(skill.AllowedTools) > 0 {
-		result.WriteString(fmt.Sprintf("\nallowed-tools: %s", strings.Join(skill.AllowedTools, " ")))
+		fmt.Fprintf(&result, "\nallowed-tools: %s", strings.Join(skill.AllowedTools, " "))
 	}
 	// Include source_type to indicate if skill is user, project, or project-claude
-	result.WriteString(fmt.Sprintf("\nsource_type: %s", skill.SourceType))
+	fmt.Fprintf(&result, "\nsource_type: %s", skill.SourceType)
 	// Include directory_path for script execution context
-	result.WriteString(fmt.Sprintf("\ndirectory_path: %s", skill.OriginalPath))
+	fmt.Fprintf(&result, "\ndirectory_path: %s", skill.OriginalPath)
 	if len(skill.Metadata) > 0 {
 		result.WriteString("\nmetadata:")
 		for key, value := range skill.Metadata {
-			result.WriteString(fmt.Sprintf("\n  %s: %s", key, value))
+			fmt.Fprintf(&result, "\n  %s: %s", key, value)
 		}
 	}
 	result.WriteString("\n---\n")
@@ -1839,7 +1839,7 @@ func (a *ExecutorAdapter) registerTaskTool() {
 		if err == nil && agents.TotalCount > 0 {
 			fullDescription.WriteString("\n\nAvailable agents:\n")
 			for _, agent := range agents.Subagents {
-				fullDescription.WriteString(fmt.Sprintf("- %s: %s\n", agent.Name, agent.Description))
+				fmt.Fprintf(&fullDescription, "- %s: %s\n", agent.Name, agent.Description)
 			}
 		}
 	}
