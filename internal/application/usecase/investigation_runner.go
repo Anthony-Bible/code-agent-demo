@@ -217,6 +217,20 @@ func (r *InvestigationRunner) processToolCalls(rc *runContext, toolCalls []port.
 	return nil
 }
 
+// cleanupConversation ends an investigation conversation using a background context
+// so cleanup succeeds even if the parent context was cancelled.
+func (r *InvestigationRunner) cleanupConversation(sessionID, investigationID string) {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := r.convService.EndConversation(cleanupCtx, sessionID); err != nil {
+		slog.Default().Error("failed to end investigation conversation",
+			"session_id", sessionID,
+			"investigation_id", investigationID,
+			"error", err,
+		)
+	}
+}
+
 // Run executes an investigation for the given alert.
 //
 // The investigation follows this flow:
@@ -266,17 +280,7 @@ func (r *InvestigationRunner) Run(
 		return rc.failedResult(err), err
 	}
 	rc.sessionID = sessionID
-	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := r.convService.EndConversation(cleanupCtx, sessionID); err != nil {
-			slog.Default().Error("failed to end investigation conversation",
-				"session_id", sessionID,
-				"investigation_id", investigationID,
-				"error", err,
-			)
-		}
-	}()
+	defer r.cleanupConversation(sessionID, investigationID)
 
 	// Configure extended thinking mode if enabled
 	if r.config.ExtendedThinking {
