@@ -8,7 +8,7 @@ import (
 // extractFrontmatter extracts YAML frontmatter from content enclosed in --- markers.
 // Returns the frontmatter content (without --- markers) and the remaining content after frontmatter.
 // Returns an error if the frontmatter format is invalid.
-func extractFrontmatter(content string) (frontmatter, remainingContent string, err error) {
+func extractFrontmatter(content string) (string, string, error) {
 	content = strings.TrimSpace(content)
 	if !strings.HasPrefix(content, "---") {
 		return "", "", errors.New("invalid YAML frontmatter: missing opening ---")
@@ -22,6 +22,9 @@ func extractFrontmatter(content string) (frontmatter, remainingContent string, e
 		if firstLineEnd == -1 {
 			return "", "", errors.New("invalid YAML frontmatter: missing closing ---")
 		}
+	} else {
+		// Convert substring index to full string index
+		firstLineEnd += 3
 	}
 
 	// Get the frontmatter part
@@ -29,7 +32,7 @@ func extractFrontmatter(content string) (frontmatter, remainingContent string, e
 	frontmatterRaw := content[:frontmatterEnd]
 
 	// Get the content after frontmatter
-	remaining := strings.TrimSpace(content[frontmatterEnd+3:])
+	remaining := strings.TrimSpace(content[frontmatterEnd:])
 
 	// Remove the opening and closing --- from frontmatter
 	frontmatterRaw = strings.TrimPrefix(frontmatterRaw, "---")
