@@ -378,6 +378,47 @@ func TestSkill_ValidateDirectoryName_NonMatchingNames(t *testing.T) {
 	}
 }
 
+func TestSkill_ParseSkillFromYAML_RawContent(t *testing.T) {
+	tests := []struct {
+		name           string
+		yaml           string
+		wantRawContent string
+	}{
+		{
+			name:           "body text preserved exactly",
+			yaml:           "---\nname: my-skill\ndescription: A skill\n---\nThis is the body content.",
+			wantRawContent: "This is the body content.",
+		},
+		{
+			name:           "multi-line body first 3 chars preserved",
+			yaml:           "---\nname: my-skill\ndescription: A skill\n---\n# Header\nSome content\nMore content",
+			wantRawContent: "# Header\nSome content\nMore content",
+		},
+		{
+			name:           "no body content gives empty string",
+			yaml:           "---\nname: my-skill\ndescription: A skill\n---\n",
+			wantRawContent: "",
+		},
+		{
+			name:           "body starting with special characters preserved",
+			yaml:           "---\nname: my-skill\ndescription: A skill\n---\n# Header starts here",
+			wantRawContent: "# Header starts here",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			skill, err := ParseSkillFromYAML(tt.yaml)
+			if err != nil {
+				t.Fatalf("ParseSkillFromYAML() returned unexpected error: %v", err)
+			}
+			if skill.RawContent != tt.wantRawContent {
+				t.Errorf("ParseSkillFromYAML() RawContent = %q, want %q", skill.RawContent, tt.wantRawContent)
+			}
+		})
+	}
+}
+
 func TestSkill_ValidateDirectoryName_EmptyDirName(t *testing.T) {
 	skill := Skill{
 		Name:        "test-skill",
