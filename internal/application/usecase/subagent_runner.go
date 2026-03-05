@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -194,7 +195,15 @@ func (r *SubagentRunner) Run(
 		if err := r.aiProvider.SetModel(resolvedModel); err != nil {
 			return r.validationFailedResult(subagentID, agent, err), err
 		}
-		defer func() { _ = r.aiProvider.SetModel(originalModel) }()
+		defer func() {
+			if err := r.aiProvider.SetModel(originalModel); err != nil {
+				slog.Error("failed to restore model after subagent execution",
+					"original_model", originalModel,
+					"agent", agent.Name,
+					"error", err,
+				)
+			}
+		}()
 	}
 
 	// Wrap context with subagent info for recursion prevention
@@ -224,7 +233,15 @@ func (r *SubagentRunner) Run(
 		return rc.failedResult(err), err
 	}
 	rc.sessionID = sessionID
-	defer func() { _ = r.convService.EndConversation(ctx, sessionID) }()
+	defer func() {
+		if err := r.convService.EndConversation(ctx, sessionID); err != nil {
+			slog.Error("failed to end subagent conversation",
+				"session_id", sessionID,
+				"agent", agent.Name,
+				"error", err,
+			)
+		}
+	}()
 
 	// Extract thinking mode from context (from parent) or fall back to static config
 	thinkingInfo, hasThinking := port.ThinkingModeFromContext(ctx)

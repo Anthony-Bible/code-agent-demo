@@ -265,9 +265,10 @@ type subagentRunnerAIProviderMock struct {
 	sendMessageToolCall []port.ToolCallInfo
 
 	// SetModel tracking
-	setModelCalls  int
-	setModelValues []string
-	currentModel   string
+	setModelCalls        int
+	setModelValues       []string
+	setModelRestoreError error // returned on 2nd+ call (simulates cleanup failure)
+	currentModel         string
 }
 
 func newSubagentRunnerAIProviderMock() *subagentRunnerAIProviderMock {
@@ -325,6 +326,9 @@ func (m *subagentRunnerAIProviderMock) SetModel(model string) error {
 	defer m.mu.Unlock()
 	m.setModelCalls++
 	m.setModelValues = append(m.setModelValues, model)
+	if m.setModelRestoreError != nil && m.setModelCalls >= 2 {
+		return m.setModelRestoreError
+	}
 	m.currentModel = model
 	return nil
 }
@@ -1939,6 +1943,77 @@ func TestSubagentRunner_ModelSwitch_RestoresOriginalModelAfterError(t *testing.T
 	currentModel := aiProvider.GetModel()
 	if currentModel != originalModel {
 		t.Errorf("Model after error = %q, want %q (should restore original on error)", currentModel, originalModel)
+	}
+}
+
+func TestSubagentRunner_ModelSwitch_LogsErrorOnRestoreFailure(t *testing.T) {
+	// Arrange
+	convService := newSubagentRunnerConvServiceMock()
+	convService.startConversationSession = "subagent-session-restore-fail"
+	convService.processResponseMessages = []*entity.Message{
+		createSubagentAssistantMessage("Task completed"),
+	}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
+
+	toolExecutor := newSubagentRunnerToolExecutorMock()
+	aiProvider := newSubagentRunnerAIProviderMock()
+	aiProvider.setModelRestoreError = errors.New("provider unavailable")
+
+	config := SubagentConfig{MaxActions: 10}
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+	agent := createTestAgent("agent-restore-fail", "Restore Fail Agent")
+	agent.Model = "haiku"
+
+	// Act — the defer cleanup will fail on SetModel restore, but Run should still succeed
+	result, err := runner.Run(context.Background(), agent, "Do something", "subagent-restore-fail-001")
+	// Assert — subagent result is returned despite cleanup error
+	if err != nil {
+		t.Errorf("Run() error = %v, want nil (cleanup error should not propagate)", err)
+	}
+	if result == nil {
+		t.Fatal("Run() returned nil result")
+	}
+	if result.Status != "completed" {
+		t.Errorf("result.Status = %q, want %q", result.Status, "completed")
+	}
+	// SetModel was called twice: once to set agent model, once to restore
+	if aiProvider.setModelCalls != 2 {
+		t.Errorf("SetModel calls = %d, want 2", aiProvider.setModelCalls)
+	}
+}
+
+func TestSubagentRunner_EndConversation_LogsErrorOnCleanupFailure(t *testing.T) {
+	// Arrange
+	convService := newSubagentRunnerConvServiceMock()
+	convService.startConversationSession = "subagent-session-end-fail"
+	convService.processResponseMessages = []*entity.Message{
+		createSubagentAssistantMessage("Task completed"),
+	}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
+	convService.endConversationError = errors.New("session cleanup failed")
+
+	toolExecutor := newSubagentRunnerToolExecutorMock()
+	aiProvider := newSubagentRunnerAIProviderMock()
+
+	config := SubagentConfig{MaxActions: 10}
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+	agent := createTestAgent("agent-end-fail", "End Fail Agent")
+
+	// Act — EndConversation will fail in defer, but Run should still succeed
+	result, err := runner.Run(context.Background(), agent, "Do something", "subagent-end-fail-001")
+	// Assert — subagent result is returned despite cleanup error
+	if err != nil {
+		t.Errorf("Run() error = %v, want nil (cleanup error should not propagate)", err)
+	}
+	if result == nil {
+		t.Fatal("Run() returned nil result")
+	}
+	if result.Status != "completed" {
+		t.Errorf("result.Status = %q, want %q", result.Status, "completed")
+	}
+	// EndConversation was called exactly once
+	if convService.endConversationCalls != 1 {
+		t.Errorf("EndConversation calls = %d, want 1", convService.endConversationCalls)
 	}
 }
 
