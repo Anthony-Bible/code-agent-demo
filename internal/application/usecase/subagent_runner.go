@@ -157,10 +157,10 @@ func NewSubagentRunner(
 // cleanupConversation ends a subagent conversation using a background context
 // so cleanup succeeds even if the parent context was cancelled.
 func (r *SubagentRunner) cleanupConversation(sessionID, agentName string) {
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), conversationCleanupTimeout)
 	defer cancel()
 	if err := r.convService.EndConversation(cleanupCtx, sessionID); err != nil {
-		slog.Default().Error("failed to end subagent conversation",
+		slog.Error("failed to end subagent conversation", //nolint:sloglint // no injected logger on this struct
 			"session_id", sessionID,
 			"agent", agentName,
 			"error", err,

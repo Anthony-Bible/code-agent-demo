@@ -21,6 +21,11 @@ const (
 	toolBash                  = "bash"
 )
 
+// conversationCleanupTimeout is the maximum time allowed for ending a conversation
+// during cleanup, using a background context so it succeeds even if the parent
+// context was cancelled.
+const conversationCleanupTimeout = 5 * time.Second
+
 // InvestigationRunner orchestrates AI-driven alert investigations.
 // It manages the conversation loop with an AI provider, executes tools,
 // and tracks investigation progress.
@@ -220,10 +225,10 @@ func (r *InvestigationRunner) processToolCalls(rc *runContext, toolCalls []port.
 // cleanupConversation ends an investigation conversation using a background context
 // so cleanup succeeds even if the parent context was cancelled.
 func (r *InvestigationRunner) cleanupConversation(sessionID, investigationID string) {
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), conversationCleanupTimeout)
 	defer cancel()
 	if err := r.convService.EndConversation(cleanupCtx, sessionID); err != nil {
-		slog.Default().Error("failed to end investigation conversation",
+		slog.Error("failed to end investigation conversation", //nolint:sloglint // no injected logger on this struct
 			"session_id", sessionID,
 			"investigation_id", investigationID,
 			"error", err,
