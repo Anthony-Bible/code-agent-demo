@@ -154,6 +154,20 @@ func NewSubagentRunner(
 	}
 }
 
+// cleanupConversation ends a subagent conversation using a background context
+// so cleanup succeeds even if the parent context was cancelled.
+func (r *SubagentRunner) cleanupConversation(sessionID, agentName string) {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), conversationCleanupTimeout)
+	defer cancel()
+	if err := r.convService.EndConversation(cleanupCtx, sessionID); err != nil {
+		slog.Error("failed to end subagent conversation", //nolint:sloglint // no injected logger on this struct
+			"session_id", sessionID,
+			"agent", agentName,
+			"error", err,
+		)
+	}
+}
+
 // Run executes a subagent task with the given agent configuration.
 //
 // The subagent execution follows this flow:
@@ -233,15 +247,7 @@ func (r *SubagentRunner) Run(
 		return rc.failedResult(err), err
 	}
 	rc.sessionID = sessionID
-	defer func() {
-		if err := r.convService.EndConversation(ctx, sessionID); err != nil {
-			slog.Error("failed to end subagent conversation",
-				"session_id", sessionID,
-				"agent", agent.Name,
-				"error", err,
-			)
-		}
-	}()
+	defer r.cleanupConversation(sessionID, agent.Name)
 
 	// Extract thinking mode from context (from parent) or fall back to static config
 	thinkingInfo, hasThinking := port.ThinkingModeFromContext(ctx)

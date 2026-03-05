@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -19,6 +20,11 @@ const (
 	toolEscalateInvestigation = "escalate_investigation"
 	toolBash                  = "bash"
 )
+
+// conversationCleanupTimeout is the maximum time allowed for ending a conversation
+// during cleanup, using a background context so it succeeds even if the parent
+// context was cancelled.
+const conversationCleanupTimeout = 5 * time.Second
 
 // InvestigationRunner orchestrates AI-driven alert investigations.
 // It manages the conversation loop with an AI provider, executes tools,
@@ -216,6 +222,20 @@ func (r *InvestigationRunner) processToolCalls(rc *runContext, toolCalls []port.
 	return nil
 }
 
+// cleanupConversation ends an investigation conversation using a background context
+// so cleanup succeeds even if the parent context was cancelled.
+func (r *InvestigationRunner) cleanupConversation(sessionID, investigationID string) {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), conversationCleanupTimeout)
+	defer cancel()
+	if err := r.convService.EndConversation(cleanupCtx, sessionID); err != nil {
+		slog.Error("failed to end investigation conversation", //nolint:sloglint // no injected logger on this struct
+			"session_id", sessionID,
+			"investigation_id", investigationID,
+			"error", err,
+		)
+	}
+}
+
 // Run executes an investigation for the given alert.
 //
 // The investigation follows this flow:
@@ -265,7 +285,7 @@ func (r *InvestigationRunner) Run(
 		return rc.failedResult(err), err
 	}
 	rc.sessionID = sessionID
-	defer func() { _ = r.convService.EndConversation(ctx, sessionID) }()
+	defer r.cleanupConversation(sessionID, investigationID)
 
 	// Configure extended thinking mode if enabled
 	if r.config.ExtendedThinking {
