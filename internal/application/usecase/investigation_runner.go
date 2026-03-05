@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -265,7 +266,17 @@ func (r *InvestigationRunner) Run(
 		return rc.failedResult(err), err
 	}
 	rc.sessionID = sessionID
-	defer func() { _ = r.convService.EndConversation(ctx, sessionID) }()
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := r.convService.EndConversation(cleanupCtx, sessionID); err != nil {
+			slog.Default().Error("failed to end investigation conversation",
+				"session_id", sessionID,
+				"investigation_id", investigationID,
+				"error", err,
+			)
+		}
+	}()
 
 	// Configure extended thinking mode if enabled
 	if r.config.ExtendedThinking {
