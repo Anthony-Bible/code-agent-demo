@@ -514,12 +514,7 @@ func wireSkillActivationCallback(
 	convService *service.ConversationService,
 ) {
 	baseExecutor.SetSkillActivationCallback(func(sessionID string, skill entity.Skill) error {
-		// Get existing active skills
-		existingSkills, _ := convService.GetActiveSkills(sessionID)
-		// Append the new skill to a new slice
-		allSkills := make([]entity.Skill, 0, len(existingSkills)+1)
-		allSkills = append(allSkills, existingSkills...)
-		allSkills = append(allSkills, skill)
-		return convService.SetActiveSkills(sessionID, allSkills)
+		// Use AppendActiveSkill for atomic read-modify-write under single lock
+		return convService.AppendActiveSkill(sessionID, skill)
 	})
 }

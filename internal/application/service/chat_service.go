@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -408,11 +409,13 @@ func (cs *ChatService) validateToolsAllowedForSession(sessionID string, toolCall
 }
 
 // formatAllowedToolsList formats the allowed tools map as a comma-separated list.
+// Tools are sorted alphabetically for deterministic output.
 func (cs *ChatService) formatAllowedToolsList(allowedTools map[string]bool) string {
 	tools := make([]string, 0, len(allowedTools))
 	for tool := range allowedTools {
 		tools = append(tools, tool)
 	}
+	sort.Strings(tools)
 	return strings.Join(tools, ", ")
 }
 
