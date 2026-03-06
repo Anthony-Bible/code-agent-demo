@@ -84,6 +84,10 @@ func (m *thinkingDisplayUIMock) ConfirmBashCommand(_ string, _ bool, _ string, _
 	return false
 }
 
+func (m *thinkingDisplayUIMock) Confirm(_ string, _ string) bool {
+	return false
+}
+
 func (m *thinkingDisplayUIMock) BeginStreamingResponse() error {
 	return nil
 }

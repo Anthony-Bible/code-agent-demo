@@ -900,10 +900,8 @@ func (cs *ChatService) handleSkillsReset(sessionID string) error {
 	}
 
 	// Ask for confirmation
-	confirmed := cs.userInterface.ConfirmBashCommand(
+	confirmed := cs.userInterface.Confirm(
 		fmt.Sprintf("Clear %d active skill(s)?", len(skills)),
-		false,
-		"skills_reset",
 		"This will remove all skill tool restrictions",
 	)
 

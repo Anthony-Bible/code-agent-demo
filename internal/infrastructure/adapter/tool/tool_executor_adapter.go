@@ -363,27 +363,26 @@ func (a *ExecutorAdapter) ValidateToolInput(name string, input interface{}) erro
 // registerDefaultTools registers the built-in tools.
 func (a *ExecutorAdapter) registerDefaultTools() {
 	// Register file tools
-	a.registerFileToolsLocked()
+	a.registerFileTools()
 
 	// Register bash and fetch tools
-	a.registerBashAndFetchToolsLocked()
+	a.registerBashAndFetchTools()
 
 	// Register skill tools
-	a.registerSkillToolsLocked()
+	a.registerSkillTools()
 
 	// Register plan mode and batch tools
-	a.registerPlanAndBatchToolsLocked()
+	a.registerPlanAndBatchTools()
 
 	// Register subagent and delegate tools
-	a.registerSubagentToolsLocked()
+	a.registerSubagentTools()
 
 	// Register investigation tools
 	a.registerInvestigationTools()
 }
 
-// registerPlanAndBatchToolsLocked registers plan mode and batch tools.
-// REQUIRES: a.mu must be held by the caller.
-func (a *ExecutorAdapter) registerPlanAndBatchToolsLocked() {
+// registerPlanAndBatchTools registers plan mode and batch tools.
+func (a *ExecutorAdapter) registerPlanAndBatchTools() {
 	// Register enter_plan_mode tool
 	enterPlanModeTool := entity.Tool{
 		ID:   "enter_plan_mode",
@@ -484,9 +483,8 @@ The tool returns aggregated results showing success/failure counts and individua
 	a.tools[batchToolTool.Name] = batchToolTool
 }
 
-// registerSubagentToolsLocked registers subagent-related tools.
-// REQUIRES: a.mu must be held by the caller.
-func (a *ExecutorAdapter) registerSubagentToolsLocked() {
+// registerSubagentTools registers subagent-related tools.
+func (a *ExecutorAdapter) registerSubagentTools() {
 	// Register task tool (dynamically includes available agents if subagentManager is set)
 	a.registerTaskTool()
 
@@ -643,9 +641,8 @@ func (a *ExecutorAdapter) buildActivateSkillDescription() string {
 	return sb.String()
 }
 
-// registerFileToolsLocked registers file-related tools.
-// REQUIRES: a.mu must be held by the caller.
-func (a *ExecutorAdapter) registerFileToolsLocked() {
+// registerFileTools registers file-related tools.
+func (a *ExecutorAdapter) registerFileTools() {
 	// Register read_file tool
 	readFileTool := entity.Tool{
 		ID:          "read_file",
@@ -719,9 +716,8 @@ func (a *ExecutorAdapter) registerFileToolsLocked() {
 	a.tools[editFileTool.Name] = editFileTool
 }
 
-// registerBashAndFetchToolsLocked registers bash and fetch tools.
-// REQUIRES: a.mu must be held by the caller.
-func (a *ExecutorAdapter) registerBashAndFetchToolsLocked() {
+// registerBashAndFetchTools registers bash and fetch tools.
+func (a *ExecutorAdapter) registerBashAndFetchTools() {
 	// Register bash tool
 	bashTool := entity.Tool{
 		ID:          "bash",
@@ -777,9 +773,8 @@ func (a *ExecutorAdapter) registerBashAndFetchToolsLocked() {
 	a.tools[fetchTool.Name] = fetchTool
 }
 
-// registerSkillToolsLocked registers skill-related tools.
-// REQUIRES: a.mu must be held by the caller.
-func (a *ExecutorAdapter) registerSkillToolsLocked() {
+// registerSkillTools registers skill-related tools.
+func (a *ExecutorAdapter) registerSkillTools() {
 	// Register activate_skill tool (will be rebuilt with dynamic description if SetSkillManager is called)
 	activateSkillTool := entity.Tool{
 		ID:          "activate_skill",
