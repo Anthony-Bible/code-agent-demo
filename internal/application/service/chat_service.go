@@ -835,6 +835,92 @@ func (cs *ChatService) HandleThinkingCommand(_ context.Context, sessionID string
 	}
 }
 
+// HandleSkillsCommand handles the :skills command for listing and resetting active skills.
+//
+// Parameters:
+//   - ctx: Context for the operation
+//   - sessionID: The session ID
+//   - subcommand: The subcommand to execute ("list" or "reset")
+//
+// Returns:
+//   - bool: true if a command was handled, false if not recognized
+//   - error: An error if the command fails
+func (cs *ChatService) HandleSkillsCommand(_ context.Context, sessionID string, subcommand string) (bool, error) {
+	// Validate session exists first
+	_, err := cs.messageProcessUseCase.GetConversationState(sessionID)
+	if err != nil {
+		return true, errors.New("session not found")
+	}
+
+	switch strings.ToLower(subcommand) {
+	case "list":
+		return true, cs.handleSkillsList(sessionID)
+	case "reset":
+		return true, cs.handleSkillsReset(sessionID)
+	default:
+		return false, nil // Not a recognized skills subcommand
+	}
+}
+
+// handleSkillsList displays the list of currently active skills.
+func (cs *ChatService) handleSkillsList(sessionID string) error {
+	skills, err := cs.conversationService.GetActiveSkills(sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get active skills: %w", err)
+	}
+
+	if len(skills) == 0 {
+		_ = cs.userInterface.DisplaySystemMessage("No active skills")
+		return nil
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Active skills (%d):\n", len(skills))
+	for _, skill := range skills {
+		fmt.Fprintf(&sb, "  - %s", skill.Name)
+		if len(skill.AllowedTools) > 0 {
+			fmt.Fprintf(&sb, " (allowed-tools: %s)", strings.Join(skill.AllowedTools, ", "))
+		}
+		sb.WriteString("\n")
+	}
+	_ = cs.userInterface.DisplaySystemMessage(sb.String())
+	return nil
+}
+
+// handleSkillsReset clears all active skills after user confirmation.
+func (cs *ChatService) handleSkillsReset(sessionID string) error {
+	skills, err := cs.conversationService.GetActiveSkills(sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get active skills: %w", err)
+	}
+
+	if len(skills) == 0 {
+		_ = cs.userInterface.DisplaySystemMessage("No active skills to reset")
+		return nil
+	}
+
+	// Ask for confirmation
+	confirmed := cs.userInterface.ConfirmBashCommand(
+		fmt.Sprintf("Clear %d active skill(s)?", len(skills)),
+		false,
+		"skills_reset",
+		"This will remove all skill tool restrictions",
+	)
+
+	if !confirmed {
+		_ = cs.userInterface.DisplaySystemMessage("Skills reset cancelled")
+		return nil
+	}
+
+	// Clear all active skills
+	if err := cs.conversationService.SetActiveSkills(sessionID, nil); err != nil {
+		return fmt.Errorf("failed to reset skills: %w", err)
+	}
+
+	_ = cs.userInterface.DisplaySystemMessage(fmt.Sprintf("Cleared %d active skill(s)", len(skills)))
+	return nil
+}
+
 // GetPorts returns references to the internal ports for advanced use cases.
 // This is primarily intended for testing or scenarios where direct port access is needed.
 //

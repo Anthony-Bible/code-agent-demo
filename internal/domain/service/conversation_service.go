@@ -543,6 +543,44 @@ func (cs *ConversationService) AppendActiveSkill(sessionID string, skill entity.
 	return nil
 }
 
+// RemoveActiveSkill removes a skill from the active skills for a session.
+// This method is idempotent - returns nil if skill not found or not active.
+func (cs *ConversationService) RemoveActiveSkill(sessionID string, skillName string) error {
+	cs.conversationsMu.RLock()
+	_, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
+	if !exists {
+		return ErrConversationNotFound
+	}
+
+	cs.sessionActiveSkillsMu.Lock()
+	defer cs.sessionActiveSkillsMu.Unlock()
+
+	// Read existing skills
+	existingSkills := cs.sessionActiveSkills[sessionID]
+	if len(existingSkills) == 0 {
+		return nil // No skills active, nothing to remove (idempotent)
+	}
+
+	// Filter out the skill with matching name
+	filteredSkills := make([]entity.Skill, 0, len(existingSkills))
+	for _, skill := range existingSkills {
+		if skill.Name != skillName {
+			filteredSkills = append(filteredSkills, skill)
+		}
+	}
+
+	cs.sessionActiveSkills[sessionID] = filteredSkills
+
+	// Recompute and cache the allowed tools union
+	allowedTools := cs.computeAllowedTools(filteredSkills)
+	cs.sessionAllowedToolsMu.Lock()
+	cs.sessionAllowedTools[sessionID] = allowedTools
+	cs.sessionAllowedToolsMu.Unlock()
+
+	return nil
+}
+
 // SetActiveSkills sets the active skills for a session.
 // These skills are used to determine which tools are allowed for execution.
 // The allowed tools cache is recomputed when skills are set.

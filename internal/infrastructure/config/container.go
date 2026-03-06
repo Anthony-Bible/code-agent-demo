@@ -170,8 +170,9 @@ func NewContainer(cfg *Config) (*Container, error) {
 		return nil, err
 	}
 
-	// Wire skill activation callback for allowed-tools enforcement
+	// Wire skill activation/deactivation callbacks for allowed-tools enforcement
 	wireSkillActivationCallback(baseExecutor, convService)
+	wireSkillDeactivationCallback(baseExecutor, convService)
 
 	// Step 3: Create application service (ChatService)
 	// NewChatServiceFromDomain directly accepts concrete adapter types
@@ -516,5 +517,17 @@ func wireSkillActivationCallback(
 	baseExecutor.SetSkillActivationCallback(func(sessionID string, skill entity.Skill) error {
 		// Use AppendActiveSkill for atomic read-modify-write under single lock
 		return convService.AppendActiveSkill(sessionID, skill)
+	})
+}
+
+// wireSkillDeactivationCallback sets up the callback for skill deactivation.
+// This enables removing skill tool restrictions when a skill is deactivated.
+func wireSkillDeactivationCallback(
+	baseExecutor *tool.ExecutorAdapter,
+	convService *service.ConversationService,
+) {
+	baseExecutor.SetSkillDeactivationCallback(func(sessionID string, skillName string) error {
+		// Use RemoveActiveSkill for atomic removal - idempotent (succeeds if not active)
+		return convService.RemoveActiveSkill(sessionID, skillName)
 	})
 }
