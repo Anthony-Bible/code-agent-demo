@@ -527,6 +527,13 @@ func (cs *ConversationService) AppendActiveSkill(sessionID string, skill entity.
 	// Read existing skills
 	existingSkills := cs.sessionActiveSkills[sessionID]
 
+	// Dedup: skip if skill already active
+	for _, s := range existingSkills {
+		if s.Name == skill.Name {
+			return nil
+		}
+	}
+
 	// Create new slice with capacity for existing + 1 new skill
 	allSkills := make([]entity.Skill, 0, len(existingSkills)+1)
 	allSkills = append(allSkills, existingSkills...)
@@ -592,8 +599,9 @@ func (cs *ConversationService) SetActiveSkills(sessionID string, skills []entity
 		return ErrConversationNotFound
 	}
 	cs.sessionActiveSkillsMu.Lock()
+	defer cs.sessionActiveSkillsMu.Unlock()
+
 	cs.sessionActiveSkills[sessionID] = skills
-	cs.sessionActiveSkillsMu.Unlock()
 
 	// Compute and cache the allowed tools union
 	allowedTools := cs.computeAllowedTools(skills)
