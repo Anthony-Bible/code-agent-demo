@@ -7,6 +7,7 @@ import (
 	"code-editing-agent/internal/application/usecase"
 	"code-editing-agent/internal/domain/entity"
 	"code-editing-agent/internal/domain/port"
+	"code-editing-agent/internal/domain/safety"
 	"code-editing-agent/internal/domain/service"
 	"context"
 	"errors"
@@ -400,8 +401,7 @@ func (cs *ChatService) validateToolsAllowedForSession(sessionID string, toolCall
 	// Check each tool call against the allowed set
 	for _, tc := range toolCalls {
 		if !allowedTools[tc.ToolName] {
-			return fmt.Errorf("tool '%s' is not allowed for active skills. Allowed tools: %s",
-				tc.ToolName, cs.formatAllowedToolsList(allowedTools))
+			return fmt.Errorf(safety.ErrFmtToolNotAllowed, tc.ToolName, cs.formatAllowedToolsList(allowedTools))
 		}
 	}
 	return nil
