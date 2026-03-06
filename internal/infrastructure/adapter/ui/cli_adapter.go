@@ -633,7 +633,7 @@ func (c *CLIAdapter) ConfirmBashCommand(command string, isDangerous bool, reason
 	}
 	// Display description if provided
 	if description != "" {
-		fmt.Fprintf(c.output, "%s\x1b[0m\n", description)
+		fmt.Fprintf(c.output, "%s%s\x1b[0m\n", c.colors.System, description)
 	}
 	// Display standard prefix for non-dangerous commands
 	if !isDangerous {
@@ -676,7 +676,7 @@ func (c *CLIAdapter) Confirm(prompt string, description string) bool {
 	fmt.Fprintf(c.output, "%s[CONFIRM]\x1b[0m\n", c.colors.System)
 	// Display description if provided
 	if description != "" {
-		fmt.Fprintf(c.output, "%s\x1b[0m\n", description)
+		fmt.Fprintf(c.output, "%s%s\x1b[0m\n", c.colors.System, description)
 	}
 	// Display prompt with indentation in tool color
 	fmt.Fprintf(c.output, "  %s%s\x1b[0m\n", c.colors.Tool, prompt)

@@ -33,10 +33,13 @@ const (
 // It orchestrates the flow of messages between users and AI, processes tool executions,
 // maintains conversation state, and coordinates with the AI provider.
 type ConversationService struct {
-	aiProvider             port.AIProvider
-	toolExecutor           port.ToolExecutor
-	conversations          map[string]*entity.Conversation
-	conversationsMu        sync.RWMutex // Protects conversations map for concurrent access
+	aiProvider    port.AIProvider
+	toolExecutor  port.ToolExecutor
+	conversations map[string]*entity.Conversation
+	// conversationsMu protects conversations map reads in new skill-related methods.
+	// Note: Pre-existing methods (GetConversation, EndConversation, etc.) access
+	// conversations without this mutex. Consistent usage is a separate refactor.
+	conversationsMu        sync.RWMutex
 	currentSession         string
 	processing             map[string]bool
 	processingMu           sync.RWMutex // Protects processing map for concurrent access
@@ -513,6 +516,11 @@ func (cs *ConversationService) SetProcessingState(sessionID string, processing b
 
 // AppendActiveSkill appends a single skill to the active skills for a session.
 // This method performs the read-modify-write atomically under a single lock to prevent race conditions.
+//
+// Note: A TOCTOU window exists between the conversationsMu check and the
+// sessionActiveSkillsMu lock. EndConversation could delete the session in between.
+// Worst case is a benign orphaned map entry. A full fix requires refactoring all
+// conversations map access to use conversationsMu consistently (out of scope).
 func (cs *ConversationService) AppendActiveSkill(sessionID string, skill entity.Skill) error {
 	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
@@ -552,6 +560,11 @@ func (cs *ConversationService) AppendActiveSkill(sessionID string, skill entity.
 
 // RemoveActiveSkill removes a skill from the active skills for a session.
 // This method is idempotent - returns nil if skill not found or not active.
+//
+// Note: A TOCTOU window exists between the conversationsMu check and the
+// sessionActiveSkillsMu lock. EndConversation could delete the session in between.
+// Worst case is a benign orphaned map entry. A full fix requires refactoring all
+// conversations map access to use conversationsMu consistently (out of scope).
 func (cs *ConversationService) RemoveActiveSkill(sessionID string, skillName string) error {
 	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
@@ -591,6 +604,11 @@ func (cs *ConversationService) RemoveActiveSkill(sessionID string, skillName str
 // SetActiveSkills sets the active skills for a session.
 // These skills are used to determine which tools are allowed for execution.
 // The allowed tools cache is recomputed when skills are set.
+//
+// Note: A TOCTOU window exists between the conversationsMu check and the
+// sessionActiveSkillsMu lock. EndConversation could delete the session in between.
+// Worst case is a benign orphaned map entry. A full fix requires refactoring all
+// conversations map access to use conversationsMu consistently (out of scope).
 func (cs *ConversationService) SetActiveSkills(sessionID string, skills []entity.Skill) error {
 	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
@@ -612,8 +630,13 @@ func (cs *ConversationService) SetActiveSkills(sessionID string, skills []entity
 	return nil
 }
 
-// computeAllowedTools computes the union of allowed tools from all skills.
+// computeAllowedTools computes the union of allowed tools from all active skills.
 // Returns an empty map if no skills have restrictions (meaning all tools allowed).
+//
+// Important: Skills without allowed-tools fields do NOT relax restrictions imposed
+// by other skills. If any skill has allowed-tools, only those tools are permitted.
+// Example: skill A (allowed-tools: [read_file]) + skill B (no allowed-tools)
+// results in only [read_file] being allowed, not all tools.
 func (cs *ConversationService) computeAllowedTools(skills []entity.Skill) map[string]bool {
 	allowedTools := make(map[string]bool)
 	hasRestrictions := false
@@ -633,6 +656,11 @@ func (cs *ConversationService) computeAllowedTools(skills []entity.Skill) map[st
 
 // GetActiveSkills returns the active skills for a session.
 // Returns nil if no skills are active for the session.
+//
+// Note: A TOCTOU window exists between the conversationsMu check and the
+// sessionActiveSkillsMu lock. EndConversation could delete the session in between.
+// Worst case is a benign orphaned map entry. A full fix requires refactoring all
+// conversations map access to use conversationsMu consistently (out of scope).
 func (cs *ConversationService) GetActiveSkills(sessionID string) ([]entity.Skill, error) {
 	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
@@ -654,6 +682,11 @@ func (cs *ConversationService) GetActiveSkills(sessionID string) ([]entity.Skill
 // GetAllowedToolsForSession returns the cached union of all allowed tools from active skills.
 // Returns an empty map if no skills have allowed-tools restrictions (meaning all tools are allowed).
 // The cache is maintained by SetActiveSkills for O(1) lookup.
+//
+// Note: A TOCTOU window exists between the conversationsMu check and the
+// sessionActiveSkillsMu lock. EndConversation could delete the session in between.
+// Worst case is a benign orphaned map entry. A full fix requires refactoring all
+// conversations map access to use conversationsMu consistently (out of scope).
 func (cs *ConversationService) GetAllowedToolsForSession(sessionID string) (map[string]bool, error) {
 	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]

@@ -858,7 +858,7 @@ func (cs *ChatService) HandleSkillsCommand(_ context.Context, sessionID string, 
 	case "reset":
 		return true, cs.handleSkillsReset(sessionID)
 	default:
-		return false, nil // Not a recognized skills subcommand
+		return true, fmt.Errorf("unknown :skills subcommand %q. Available: list, reset", subcommand)
 	}
 }
 

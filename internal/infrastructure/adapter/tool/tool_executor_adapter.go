@@ -1805,8 +1805,10 @@ func (a *ExecutorAdapter) executeDeactivateSkill(ctx context.Context, input json
 		return "", errors.New("session ID not found in context")
 	}
 
-	// Call deactivation callback if set
-	// This is idempotent - succeeds silently if skill not active
+	// Call deactivation callback if set.
+	// When no callback is registered (e.g., in subagent contexts), deactivation
+	// reports success intentionally — this is symmetric with the idempotent behavior
+	// when the skill is not active.
 	if a.skillDeactivationCallback != nil {
 		if err := a.skillDeactivationCallback(sessionID, in.SkillName); err != nil {
 			return "", fmt.Errorf("failed to deactivate skill '%s': %w", in.SkillName, err)

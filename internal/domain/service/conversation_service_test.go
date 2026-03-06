@@ -589,6 +589,177 @@ func TestProcessingState(t *testing.T) {
 	})
 }
 
+// =============================================================================
+// Skill Management Tests
+// =============================================================================
+
+// newServiceWithSession is a helper that creates a ConversationService and starts a session.
+func newServiceWithSession(t *testing.T) (*ConversationService, string) {
+	t.Helper()
+	service, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{})
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
+	sessionID, err := service.StartConversation(context.Background())
+	if err != nil {
+		t.Fatalf("failed to start conversation: %v", err)
+	}
+	return service, sessionID
+}
+
+// assertSkillCount checks the number of active skills for a session.
+func assertSkillCount(t *testing.T, service *ConversationService, sessionID string, want int) {
+	t.Helper()
+	skills, _ := service.GetActiveSkills(sessionID)
+	if len(skills) != want {
+		t.Errorf("expected %d skills, got %d", want, len(skills))
+	}
+}
+
+func TestConversationService_AppendActiveSkill(t *testing.T) {
+	t.Run("append to empty session", func(t *testing.T) {
+		service, sid := newServiceWithSession(t)
+		err := service.AppendActiveSkill(sid, entity.Skill{Name: "skill-a", AllowedTools: []string{"read_file"}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertSkillCount(t, service, sid, 1)
+	})
+
+	t.Run("dedup by name", func(t *testing.T) {
+		service, sid := newServiceWithSession(t)
+		_ = service.SetActiveSkills(sid, []entity.Skill{{Name: "skill-a", AllowedTools: []string{"read_file"}}})
+		err := service.AppendActiveSkill(sid, entity.Skill{Name: "skill-a", AllowedTools: []string{"write_file"}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertSkillCount(t, service, sid, 1)
+	})
+
+	t.Run("multiple distinct skills", func(t *testing.T) {
+		service, sid := newServiceWithSession(t)
+		_ = service.SetActiveSkills(sid, []entity.Skill{{Name: "skill-a"}, {Name: "skill-b"}})
+		err := service.AppendActiveSkill(sid, entity.Skill{Name: "skill-c", AllowedTools: []string{"bash"}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertSkillCount(t, service, sid, 3)
+	})
+
+	t.Run("non-existent session returns error", func(t *testing.T) {
+		service, _ := newServiceWithSession(t)
+		err := service.AppendActiveSkill("nonexistent", entity.Skill{Name: "skill-a"})
+		if err == nil {
+			t.Error("expected error but got nil")
+		}
+	})
+}
+
+func TestConversationService_RemoveActiveSkill(t *testing.T) {
+	t.Run("remove existing skill", func(t *testing.T) {
+		service, sid := newServiceWithSession(t)
+		_ = service.SetActiveSkills(sid, []entity.Skill{{Name: "skill-a"}, {Name: "skill-b"}})
+		err := service.RemoveActiveSkill(sid, "skill-a")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertSkillCount(t, service, sid, 1)
+	})
+
+	t.Run("idempotent remove (skill not present)", func(t *testing.T) {
+		service, sid := newServiceWithSession(t)
+		_ = service.SetActiveSkills(sid, []entity.Skill{{Name: "skill-a"}})
+		err := service.RemoveActiveSkill(sid, "nonexistent")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertSkillCount(t, service, sid, 1)
+	})
+
+	t.Run("remove from empty", func(t *testing.T) {
+		service, sid := newServiceWithSession(t)
+		err := service.RemoveActiveSkill(sid, "skill-a")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertSkillCount(t, service, sid, 0)
+	})
+
+	t.Run("non-existent session returns error", func(t *testing.T) {
+		service, _ := newServiceWithSession(t)
+		err := service.RemoveActiveSkill("nonexistent", "skill-a")
+		if err == nil {
+			t.Error("expected error but got nil")
+		}
+	})
+}
+
+func TestConversationService_ComputeAllowedTools(t *testing.T) {
+	t.Run("no skills returns empty map (all allowed)", func(t *testing.T) {
+		service, sid := newServiceWithSession(t)
+		_ = service.SetActiveSkills(sid, nil)
+		allowed, err := service.GetAllowedToolsForSession(sid)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(allowed) != 0 {
+			t.Errorf("expected empty map (all allowed), got %v", allowed)
+		}
+	})
+
+	t.Run("one restricted skill returns only those tools", func(t *testing.T) {
+		service, sid := newServiceWithSession(t)
+		_ = service.SetActiveSkills(sid, []entity.Skill{
+			{Name: "skill-a", AllowedTools: []string{"read_file", "list_files"}},
+		})
+		allowed, err := service.GetAllowedToolsForSession(sid)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertAllowedToolsEqual(t, allowed, []string{"read_file", "list_files"})
+	})
+
+	t.Run("mixed restricted + unrestricted keeps only restricted tools", func(t *testing.T) {
+		service, sid := newServiceWithSession(t)
+		_ = service.SetActiveSkills(sid, []entity.Skill{
+			{Name: "skill-a", AllowedTools: []string{"read_file"}},
+			{Name: "skill-b"}, // no allowed-tools
+		})
+		allowed, err := service.GetAllowedToolsForSession(sid)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertAllowedToolsEqual(t, allowed, []string{"read_file"})
+	})
+
+	t.Run("union of multiple restricted skills", func(t *testing.T) {
+		service, sid := newServiceWithSession(t)
+		_ = service.SetActiveSkills(sid, []entity.Skill{
+			{Name: "skill-a", AllowedTools: []string{"read_file", "list_files"}},
+			{Name: "skill-b", AllowedTools: []string{"bash", "read_file"}},
+		})
+		allowed, err := service.GetAllowedToolsForSession(sid)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertAllowedToolsEqual(t, allowed, []string{"read_file", "list_files", "bash"})
+	})
+}
+
+// assertAllowedToolsEqual checks that the allowed tools map contains exactly the expected tools.
+func assertAllowedToolsEqual(t *testing.T, allowed map[string]bool, wantTools []string) {
+	t.Helper()
+	if len(allowed) != len(wantTools) {
+		t.Errorf("expected %d tools, got %d: %v", len(wantTools), len(allowed), allowed)
+		return
+	}
+	for _, tool := range wantTools {
+		if !allowed[tool] {
+			t.Errorf("expected tool %q in allowed set, got %v", tool, allowed)
+		}
+	}
+}
+
 // --- Mock Implementations for Testing ---
 
 type mockAIProvider struct {

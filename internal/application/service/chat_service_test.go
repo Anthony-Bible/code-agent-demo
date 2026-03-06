@@ -617,6 +617,118 @@ func TestChatService_ModeCommandInMessageFlow(t *testing.T) {
 }
 
 // =============================================================================
+// Skills Command Tests
+// =============================================================================
+
+// newChatServiceForSkills creates a ChatService with a real ConversationService and started session.
+func newChatServiceForSkills(t *testing.T, input string) (*ChatService, *serviceDomain.ConversationService, string, *strings.Builder) {
+	t.Helper()
+	tempDir := t.TempDir()
+	fileManager := file.NewLocalFileManager(tempDir)
+	toolExecutor := tool.NewExecutorAdapter(fileManager)
+	uiOutput := &strings.Builder{}
+	userInterface := ui.NewCLIAdapterWithIO(strings.NewReader(input), uiOutput)
+	aiProvider := &mockAIProviderForChat{}
+
+	convService, err := serviceDomain.NewConversationService(aiProvider, toolExecutor)
+	if err != nil {
+		t.Fatalf("failed to create conversation service: %v", err)
+	}
+	chatService, err := NewChatServiceFromDomain(convService, userInterface, aiProvider, toolExecutor, fileManager)
+	if err != nil {
+		t.Fatalf("failed to create chat service: %v", err)
+	}
+
+	ctx := context.Background()
+	startResp, err := chatService.StartSession(ctx, "")
+	if err != nil {
+		t.Fatalf("failed to start session: %v", err)
+	}
+	return chatService, convService, startResp.SessionID, uiOutput
+}
+
+// requireHandled asserts HandleSkillsCommand returned handled=true with no error.
+func requireHandled(t *testing.T, handled bool, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !handled {
+		t.Error("expected handled=true")
+	}
+}
+
+func TestChatService_HandleSkillsCommand_List(t *testing.T) {
+	t.Run("no skills", func(t *testing.T) {
+		cs, _, sid, out := newChatServiceForSkills(t, "")
+		handled, err := cs.HandleSkillsCommand(context.Background(), sid, "list")
+		requireHandled(t, handled, err)
+		if !strings.Contains(out.String(), "No active skills") {
+			t.Errorf("expected 'No active skills' in output, got: %s", out.String())
+		}
+	})
+
+	t.Run("with skills", func(t *testing.T) {
+		cs, conv, sid, out := newChatServiceForSkills(t, "")
+		_ = conv.SetActiveSkills(sid, []entity.Skill{
+			{Name: "my-skill", AllowedTools: []string{"read_file"}},
+		})
+		handled, err := cs.HandleSkillsCommand(context.Background(), sid, "list")
+		requireHandled(t, handled, err)
+		if !strings.Contains(out.String(), "my-skill") {
+			t.Errorf("expected skill name in output, got: %s", out.String())
+		}
+	})
+}
+
+func TestChatService_HandleSkillsCommand_Unknown(t *testing.T) {
+	cs, _, sid, _ := newChatServiceForSkills(t, "")
+	handled, err := cs.HandleSkillsCommand(context.Background(), sid, "bogus")
+	if !handled {
+		t.Error("expected handled=true for unknown subcommand")
+	}
+	if err == nil {
+		t.Fatal("expected error for unknown subcommand")
+	}
+	if !strings.Contains(err.Error(), "unknown :skills subcommand") {
+		t.Errorf("expected 'unknown :skills subcommand' in error, got: %v", err)
+	}
+}
+
+func TestChatService_HandleSkillsCommand_Reset(t *testing.T) {
+	t.Run("no skills", func(t *testing.T) {
+		cs, _, sid, out := newChatServiceForSkills(t, "")
+		handled, err := cs.HandleSkillsCommand(context.Background(), sid, "reset")
+		requireHandled(t, handled, err)
+		if !strings.Contains(out.String(), "No active skills to reset") {
+			t.Errorf("expected 'No active skills to reset' in output, got: %s", out.String())
+		}
+	})
+
+	t.Run("confirmed", func(t *testing.T) {
+		cs, conv, sid, _ := newChatServiceForSkills(t, "y\n")
+		_ = conv.SetActiveSkills(sid, []entity.Skill{{Name: "my-skill"}})
+		handled, err := cs.HandleSkillsCommand(context.Background(), sid, "reset")
+		requireHandled(t, handled, err)
+		skills, _ := conv.GetActiveSkills(sid)
+		if len(skills) != 0 {
+			t.Errorf("expected skills cleared, got %d", len(skills))
+		}
+	})
+
+	t.Run("cancelled", func(t *testing.T) {
+		cs, conv, sid, _ := newChatServiceForSkills(t, "n\n")
+		_ = conv.SetActiveSkills(sid, []entity.Skill{{Name: "my-skill"}})
+		handled, err := cs.HandleSkillsCommand(context.Background(), sid, "reset")
+		requireHandled(t, handled, err)
+		skills, _ := conv.GetActiveSkills(sid)
+		if len(skills) != 1 {
+			t.Errorf("expected skills unchanged, got %d", len(skills))
+		}
+	})
+}
+
+// =============================================================================
 // Mock Implementation for Testing
 // =============================================================================
 
