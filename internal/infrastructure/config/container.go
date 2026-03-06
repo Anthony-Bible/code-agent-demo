@@ -170,6 +170,9 @@ func NewContainer(cfg *Config) (*Container, error) {
 		return nil, err
 	}
 
+	// Wire skill activation callback for allowed-tools enforcement
+	wireSkillActivationCallback(baseExecutor, convService)
+
 	// Step 3: Create application service (ChatService)
 	// NewChatServiceFromDomain directly accepts concrete adapter types
 	chatService, err := appsvc.NewChatServiceFromDomain(
@@ -502,4 +505,21 @@ func configureCommandValidation(executor *tool.ExecutorAdapter, cfg *Config) err
 		return err
 	}
 	return executor.SetValidationMode(mode, whitelist, cfg.AskLLMOnUnknown)
+}
+
+// wireSkillActivationCallback sets up the callback for skill activation.
+// This enables allowed-tools enforcement based on skill configuration.
+func wireSkillActivationCallback(
+	baseExecutor *tool.ExecutorAdapter,
+	convService *service.ConversationService,
+) {
+	baseExecutor.SetSkillActivationCallback(func(sessionID string, skill entity.Skill) error {
+		// Get existing active skills
+		existingSkills, _ := convService.GetActiveSkills(sessionID)
+		// Append the new skill to a new slice
+		allSkills := make([]entity.Skill, 0, len(existingSkills)+1)
+		allSkills = append(allSkills, existingSkills...)
+		allSkills = append(allSkills, skill)
+		return convService.SetActiveSkills(sessionID, allSkills)
+	})
 }

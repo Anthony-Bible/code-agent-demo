@@ -358,11 +358,17 @@ func (cs *ChatService) handleToolRequestCycle(
 }
 
 // executeToolsForSession executes the requested tools for a session.
+// It validates that all requested tools are allowed for the active skills before execution.
 func (cs *ChatService) executeToolsForSession(
 	ctx context.Context,
 	sessionID string,
 	toolCalls []dto.ToolCallInfo,
 ) (*dto.ToolExecutionBatchResponse, error) {
+	// Validate that all tools are allowed for active skills
+	if err := cs.validateToolsAllowedForSession(sessionID, toolCalls); err != nil {
+		return nil, err
+	}
+
 	toolReqs := make([]dto.ToolExecuteRequest, len(toolCalls))
 	for i, tc := range toolCalls {
 		toolReqs[i] = dto.ToolExecuteRequest{
@@ -376,6 +382,38 @@ func (cs *ChatService) executeToolsForSession(
 		return nil, fmt.Errorf("failed to execute tools: %w", err)
 	}
 	return batchResp, nil
+}
+
+// validateToolsAllowedForSession checks if all requested tools are allowed for the session's active skills.
+// Returns an error if any tool is not in the allowed set.
+func (cs *ChatService) validateToolsAllowedForSession(sessionID string, toolCalls []dto.ToolCallInfo) error {
+	allowedTools, err := cs.conversationService.GetAllowedToolsForSession(sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get allowed tools: %w", err)
+	}
+
+	// If allowedTools is empty, no restrictions are in place
+	if len(allowedTools) == 0 {
+		return nil
+	}
+
+	// Check each tool call against the allowed set
+	for _, tc := range toolCalls {
+		if !allowedTools[tc.ToolName] {
+			return fmt.Errorf("tool '%s' is not allowed for active skills. Allowed tools: %s",
+				tc.ToolName, cs.formatAllowedToolsList(allowedTools))
+		}
+	}
+	return nil
+}
+
+// formatAllowedToolsList formats the allowed tools map as a comma-separated list.
+func (cs *ChatService) formatAllowedToolsList(allowedTools map[string]bool) string {
+	tools := make([]string, 0, len(allowedTools))
+	for tool := range allowedTools {
+		tools = append(tools, tool)
+	}
+	return strings.Join(tools, ", ")
 }
 
 // displayToolResults displays the results of executed tools.

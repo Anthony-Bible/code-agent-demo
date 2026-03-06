@@ -60,6 +60,10 @@ type DangerousCommandCallback func(command, reason string) bool
 // Returns true if execution should proceed, false to block.
 type CommandConfirmationCallback func(command string, isDangerous bool, reason string, description string) bool
 
+// SkillActivationCallback is called when a skill is activated.
+// It receives the session ID and the activated skill, allowing the handler to track active skills.
+type SkillActivationCallback func(sessionID string, skill entity.Skill) error
+
 // ExecutorAdapter implements the ToolExecutor port using the FileManager for file operations.
 type ExecutorAdapter struct {
 	fileManager                 port.FileManager
@@ -70,6 +74,7 @@ type ExecutorAdapter struct {
 	mu                          sync.RWMutex
 	dangerousCommandCallback    DangerousCommandCallback
 	commandConfirmationCallback CommandConfirmationCallback
+	skillActivationCallback     SkillActivationCallback
 	investigationStates         map[string]string // tracks investigation_id -> status
 	investigationMu             sync.Mutex
 
@@ -205,6 +210,14 @@ func (a *ExecutorAdapter) SetCommandConfirmationCallback(cb CommandConfirmationC
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.commandConfirmationCallback = cb
+}
+
+// SetSkillActivationCallback sets the callback for skill activation.
+// This callback is called when a skill is activated, allowing the handler to track active skills.
+func (a *ExecutorAdapter) SetSkillActivationCallback(cb SkillActivationCallback) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.skillActivationCallback = cb
 }
 
 // SetValidationMode configures command validation mode and whitelist.
@@ -1693,6 +1706,13 @@ func (a *ExecutorAdapter) executeActivateSkill(ctx context.Context, input json.R
 	}
 	result.WriteString("\n---\n")
 	result.WriteString(skill.RawContent)
+
+	// Track active skill for allowed-tools enforcement if callback is set
+	if a.skillActivationCallback != nil {
+		if sessionID, ok := port.SessionIDFromContext(ctx); ok {
+			_ = a.skillActivationCallback(sessionID, *skill)
+		}
+	}
 
 	return result.String(), nil
 }

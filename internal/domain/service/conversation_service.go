@@ -46,6 +46,8 @@ type ConversationService struct {
 	sessionSystemPromptsMu sync.RWMutex     // Protects sessionSystemPrompts map for concurrent access
 	sessionTokenUsage      map[string]int64 // total tokens (input+output) from latest API response
 	sessionTokenUsageMu    sync.RWMutex
+	sessionActiveSkills    map[string][]entity.Skill // Active skills per session with allowed-tools
+	sessionActiveSkillsMu  sync.RWMutex              // Protects sessionActiveSkills map for concurrent access
 	compactionThreshold    int64
 }
 
@@ -81,6 +83,7 @@ func NewConversationService(
 		sessionThinkingModes: make(map[string]port.ThinkingModeInfo),
 		sessionSystemPrompts: make(map[string]string),
 		sessionTokenUsage:    make(map[string]int64),
+		sessionActiveSkills:  make(map[string][]entity.Skill),
 		compactionThreshold:  threshold,
 	}, nil
 }
@@ -277,8 +280,11 @@ func (cs *ConversationService) prepareAIRequest(
 		return nil, nil, nil, nil, err
 	}
 
-	toolParams := make([]port.ToolParam, len(tools))
-	for i, tool := range tools {
+	// Filter tools based on active skills' allowed-tools restrictions
+	filteredTools := cs.filterToolsByActiveSkills(sessionID, tools)
+
+	toolParams := make([]port.ToolParam, len(filteredTools))
+	for i, tool := range filteredTools {
 		toolParams[i] = port.ToolParam{
 			Name:        tool.Name,
 			Description: tool.Description,
@@ -453,6 +459,11 @@ func (cs *ConversationService) EndConversation(ctx context.Context, sessionID st
 	delete(cs.sessionTokenUsage, sessionID)
 	cs.sessionTokenUsageMu.Unlock()
 
+	// Remove active skills
+	cs.sessionActiveSkillsMu.Lock()
+	delete(cs.sessionActiveSkills, sessionID)
+	cs.sessionActiveSkillsMu.Unlock()
+
 	// Clean up session state in tool executor if it supports it
 	if cleaner, ok := cs.toolExecutor.(port.SessionCleaner); ok {
 		cleaner.CleanupSession(sessionID)
@@ -485,6 +496,65 @@ func (cs *ConversationService) SetProcessingState(sessionID string, processing b
 	cs.processing[sessionID] = processing
 	cs.processingMu.Unlock()
 	return nil
+}
+
+// SetActiveSkills sets the active skills for a session.
+// These skills are used to determine which tools are allowed for execution.
+func (cs *ConversationService) SetActiveSkills(sessionID string, skills []entity.Skill) error {
+	_, exists := cs.conversations[sessionID]
+	if !exists {
+		return ErrConversationNotFound
+	}
+	cs.sessionActiveSkillsMu.Lock()
+	cs.sessionActiveSkills[sessionID] = skills
+	cs.sessionActiveSkillsMu.Unlock()
+	return nil
+}
+
+// GetActiveSkills returns the active skills for a session.
+// Returns nil if no skills are active for the session.
+func (cs *ConversationService) GetActiveSkills(sessionID string) ([]entity.Skill, error) {
+	_, exists := cs.conversations[sessionID]
+	if !exists {
+		return nil, ErrConversationNotFound
+	}
+	cs.sessionActiveSkillsMu.RLock()
+	defer cs.sessionActiveSkillsMu.RUnlock()
+	skills := cs.sessionActiveSkills[sessionID]
+	if skills == nil {
+		return nil, nil
+	}
+	result := make([]entity.Skill, len(skills))
+	copy(result, skills)
+	return result, nil
+}
+
+// GetAllowedToolsForSession returns the union of all allowed tools from active skills.
+// Returns nil if no skills have allowed-tools restrictions (meaning all tools are allowed).
+func (cs *ConversationService) GetAllowedToolsForSession(sessionID string) (map[string]bool, error) {
+	skills, err := cs.GetActiveSkills(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if len(skills) == 0 {
+		return make(map[string]bool), nil // No active skills, no restrictions (empty map means all allowed)
+	}
+
+	allowedTools := make(map[string]bool)
+	hasRestrictions := false
+	for _, skill := range skills {
+		if len(skill.AllowedTools) > 0 {
+			hasRestrictions = true
+			for _, tool := range skill.AllowedTools {
+				allowedTools[tool] = true
+			}
+		}
+	}
+
+	if !hasRestrictions {
+		return make(map[string]bool), nil // No skills have allowed-tools restrictions (empty map means all allowed)
+	}
+	return allowedTools, nil
 }
 
 // Helper methods for ConversationService
@@ -683,6 +753,31 @@ func truncateByRunes(s string, maxRunes int, suffix string) string {
 		return s
 	}
 	return string(runes[:maxRunes]) + suffix
+}
+
+// filterToolsByActiveSkills filters the tool list based on active skills' allowed-tools restrictions.
+// If no skills have allowed-tools restrictions, returns all tools.
+// If skills have allowed-tools, returns only tools that are in the union of all allowed tools.
+func (cs *ConversationService) filterToolsByActiveSkills(sessionID string, tools []entity.Tool) []entity.Tool {
+	allowedTools, err := cs.GetAllowedToolsForSession(sessionID)
+	if err != nil {
+		// If we can't get allowed tools, return all tools as a safe fallback
+		return tools
+	}
+
+	// If allowedTools is empty, no restrictions are in place
+	if len(allowedTools) == 0 {
+		return tools
+	}
+
+	// Filter tools to only include allowed ones
+	filtered := make([]entity.Tool, 0)
+	for _, tool := range tools {
+		if allowedTools[tool.Name] {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
 }
 
 // buildSummaryRequest formats conversation messages into a prompt for the AI to summarize.
