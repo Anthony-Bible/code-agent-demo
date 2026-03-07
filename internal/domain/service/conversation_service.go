@@ -110,7 +110,10 @@ func (cs *ConversationService) StartConversation(ctx context.Context) (string, e
 		return "", err
 	}
 
+	cs.conversationsMu.Lock()
 	cs.conversations[sessionID] = conversation
+	cs.conversationsMu.Unlock()
+
 	cs.currentSession = sessionID
 	cs.processingMu.Lock()
 	cs.processing[sessionID] = false
@@ -127,7 +130,9 @@ func (cs *ConversationService) AddUserMessage(ctx context.Context, sessionID, co
 	default:
 	}
 
+	cs.conversationsMu.RLock()
 	conversation, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return nil, ErrConversationNotFound
 	}
@@ -157,7 +162,9 @@ func (cs *ConversationService) AddToolResultMessage(
 	default:
 	}
 
+	cs.conversationsMu.RLock()
 	conversation, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return ErrConversationNotFound
 	}
@@ -233,7 +240,9 @@ func (cs *ConversationService) prepareAIRequest(
 	default:
 	}
 
+	cs.conversationsMu.RLock()
 	conversation, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return nil, nil, nil, nil, ErrConversationNotFound
 	}
@@ -379,15 +388,23 @@ func (cs *ConversationService) ExecuteToolsInResponse(
 	default:
 	}
 
+	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
-		return nil, errors.New("conversation not found")
+		return nil, ErrConversationNotFound
 	}
 
 	toolRequests := cs.parseToolRequests(assistantMessage.Content)
 	results := make([]string, 0, len(toolRequests))
 
 	for _, request := range toolRequests {
+		// Enforce tool whitelisting
+		if err := cs.ValidateToolAllowed(sessionID, request.Name); err != nil {
+			results = append(results, fmt.Sprintf("tool blocked: %v", err))
+			continue
+		}
+
 		_, found := cs.toolExecutor.GetTool(request.Name)
 		if !found {
 			results = append(results, "tool not found")
@@ -414,6 +431,8 @@ func (cs *ConversationService) ExecuteToolsInResponse(
 
 // GetConversation retrieves a conversation by session ID.
 func (cs *ConversationService) GetConversation(sessionID string) (*entity.Conversation, error) {
+	cs.conversationsMu.RLock()
+	defer cs.conversationsMu.RUnlock()
 	conversation, exists := cs.conversations[sessionID]
 	if !exists {
 		return nil, ErrConversationNotFound
@@ -434,6 +453,9 @@ func (cs *ConversationService) EndConversation(ctx context.Context, sessionID st
 		return context.Canceled
 	default:
 	}
+
+	cs.conversationsMu.Lock()
+	defer cs.conversationsMu.Unlock()
 
 	_, exists := cs.conversations[sessionID]
 	if !exists {
@@ -493,7 +515,9 @@ func (cs *ConversationService) EndConversation(ctx context.Context, sessionID st
 
 // IsProcessing checks if the conversation is currently processing (waiting for tool results).
 func (cs *ConversationService) IsProcessing(sessionID string) (bool, error) {
+	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return false, ErrConversationNotFound
 	}
@@ -504,7 +528,9 @@ func (cs *ConversationService) IsProcessing(sessionID string) (bool, error) {
 
 // SetProcessingState sets the processing state of a conversation.
 func (cs *ConversationService) SetProcessingState(sessionID string, processing bool) error {
+	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return ErrConversationNotFound
 	}
@@ -516,15 +542,11 @@ func (cs *ConversationService) SetProcessingState(sessionID string, processing b
 
 // AppendActiveSkill appends a single skill to the active skills for a session.
 // This method performs the read-modify-write atomically under a single lock to prevent race conditions.
-//
-// Note: A TOCTOU window exists between the conversationsMu check and the
-// sessionActiveSkillsMu lock. EndConversation could delete the session in between.
-// Worst case is a benign orphaned map entry. A full fix requires refactoring all
-// conversations map access to use conversationsMu consistently (out of scope).
 func (cs *ConversationService) AppendActiveSkill(sessionID string, skill entity.Skill) error {
 	cs.conversationsMu.RLock()
+	defer cs.conversationsMu.RUnlock()
+
 	_, exists := cs.conversations[sessionID]
-	cs.conversationsMu.RUnlock()
 	if !exists {
 		return ErrConversationNotFound
 	}
@@ -560,15 +582,11 @@ func (cs *ConversationService) AppendActiveSkill(sessionID string, skill entity.
 
 // RemoveActiveSkill removes a skill from the active skills for a session.
 // This method is idempotent - returns nil if skill not found or not active.
-//
-// Note: A TOCTOU window exists between the conversationsMu check and the
-// sessionActiveSkillsMu lock. EndConversation could delete the session in between.
-// Worst case is a benign orphaned map entry. A full fix requires refactoring all
-// conversations map access to use conversationsMu consistently (out of scope).
 func (cs *ConversationService) RemoveActiveSkill(sessionID string, skillName string) error {
 	cs.conversationsMu.RLock()
+	defer cs.conversationsMu.RUnlock()
+
 	_, exists := cs.conversations[sessionID]
-	cs.conversationsMu.RUnlock()
 	if !exists {
 		return ErrConversationNotFound
 	}
@@ -604,15 +622,11 @@ func (cs *ConversationService) RemoveActiveSkill(sessionID string, skillName str
 // SetActiveSkills sets the active skills for a session.
 // These skills are used to determine which tools are allowed for execution.
 // The allowed tools cache is recomputed when skills are set.
-//
-// Note: A TOCTOU window exists between the conversationsMu check and the
-// sessionActiveSkillsMu lock. EndConversation could delete the session in between.
-// Worst case is a benign orphaned map entry. A full fix requires refactoring all
-// conversations map access to use conversationsMu consistently (out of scope).
 func (cs *ConversationService) SetActiveSkills(sessionID string, skills []entity.Skill) error {
 	cs.conversationsMu.RLock()
+	defer cs.conversationsMu.RUnlock()
+
 	_, exists := cs.conversations[sessionID]
-	cs.conversationsMu.RUnlock()
 	if !exists {
 		return ErrConversationNotFound
 	}
@@ -656,15 +670,11 @@ func (cs *ConversationService) computeAllowedTools(skills []entity.Skill) map[st
 
 // GetActiveSkills returns the active skills for a session.
 // Returns nil if no skills are active for the session.
-//
-// Note: A TOCTOU window exists between the conversationsMu check and the
-// sessionActiveSkillsMu lock. EndConversation could delete the session in between.
-// Worst case is a benign orphaned map entry. A full fix requires refactoring all
-// conversations map access to use conversationsMu consistently (out of scope).
 func (cs *ConversationService) GetActiveSkills(sessionID string) ([]entity.Skill, error) {
 	cs.conversationsMu.RLock()
+	defer cs.conversationsMu.RUnlock()
+
 	_, exists := cs.conversations[sessionID]
-	cs.conversationsMu.RUnlock()
 	if !exists {
 		return nil, ErrConversationNotFound
 	}
@@ -682,15 +692,11 @@ func (cs *ConversationService) GetActiveSkills(sessionID string) ([]entity.Skill
 // GetAllowedToolsForSession returns the cached union of all allowed tools from active skills.
 // Returns an empty map if no skills have allowed-tools restrictions (meaning all tools are allowed).
 // The cache is maintained by SetActiveSkills for O(1) lookup.
-//
-// Note: A TOCTOU window exists between the conversationsMu check and the
-// sessionActiveSkillsMu lock. EndConversation could delete the session in between.
-// Worst case is a benign orphaned map entry. A full fix requires refactoring all
-// conversations map access to use conversationsMu consistently (out of scope).
 func (cs *ConversationService) GetAllowedToolsForSession(sessionID string) (map[string]bool, error) {
 	cs.conversationsMu.RLock()
+	defer cs.conversationsMu.RUnlock()
+
 	_, exists := cs.conversations[sessionID]
-	cs.conversationsMu.RUnlock()
 	if !exists {
 		return nil, ErrConversationNotFound
 	}
@@ -705,12 +711,35 @@ func (cs *ConversationService) GetAllowedToolsForSession(sessionID string) (map[
 	return result, nil
 }
 
+// ValidateToolAllowed checks if a tool is allowed for the given session.
+// Returns nil if allowed, or an error if blocked by skill restrictions.
+func (cs *ConversationService) ValidateToolAllowed(sessionID string, toolName string) error {
+	allowedTools, err := cs.GetAllowedToolsForSession(sessionID)
+	if err != nil {
+		return err
+	}
+
+	// If allowedTools is empty, no restrictions are in place
+	if len(allowedTools) == 0 {
+		return nil
+	}
+
+	if !allowedTools[toolName] {
+		// Try to format the list of allowed tools for better error message
+		return fmt.Errorf("tool '%s' is not in the allowed set for active skills", toolName)
+	}
+	return nil
+}
+
 // Helper methods for ConversationService
 
 // generateSessionID generates a unique session ID using crypto/rand.
 func generateSessionID() string {
 	bytes := make([]byte, 16)
-	_, _ = rand.Read(bytes) // Ignore error for test implementation
+	if _, err := rand.Read(bytes); err != nil {
+		// Use fallback if crypto/rand fails (should be extremely rare)
+		fmt.Fprintf(os.Stderr, "[ConversationService] CRITICAL: crypto/rand failed: %v\n", err)
+	}
 	return hex.EncodeToString(bytes)
 }
 
@@ -745,7 +774,9 @@ func (cs *ConversationService) parseToolRequests(content string) []ToolRequest {
 // When plan mode is enabled, tool executions are written to plan files instead of being executed.
 // The operation is thread-safe.
 func (cs *ConversationService) SetPlanMode(sessionID string, enabled bool) error {
+	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return ErrConversationNotFound
 	}
@@ -759,7 +790,9 @@ func (cs *ConversationService) SetPlanMode(sessionID string, enabled bool) error
 // Returns false for non-existent sessions.
 // The operation is thread-safe for concurrent reads.
 func (cs *ConversationService) IsPlanMode(sessionID string) (bool, error) {
+	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return false, ErrConversationNotFound
 	}
@@ -772,7 +805,9 @@ func (cs *ConversationService) IsPlanMode(sessionID string) (bool, error) {
 // The configuration includes whether thinking is enabled, the token budget, and display settings.
 // The operation is thread-safe.
 func (cs *ConversationService) SetThinkingMode(sessionID string, info port.ThinkingModeInfo) error {
+	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return ErrConversationNotFound
 	}
@@ -786,7 +821,9 @@ func (cs *ConversationService) SetThinkingMode(sessionID string, info port.Think
 // Returns zero-value ThinkingModeInfo for non-existent sessions or if not set.
 // The operation is thread-safe for concurrent reads.
 func (cs *ConversationService) GetThinkingMode(sessionID string) (port.ThinkingModeInfo, error) {
+	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return port.ThinkingModeInfo{}, ErrConversationNotFound
 	}
@@ -806,7 +843,9 @@ func (cs *ConversationService) SetCustomSystemPrompt(ctx context.Context, sessio
 	default:
 	}
 
+	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return ErrConversationNotFound
 	}

@@ -2,6 +2,7 @@ package investigation
 
 import (
 	"code-editing-agent/internal/application/service"
+	"code-editing-agent/internal/test/helpers"
 	"context"
 	"errors"
 	"os"
@@ -131,7 +132,7 @@ func TestFileInvestigationStore_Store_Success(t *testing.T) {
 		}
 	}()
 
-	inv := service.NewInvestigationRecordForTest("inv-001", "alert-001", "session-001", "started")
+	inv := helpers.NewInvestigationRecordForTest("inv-001", "alert-001", "session-001", "started")
 
 	err = store.Store(context.Background(), inv)
 	if err != nil {
@@ -151,7 +152,7 @@ func TestFileInvestigationStore_Store_CreatesFile(t *testing.T) {
 		}
 	}()
 
-	inv := service.NewInvestigationRecordForTest("inv-file-test", "alert-001", "session-001", "started")
+	inv := helpers.NewInvestigationRecordForTest("inv-file-test", "alert-001", "session-001", "started")
 
 	err = store.Store(context.Background(), inv)
 	if err != nil {
@@ -177,7 +178,7 @@ func TestFileInvestigationStore_Store_DuplicateID(t *testing.T) {
 		}
 	}()
 
-	inv := service.NewInvestigationRecordForTest("inv-dup", "alert-001", "session-001", "started")
+	inv := helpers.NewInvestigationRecordForTest("inv-dup", "alert-001", "session-001", "started")
 
 	err = store.Store(context.Background(), inv)
 	if err != nil {
@@ -230,7 +231,7 @@ func TestFileInvestigationStore_Store_IncrementsCount(t *testing.T) {
 	ctx := context.Background()
 
 	for i := range 3 {
-		inv := service.NewInvestigationRecordForTest(
+		inv := helpers.NewInvestigationRecordForTest(
 			"inv-"+string(rune('a'+i)),
 			"alert-001",
 			"session-001",
@@ -267,7 +268,7 @@ func TestFileInvestigationStore_Get_Exists(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	inv := service.NewInvestigationRecordForTest("inv-get-test", "alert-001", "session-001", "running")
+	inv := helpers.NewInvestigationRecordForTest("inv-get-test", "alert-001", "session-001", "running")
 
 	if err := store.Store(ctx, inv); err != nil {
 		t.Fatalf("Store() error = %v", err)
@@ -294,7 +295,7 @@ func TestFileInvestigationStore_Get_ReadsFromDisk(t *testing.T) {
 		t.Fatalf("NewFileInvestigationStore() error = %v", err)
 	}
 
-	inv := service.NewInvestigationRecordForTest("inv-disk-test", "alert-001", "session-001", "running")
+	inv := helpers.NewInvestigationRecordForTest("inv-disk-test", "alert-001", "session-001", "running")
 	if err := store1.Store(context.Background(), inv); err != nil {
 		t.Fatalf("Store() error = %v", err)
 	}
@@ -382,14 +383,14 @@ func TestFileInvestigationStore_Update_Exists(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	inv := service.NewInvestigationRecordForTest("inv-update-test", "alert-001", "session-001", "started")
+	inv := helpers.NewInvestigationRecordForTest("inv-update-test", "alert-001", "session-001", "started")
 
 	if err := store.Store(ctx, inv); err != nil {
 		t.Fatalf("Store() error = %v", err)
 	}
 
 	// Update status
-	updatedInv := service.NewInvestigationRecordForTest("inv-update-test", "alert-001", "session-001", "completed")
+	updatedInv := helpers.NewInvestigationRecordForTest("inv-update-test", "alert-001", "session-001", "completed")
 	if err := store.Update(ctx, updatedInv); err != nil {
 		t.Errorf("Update() error = %v", err)
 	}
@@ -413,7 +414,7 @@ func TestFileInvestigationStore_Update_ModifiesFile(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	inv := service.NewInvestigationRecordForTest("inv-update-file", "alert-001", "session-001", "started")
+	inv := helpers.NewInvestigationRecordForTest("inv-update-file", "alert-001", "session-001", "started")
 
 	if err := store.Store(ctx, inv); err != nil {
 		t.Fatalf("Store() error = %v", err)
@@ -428,7 +429,7 @@ func TestFileInvestigationStore_Update_ModifiesFile(t *testing.T) {
 	// Wait a bit to ensure mtime changes
 	time.Sleep(10 * time.Millisecond)
 
-	updatedInv := service.NewInvestigationRecordForTest("inv-update-file", "alert-001", "session-001", "completed")
+	updatedInv := helpers.NewInvestigationRecordForTest("inv-update-file", "alert-001", "session-001", "completed")
 	if err := store.Update(ctx, updatedInv); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
@@ -455,7 +456,7 @@ func TestFileInvestigationStore_Update_NotExists(t *testing.T) {
 		}
 	}()
 
-	inv := service.NewInvestigationRecordForTest("nonexistent", "alert-001", "session-001", "started")
+	inv := helpers.NewInvestigationRecordForTest("nonexistent", "alert-001", "session-001", "started")
 
 	err = store.Update(context.Background(), inv)
 	if err == nil {
@@ -504,7 +505,7 @@ func TestFileInvestigationStore_Delete_Exists(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	inv := service.NewInvestigationRecordForTest("inv-delete-test", "alert-001", "session-001", "started")
+	inv := helpers.NewInvestigationRecordForTest("inv-delete-test", "alert-001", "session-001", "started")
 
 	if err := store.Store(ctx, inv); err != nil {
 		t.Fatalf("Store() error = %v", err)
@@ -534,7 +535,7 @@ func TestFileInvestigationStore_Delete_RemovesFile(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	inv := service.NewInvestigationRecordForTest("inv-delete-file", "alert-001", "session-001", "started")
+	inv := helpers.NewInvestigationRecordForTest("inv-delete-file", "alert-001", "session-001", "started")
 
 	if err := store.Store(ctx, inv); err != nil {
 		t.Fatalf("Store() error = %v", err)
@@ -588,7 +589,7 @@ func TestFileInvestigationStore_Delete_DecrementsCount(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	inv := service.NewInvestigationRecordForTest("inv-count-test", "alert-001", "session-001", "started")
+	inv := helpers.NewInvestigationRecordForTest("inv-count-test", "alert-001", "session-001", "started")
 
 	if err := store.Store(ctx, inv); err != nil {
 		t.Fatalf("Store() error = %v", err)
@@ -685,7 +686,7 @@ func TestFileInvestigationStore_Query_ByAlertIDOrSessionID(t *testing.T) {
 			ctx := context.Background()
 
 			for _, inv := range tt.invData {
-				stub := service.NewInvestigationRecordForTest(inv.id, inv.alertID, inv.sessionID, inv.status)
+				stub := helpers.NewInvestigationRecordForTest(inv.id, inv.alertID, inv.sessionID, inv.status)
 				if err := store.Store(ctx, stub); err != nil {
 					t.Fatalf("Store() error = %v", err)
 				}
@@ -725,7 +726,7 @@ func TestFileInvestigationStore_Query_ByStatus(t *testing.T) {
 		{"inv-4", "a4", "s4", "running"},
 	}
 	for _, inv := range invs {
-		stub := service.NewInvestigationRecordForTest(inv.id, inv.alertID, inv.sessionID, inv.status)
+		stub := helpers.NewInvestigationRecordForTest(inv.id, inv.alertID, inv.sessionID, inv.status)
 		if err := store.Store(ctx, stub); err != nil {
 			t.Fatalf("Store() error = %v", err)
 		}
@@ -763,7 +764,7 @@ func TestFileInvestigationStore_Query_ByMultipleStatuses(t *testing.T) {
 		{"inv-4", "a4", "s4", "failed"},
 	}
 	for _, inv := range invs {
-		stub := service.NewInvestigationRecordForTest(inv.id, inv.alertID, inv.sessionID, inv.status)
+		stub := helpers.NewInvestigationRecordForTest(inv.id, inv.alertID, inv.sessionID, inv.status)
 		if err := store.Store(ctx, stub); err != nil {
 			t.Fatalf("Store() error = %v", err)
 		}
@@ -833,7 +834,7 @@ func TestFileInvestigationStore_Query_ByTimeRange(t *testing.T) {
 				{"inv-recent", "a2", "s2", tt.recentStatus, now.Add(-30 * time.Minute)},
 			}
 			for _, inv := range invs {
-				stub := service.NewInvestigationRecordForTestWithTime(
+				stub := helpers.NewInvestigationRecordForTestWithTime(
 					inv.id,
 					inv.alertID,
 					inv.sessionID,
@@ -871,7 +872,7 @@ func TestFileInvestigationStore_Query_WithLimit(t *testing.T) {
 	ctx := context.Background()
 
 	for i := range 10 {
-		inv := service.NewInvestigationRecordForTest(
+		inv := helpers.NewInvestigationRecordForTest(
 			"inv-"+string(rune('0'+i)),
 			"a1",
 			"s1",
@@ -913,7 +914,7 @@ func TestFileInvestigationStore_Query_CombinedFilters(t *testing.T) {
 		{"inv-3", "alert-Y", "s3", "running"},
 	}
 	for _, inv := range invs {
-		stub := service.NewInvestigationRecordForTest(inv.id, inv.alertID, inv.sessionID, inv.status)
+		stub := helpers.NewInvestigationRecordForTest(inv.id, inv.alertID, inv.sessionID, inv.status)
 		if err := store.Store(ctx, stub); err != nil {
 			t.Fatalf("Store() error = %v", err)
 		}
@@ -950,7 +951,7 @@ func TestFileInvestigationStore_Store_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	inv := service.NewInvestigationRecordForTest("inv-ctx", "a1", "s1", "started")
+	inv := helpers.NewInvestigationRecordForTest("inv-ctx", "a1", "s1", "started")
 
 	err = store.Store(ctx, inv)
 	if err == nil {
@@ -1044,7 +1045,7 @@ func TestFileInvestigationStore_Close_ThenStore(t *testing.T) {
 		t.Fatalf("Close() error = %v", err)
 	}
 
-	inv := service.NewInvestigationRecordForTest("inv-after-close", "a1", "s1", "started")
+	inv := helpers.NewInvestigationRecordForTest("inv-after-close", "a1", "s1", "started")
 
 	err = store.Store(context.Background(), inv)
 	if err == nil {
@@ -1140,7 +1141,7 @@ func TestFileInvestigationStore_ConcurrentStoreAndGet(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			for j := range 10 {
-				inv := service.NewInvestigationRecordForTest(
+				inv := helpers.NewInvestigationRecordForTest(
 					"inv-"+string(rune('A'+idx))+"-"+string(rune('0'+j)),
 					"a1",
 					"s1",
@@ -1194,7 +1195,7 @@ func TestFileInvestigationStore_ConcurrentUpdateAndDelete(t *testing.T) {
 
 	// Pre-populate some investigations
 	for i := range 20 {
-		inv := service.NewInvestigationRecordForTest(
+		inv := helpers.NewInvestigationRecordForTest(
 			"inv-concurrent-"+string(rune('a'+i)),
 			"a1",
 			"s1",
@@ -1210,7 +1211,7 @@ func TestFileInvestigationStore_ConcurrentUpdateAndDelete(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			inv := service.NewInvestigationRecordForTest(
+			inv := helpers.NewInvestigationRecordForTest(
 				"inv-concurrent-"+string(rune('a'+idx)),
 				"a1",
 				"s1",

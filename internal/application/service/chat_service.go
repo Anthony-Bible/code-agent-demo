@@ -389,19 +389,11 @@ func (cs *ChatService) executeToolsForSession(
 // validateToolsAllowedForSession checks if all requested tools are allowed for the session's active skills.
 // Returns an error if any tool is not in the allowed set.
 func (cs *ChatService) validateToolsAllowedForSession(sessionID string, toolCalls []dto.ToolCallInfo) error {
-	allowedTools, err := cs.conversationService.GetAllowedToolsForSession(sessionID)
-	if err != nil {
-		return fmt.Errorf("failed to get allowed tools: %w", err)
-	}
-
-	// If allowedTools is empty, no restrictions are in place
-	if len(allowedTools) == 0 {
-		return nil
-	}
-
-	// Check each tool call against the allowed set
+	// Check each tool call against the allowed set using ConversationService
 	for _, tc := range toolCalls {
-		if !allowedTools[tc.ToolName] {
+		if err := cs.conversationService.ValidateToolAllowed(sessionID, tc.ToolName); err != nil {
+			// If blocked, format a nice error message including the allowed tools list for the user
+			allowedTools, _ := cs.conversationService.GetAllowedToolsForSession(sessionID)
 			return fmt.Errorf(safety.ErrFmtToolNotAllowed, tc.ToolName, cs.formatAllowedToolsList(allowedTools))
 		}
 	}
