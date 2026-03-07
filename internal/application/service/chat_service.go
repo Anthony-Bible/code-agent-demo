@@ -7,13 +7,11 @@ import (
 	"code-editing-agent/internal/application/usecase"
 	"code-editing-agent/internal/domain/entity"
 	"code-editing-agent/internal/domain/port"
-	"code-editing-agent/internal/domain/safety"
 	"code-editing-agent/internal/domain/service"
 	"context"
 	"errors"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"time"
 )
@@ -392,23 +390,10 @@ func (cs *ChatService) validateToolsAllowedForSession(sessionID string, toolCall
 	// Check each tool call against the allowed set using ConversationService
 	for _, tc := range toolCalls {
 		if err := cs.conversationService.ValidateToolAllowed(sessionID, tc.ToolName); err != nil {
-			// If blocked, format a nice error message including the allowed tools list for the user
-			allowedTools, _ := cs.conversationService.GetAllowedToolsForSession(sessionID)
-			return fmt.Errorf(safety.ErrFmtToolNotAllowed, tc.ToolName, cs.formatAllowedToolsList(allowedTools))
+			return err
 		}
 	}
 	return nil
-}
-
-// formatAllowedToolsList formats the allowed tools map as a comma-separated list.
-// Tools are sorted alphabetically for deterministic output.
-func (cs *ChatService) formatAllowedToolsList(allowedTools map[string]bool) string {
-	tools := make([]string, 0, len(allowedTools))
-	for tool := range allowedTools {
-		tools = append(tools, tool)
-	}
-	sort.Strings(tools)
-	return strings.Join(tools, ", ")
 }
 
 // displayToolResults displays the results of executed tools.

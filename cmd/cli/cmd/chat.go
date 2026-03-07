@@ -112,7 +112,7 @@ func handleSkillsCommand(
 	chatService *appsvc.ChatService,
 	uiAdapter port.UserInterface,
 ) bool {
-	if !strings.HasPrefix(cmdText, ":skills") {
+	if cmdText != ":skills" && !strings.HasPrefix(cmdText, ":skills ") {
 		return false
 	}
 

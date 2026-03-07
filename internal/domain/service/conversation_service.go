@@ -3,6 +3,7 @@ package service
 import (
 	"code-editing-agent/internal/domain/entity"
 	"code-editing-agent/internal/domain/port"
+	"code-editing-agent/internal/domain/safety"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -11,6 +12,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -725,10 +727,21 @@ func (cs *ConversationService) ValidateToolAllowed(sessionID string, toolName st
 	}
 
 	if !allowedTools[toolName] {
-		// Try to format the list of allowed tools for better error message
-		return fmt.Errorf("tool '%s' is not in the allowed set for active skills", toolName)
+		// Return a formatted error message including the allowed tools list
+		return fmt.Errorf(safety.ErrFmtToolNotAllowed, toolName, cs.formatAllowedToolsList(allowedTools))
 	}
 	return nil
+}
+
+// formatAllowedToolsList formats the allowed tools map as a comma-separated list.
+// Tools are sorted alphabetically for deterministic output.
+func (cs *ConversationService) formatAllowedToolsList(allowedTools map[string]bool) string {
+	tools := make([]string, 0, len(allowedTools))
+	for tool := range allowedTools {
+		tools = append(tools, tool)
+	}
+	sort.Strings(tools)
+	return strings.Join(tools, ", ")
 }
 
 // Helper methods for ConversationService
