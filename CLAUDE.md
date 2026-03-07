@@ -396,6 +396,15 @@ The `source_type` helps the AI understand the correct context:
 
 This is crucial when skills reference scripts, as the AI needs to know the full path to execute them correctly.
 
+### Skill Tool Restrictions
+
+When an active skill defines `allowed-tools`, the entire session is restricted to the union of explicitly allowed tools from all active skills.
+
+**Important:** Skills without `allowed-tools` do NOT relax restrictions imposed by other skills.
+If you activate an unrestricted skill (no `allowed-tools`) alongside a restricted skill, the unrestricted skill will be silently restricted to the tools allowed by the restricted skill.
+
+To remove tool restrictions, you must deactivate the skills that are enforcing them.
+
 ### Deactivating Skills
 
 Skills can be deactivated to remove their tool restrictions:

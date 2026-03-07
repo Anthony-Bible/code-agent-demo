@@ -569,6 +569,8 @@ See CLAUDE.md for the complete list of default whitelisted commands and addition
 
 Skills extend the agent's capabilities with specialized knowledge, workflows, or tool integrations. They follow the [agentskills.io](https://agentskills.io) specification.
 
+**Important Note on Tool Restrictions:** If any active skill defines `allowed-tools`, the entire session is restricted to only those explicitly allowed tools. Unrestricted skills activated alongside restricted ones will be silently limited by those restrictions.
+
 #### Skill Discovery Locations
 
 Skills are discovered from three directories in **priority order**:

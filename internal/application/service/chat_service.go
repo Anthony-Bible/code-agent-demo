@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -853,13 +854,41 @@ func (cs *ChatService) handleSkillsList(sessionID string) error {
 
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Active skills (%d):\n", len(skills))
+	
+	hasRestrictions := false
+	var globalAllowedTools []string
+	allowedToolsMap := make(map[string]bool)
+
+	for _, skill := range skills {
+		if len(skill.AllowedTools) > 0 {
+			hasRestrictions = true
+			for _, t := range skill.AllowedTools {
+				if !allowedToolsMap[t] {
+					allowedToolsMap[t] = true
+					globalAllowedTools = append(globalAllowedTools, t)
+				}
+			}
+		}
+	}
+
+	sort.Strings(globalAllowedTools)
+
 	for _, skill := range skills {
 		fmt.Fprintf(&sb, "  - %s", skill.Name)
 		if len(skill.AllowedTools) > 0 {
 			fmt.Fprintf(&sb, " (allowed-tools: %s)", strings.Join(skill.AllowedTools, ", "))
+		} else if hasRestrictions {
+			fmt.Fprintf(&sb, " (restricted by other skills)")
 		}
 		sb.WriteString("\n")
 	}
+	
+	if hasRestrictions {
+		sb.WriteString("\nImportant: Session is restricted to tools: ")
+		sb.WriteString(strings.Join(globalAllowedTools, ", "))
+		sb.WriteString("\n")
+	}
+	
 	_ = cs.userInterface.DisplaySystemMessage(sb.String())
 	return nil
 }
