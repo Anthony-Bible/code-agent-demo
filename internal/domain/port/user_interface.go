@@ -84,4 +84,11 @@ type UserInterface interface {
 	//   - description: AI's rationale for running the command; displayed before the command when non-empty
 	// Returns true if the user confirms execution, false otherwise.
 	ConfirmBashCommand(command string, isDangerous bool, reason string, description string) bool
+
+	// Confirm prompts the user for a generic yes/no confirmation.
+	// Parameters:
+	//   - prompt: The question or action to confirm
+	//   - description: Additional context displayed before the prompt; empty to omit
+	// Returns true if the user confirms, false otherwise.
+	Confirm(prompt string, description string) bool
 }

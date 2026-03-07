@@ -4528,3 +4528,7 @@ func (t *testUIAdapter) SetColorScheme(scheme port.ColorScheme) error { return n
 func (t *testUIAdapter) ConfirmBashCommand(command string, isDangerous bool, reason string, description string) bool {
 	return true
 }
+
+func (t *testUIAdapter) Confirm(_ string, _ string) bool {
+	return false
+}

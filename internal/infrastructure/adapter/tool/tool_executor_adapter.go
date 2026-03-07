@@ -60,6 +60,14 @@ type DangerousCommandCallback func(command, reason string) bool
 // Returns true if execution should proceed, false to block.
 type CommandConfirmationCallback func(command string, isDangerous bool, reason string, description string) bool
 
+// SkillActivationCallback is called when a skill is activated.
+// It receives the session ID and the activated skill, allowing the handler to track active skills.
+type SkillActivationCallback func(sessionID string, skill entity.Skill) error
+
+// SkillDeactivationCallback is called when a skill is deactivated.
+// It receives the session ID and the skill name, allowing the handler to remove it from active skills.
+type SkillDeactivationCallback func(sessionID string, skillName string) error
+
 // ExecutorAdapter implements the ToolExecutor port using the FileManager for file operations.
 type ExecutorAdapter struct {
 	fileManager                 port.FileManager
@@ -70,6 +78,8 @@ type ExecutorAdapter struct {
 	mu                          sync.RWMutex
 	dangerousCommandCallback    DangerousCommandCallback
 	commandConfirmationCallback CommandConfirmationCallback
+	skillActivationCallback     SkillActivationCallback
+	skillDeactivationCallback   SkillDeactivationCallback
 	investigationStates         map[string]string // tracks investigation_id -> status
 	investigationMu             sync.Mutex
 
@@ -207,6 +217,22 @@ func (a *ExecutorAdapter) SetCommandConfirmationCallback(cb CommandConfirmationC
 	a.commandConfirmationCallback = cb
 }
 
+// SetSkillActivationCallback sets the callback for skill activation.
+// This callback is called when a skill is activated, allowing the handler to track active skills.
+func (a *ExecutorAdapter) SetSkillActivationCallback(cb SkillActivationCallback) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.skillActivationCallback = cb
+}
+
+// SetSkillDeactivationCallback sets the callback for skill deactivation.
+// This callback is called when a skill is deactivated, allowing the handler to remove it from active skills.
+func (a *ExecutorAdapter) SetSkillDeactivationCallback(cb SkillDeactivationCallback) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.skillDeactivationCallback = cb
+}
+
 // SetValidationMode configures command validation mode and whitelist.
 // mode: "blacklist" (default) or "whitelist"
 // whitelist: the CommandWhitelist to use when mode is "whitelist" (can be nil for blacklist mode)
@@ -336,151 +362,27 @@ func (a *ExecutorAdapter) ValidateToolInput(name string, input interface{}) erro
 
 // registerDefaultTools registers the built-in tools.
 func (a *ExecutorAdapter) registerDefaultTools() {
-	// Register read_file tool
-	readFileTool := entity.Tool{
-		ID:          "read_file",
-		Name:        "read_file",
-		Description: "Reads the contents of a given relative file path, use this when you want to see what's inside a file. Do not use this with directory names.",
-		InputSchema: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "The relative path to the file to read in the working directory.",
-				},
-				"start_line": map[string]interface{}{
-					"type":        "integer",
-					"description": "The 1-based line number to start reading from. If not provided, reads from the beginning.",
-				},
-				"end_line": map[string]interface{}{
-					"type":        "integer",
-					"description": "The 1-based line number to stop reading at (inclusive). If not provided, reads to the end.",
-				},
-			},
-			"required": []string{"path"},
-		},
-		RequiredFields: []string{"path"},
-	}
-	a.tools[readFileTool.Name] = readFileTool
+	// Register file tools
+	a.registerFileTools()
 
-	// Register list_files tool
-	listFilesTool := entity.Tool{
-		ID:          "list_files",
-		Name:        "list_files",
-		Description: "Lists files and directories at a given path. If no path is provided, lists files in the current working directory.",
-		InputSchema: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "The relative path to the directory to list files in. If not provided, lists files in the current working directory.",
-				},
-			},
-		},
-		RequiredFields: []string{},
-	}
-	a.tools[listFilesTool.Name] = listFilesTool
+	// Register bash and fetch tools
+	a.registerBashAndFetchTools()
 
-	// Register edit_file tool
-	editFileTool := entity.Tool{
-		ID:          "edit_file",
-		Name:        "edit_file",
-		Description: "Makes edits to a text file. Replaces 'old_str' with 'new_str' in the given file. 'old_str' and 'new_str' MUST be different from each other. If the file specified with path doesn't exist, it will be created. The old_str must match exactly including whitespace and new lines. Include a few lines before to avoid editing a string with multiple matches.",
-		InputSchema: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "The relative path to the file to edit.",
-				},
-				"old_str": map[string]interface{}{
-					"type":        "string",
-					"description": "The string to replace.",
-				},
-				"new_str": map[string]interface{}{
-					"type":        "string",
-					"description": "The string to replace 'old_str' with.",
-				},
-			},
-			"required": []string{"path"},
-		},
-		RequiredFields: []string{"path"},
-	}
-	a.tools[editFileTool.Name] = editFileTool
+	// Register skill tools
+	a.registerSkillTools()
 
-	// Register bash tool
-	bashTool := entity.Tool{
-		ID:          "bash",
-		Name:        "bash",
-		Description: "Executes shell commands and returns stdout, stderr, and exit code. You MUST assess whether each command is dangerous and set the dangerous field accordingly. Dangerous commands require user confirmation.",
-		InputSchema: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"command": map[string]interface{}{
-					"type":        "string",
-					"description": "The shell command to execute",
-				},
-				"description": map[string]interface{}{
-					"type":        "string",
-					"description": "A brief description of what this command does and why it's being run",
-				},
-				"timeout_ms": map[string]interface{}{
-					"type":        "integer",
-					"description": "Timeout in milliseconds (default: 30000)",
-				},
-				"dangerous": map[string]interface{}{
-					"type":        "boolean",
-					"description": "REQUIRED: You must assess if this command is potentially dangerous. Set to true for commands that: delete/modify files (rm, mv), use elevated privileges (sudo, su), modify system config, execute untrusted input, or could cause data loss. Set to false for safe read-only commands (ls, cat, grep, echo).",
-				},
-			},
-			"required": []string{"command", "dangerous"},
-		},
-		RequiredFields: []string{"command", "dangerous"},
-	}
-	a.tools[bashTool.Name] = bashTool
+	// Register plan mode and batch tools
+	a.registerPlanAndBatchTools()
 
-	// Register fetch tool
-	fetchTool := entity.Tool{
-		ID:          "fetch",
-		Name:        "fetch",
-		Description: "Fetches web resources via HTTP/HTTPS. Prefer this to bash-isms like curl/wget",
-		InputSchema: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"url": map[string]interface{}{
-					"type":        "string",
-					"description": "Full URL to fetch, e.g. https://...",
-				},
-				"includeMarkup": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Include the HTML markup? Defaults to false. By default or when set to false, markup will be stripped and converted to plain text. Prefer markup stripping, and only set this to true if the output is confusing: otherwise you may download a massive amount of data",
-				},
-			},
-			"required": []string{"url"},
-		},
-		RequiredFields: []string{"url"},
-	}
-	a.tools[fetchTool.Name] = fetchTool
+	// Register subagent and delegate tools
+	a.registerSubagentTools()
 
-	// Register activate_skill tool (will be rebuilt with dynamic description if SetSkillManager is called)
-	activateSkillTool := entity.Tool{
-		ID:          "activate_skill",
-		Name:        "activate_skill",
-		Description: "Activates a skill by name and returns its full content. Use this to load detailed instructions for specific capabilities.",
-		InputSchema: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"skill_name": map[string]interface{}{
-					"type":        "string",
-					"description": "The name of the skill to activate",
-				},
-			},
-			"required": []string{"skill_name"},
-		},
-		RequiredFields: []string{"skill_name"},
-	}
-	a.tools[activateSkillTool.Name] = activateSkillTool
+	// Register investigation tools
+	a.registerInvestigationTools()
+}
 
+// registerPlanAndBatchTools registers plan mode and batch tools.
+func (a *ExecutorAdapter) registerPlanAndBatchTools() {
 	// Register enter_plan_mode tool
 	enterPlanModeTool := entity.Tool{
 		ID:   "enter_plan_mode",
@@ -579,7 +481,10 @@ The tool returns aggregated results showing success/failure counts and individua
 		RequiredFields: []string{"invocations"},
 	}
 	a.tools[batchToolTool.Name] = batchToolTool
+}
 
+// registerSubagentTools registers subagent-related tools.
+func (a *ExecutorAdapter) registerSubagentTools() {
 	// Register task tool (dynamically includes available agents if subagentManager is set)
 	a.registerTaskTool()
 
@@ -653,9 +558,6 @@ Output format: [expected structure]"`,
 		RequiredFields: []string{"name", "system_prompt", "task"},
 	}
 	a.tools[delegateTool.Name] = delegateTool
-
-	// Register investigation tools
-	a.registerInvestigationTools()
 }
 
 // rebuildActivateSkillToolLocked updates the activate_skill tool definition.
@@ -739,6 +641,179 @@ func (a *ExecutorAdapter) buildActivateSkillDescription() string {
 	return sb.String()
 }
 
+// registerFileTools registers file-related tools.
+func (a *ExecutorAdapter) registerFileTools() {
+	// Register read_file tool
+	readFileTool := entity.Tool{
+		ID:          "read_file",
+		Name:        "read_file",
+		Description: "Reads the contents of a given relative file path, use this when you want to see what's inside a file. Do not use this with directory names.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"path": map[string]interface{}{
+					"type":        "string",
+					"description": "The relative path to the file to read in the working directory.",
+				},
+				"start_line": map[string]interface{}{
+					"type":        "integer",
+					"description": "The 1-based line number to start reading from. If not provided, reads from the beginning.",
+				},
+				"end_line": map[string]interface{}{
+					"type":        "integer",
+					"description": "The 1-based line number to stop reading at (inclusive). If not provided, reads to the end.",
+				},
+			},
+			"required": []string{"path"},
+		},
+		RequiredFields: []string{"path"},
+	}
+	a.tools[readFileTool.Name] = readFileTool
+
+	// Register list_files tool
+	listFilesTool := entity.Tool{
+		ID:          "list_files",
+		Name:        "list_files",
+		Description: "Lists files and directories at a given path. If no path is provided, lists files in the current working directory.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"path": map[string]interface{}{
+					"type":        "string",
+					"description": "The relative path to the directory to list files in. If not provided, lists files in the current working directory.",
+				},
+			},
+		},
+		RequiredFields: []string{},
+	}
+	a.tools[listFilesTool.Name] = listFilesTool
+
+	// Register edit_file tool
+	editFileTool := entity.Tool{
+		ID:          "edit_file",
+		Name:        "edit_file",
+		Description: "Makes edits to a text file. Replaces 'old_str' with 'new_str' in the given file. 'old_str' and 'new_str' MUST be different from each other. If the file specified with path doesn't exist, it will be created. The old_str must match exactly including whitespace and new lines. Include a few lines before to avoid editing a string with multiple matches.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"path": map[string]interface{}{
+					"type":        "string",
+					"description": "The relative path to the file to edit.",
+				},
+				"old_str": map[string]interface{}{
+					"type":        "string",
+					"description": "The string to replace.",
+				},
+				"new_str": map[string]interface{}{
+					"type":        "string",
+					"description": "The string to replace 'old_str' with.",
+				},
+			},
+			"required": []string{"path"},
+		},
+		RequiredFields: []string{"path"},
+	}
+	a.tools[editFileTool.Name] = editFileTool
+}
+
+// registerBashAndFetchTools registers bash and fetch tools.
+func (a *ExecutorAdapter) registerBashAndFetchTools() {
+	// Register bash tool
+	bashTool := entity.Tool{
+		ID:          "bash",
+		Name:        "bash",
+		Description: "Executes shell commands and returns stdout, stderr, and exit code. You MUST assess whether each command is dangerous and set the dangerous field accordingly. Dangerous commands require user confirmation.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"command": map[string]interface{}{
+					"type":        "string",
+					"description": "The shell command to execute",
+				},
+				"description": map[string]interface{}{
+					"type":        "string",
+					"description": "A brief description of what this command does and why it's being run",
+				},
+				"timeout_ms": map[string]interface{}{
+					"type":        "integer",
+					"description": "Timeout in milliseconds (default: 30000)",
+				},
+				"dangerous": map[string]interface{}{
+					"type":        "boolean",
+					"description": "REQUIRED: You must assess if this command is potentially dangerous. Set to true for commands that: delete/modify files (rm, mv), use elevated privileges (sudo, su), modify system config, execute untrusted input, or could cause data loss. Set to false for safe read-only commands (ls, cat, grep, echo).",
+				},
+			},
+			"required": []string{"command", "dangerous"},
+		},
+		RequiredFields: []string{"command", "dangerous"},
+	}
+	a.tools[bashTool.Name] = bashTool
+
+	// Register fetch tool
+	fetchTool := entity.Tool{
+		ID:          "fetch",
+		Name:        "fetch",
+		Description: "Fetches web resources via HTTP/HTTPS. Prefer this to bash-isms like curl/wget",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"url": map[string]interface{}{
+					"type":        "string",
+					"description": "Full URL to fetch, e.g. https://...",
+				},
+				"includeMarkup": map[string]interface{}{
+					"type":        "boolean",
+					"description": "Include the HTML markup? Defaults to false. By default or when set to false, markup will be stripped and converted to plain text. Prefer markup stripping, and only set this to true if the output is confusing: otherwise you may download a massive amount of data",
+				},
+			},
+			"required": []string{"url"},
+		},
+		RequiredFields: []string{"url"},
+	}
+	a.tools[fetchTool.Name] = fetchTool
+}
+
+// registerSkillTools registers skill-related tools.
+func (a *ExecutorAdapter) registerSkillTools() {
+	// Register activate_skill tool (will be rebuilt with dynamic description if SetSkillManager is called)
+	activateSkillTool := entity.Tool{
+		ID:          "activate_skill",
+		Name:        "activate_skill",
+		Description: "Activates a skill by name and returns its full content. Use this to load detailed instructions for specific capabilities.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"skill_name": map[string]interface{}{
+					"type":        "string",
+					"description": "The name of the skill to activate",
+				},
+			},
+			"required": []string{"skill_name"},
+		},
+		RequiredFields: []string{"skill_name"},
+	}
+	a.tools[activateSkillTool.Name] = activateSkillTool
+
+	// Register deactivate_skill tool
+	deactivateSkillTool := entity.Tool{
+		ID:          "deactivate_skill",
+		Name:        "deactivate_skill",
+		Description: "Deactivates a previously activated skill, removing its tool restrictions. Use this when you no longer need a skill's capabilities.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"skill_name": map[string]interface{}{
+					"type":        "string",
+					"description": "Name of the skill to deactivate",
+				},
+			},
+			"required": []string{"skill_name"},
+		},
+		RequiredFields: []string{"skill_name"},
+	}
+	a.tools[deactivateSkillTool.Name] = deactivateSkillTool
+}
+
 // executeByName executes the appropriate tool function based on the tool name.
 func (a *ExecutorAdapter) executeByName(ctx context.Context, name string, input json.RawMessage) (string, error) {
 	switch name {
@@ -754,6 +829,8 @@ func (a *ExecutorAdapter) executeByName(ctx context.Context, name string, input 
 		return a.executeFetch(ctx, input)
 	case "activate_skill":
 		return a.executeActivateSkill(ctx, input)
+	case "deactivate_skill":
+		return a.executeDeactivateSkill(ctx, input)
 	case "batch_tool":
 		return a.executeBatchTool(ctx, input)
 	case "task":
@@ -1694,7 +1771,51 @@ func (a *ExecutorAdapter) executeActivateSkill(ctx context.Context, input json.R
 	result.WriteString("\n---\n")
 	result.WriteString(skill.RawContent)
 
+	// Track active skill for allowed-tools enforcement if callback is set
+	if a.skillActivationCallback != nil {
+		if sessionID, ok := port.SessionIDFromContext(ctx); ok {
+			_ = a.skillActivationCallback(sessionID, *skill)
+		}
+	}
+
 	return result.String(), nil
+}
+
+// deactivateSkillInput represents the input for the deactivate_skill tool.
+type deactivateSkillInput struct {
+	SkillName string `json:"skill_name"`
+}
+
+// executeDeactivateSkill deactivates a skill by name, removing its tool restrictions.
+// This allows the AI to remove skills when they're no longer needed.
+// If no skill manager is set, returns an error.
+func (a *ExecutorAdapter) executeDeactivateSkill(ctx context.Context, input json.RawMessage) (string, error) {
+	var in deactivateSkillInput
+	if err := json.Unmarshal(input, &in); err != nil {
+		return "", fmt.Errorf("failed to unmarshal deactivate_skill input: %w", err)
+	}
+
+	if in.SkillName == "" {
+		return "", errors.New("skill_name parameter is required but was empty")
+	}
+
+	// Get sessionID from context
+	sessionID, ok := port.SessionIDFromContext(ctx)
+	if !ok {
+		return "", errors.New("session ID not found in context")
+	}
+
+	// Call deactivation callback if set.
+	// When no callback is registered (e.g., in subagent contexts), deactivation
+	// reports success intentionally — this is symmetric with the idempotent behavior
+	// when the skill is not active.
+	if a.skillDeactivationCallback != nil {
+		if err := a.skillDeactivationCallback(sessionID, in.SkillName); err != nil {
+			return "", fmt.Errorf("failed to deactivate skill '%s': %w", in.SkillName, err)
+		}
+	}
+
+	return fmt.Sprintf("Skill '%s' deactivated successfully", in.SkillName), nil
 }
 
 // registerInvestigationTools registers the investigation-related tools.

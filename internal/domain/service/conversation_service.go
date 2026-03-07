@@ -3,13 +3,16 @@ package service
 import (
 	"code-editing-agent/internal/domain/entity"
 	"code-editing-agent/internal/domain/port"
+	"code-editing-agent/internal/domain/safety"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -32,9 +35,13 @@ const (
 // It orchestrates the flow of messages between users and AI, processes tool executions,
 // maintains conversation state, and coordinates with the AI provider.
 type ConversationService struct {
-	aiProvider             port.AIProvider
-	toolExecutor           port.ToolExecutor
-	conversations          map[string]*entity.Conversation
+	aiProvider    port.AIProvider
+	toolExecutor  port.ToolExecutor
+	conversations map[string]*entity.Conversation
+	// conversationsMu protects conversations map reads in new skill-related methods.
+	// Note: Pre-existing methods (GetConversation, EndConversation, etc.) access
+	// conversations without this mutex. Consistent usage is a separate refactor.
+	conversationsMu        sync.RWMutex
 	currentSession         string
 	processing             map[string]bool
 	processingMu           sync.RWMutex // Protects processing map for concurrent access
@@ -46,6 +53,10 @@ type ConversationService struct {
 	sessionSystemPromptsMu sync.RWMutex     // Protects sessionSystemPrompts map for concurrent access
 	sessionTokenUsage      map[string]int64 // total tokens (input+output) from latest API response
 	sessionTokenUsageMu    sync.RWMutex
+	sessionActiveSkills    map[string][]entity.Skill  // Active skills per session with allowed-tools
+	sessionActiveSkillsMu  sync.RWMutex               // Protects sessionActiveSkills map for concurrent access
+	sessionAllowedTools    map[string]map[string]bool // Cached union of allowed tools per session
+	sessionAllowedToolsMu  sync.RWMutex               // Protects sessionAllowedTools map for concurrent access
 	compactionThreshold    int64
 }
 
@@ -81,6 +92,8 @@ func NewConversationService(
 		sessionThinkingModes: make(map[string]port.ThinkingModeInfo),
 		sessionSystemPrompts: make(map[string]string),
 		sessionTokenUsage:    make(map[string]int64),
+		sessionActiveSkills:  make(map[string][]entity.Skill),
+		sessionAllowedTools:  make(map[string]map[string]bool),
 		compactionThreshold:  threshold,
 	}, nil
 }
@@ -99,7 +112,10 @@ func (cs *ConversationService) StartConversation(ctx context.Context) (string, e
 		return "", err
 	}
 
+	cs.conversationsMu.Lock()
 	cs.conversations[sessionID] = conversation
+	cs.conversationsMu.Unlock()
+
 	cs.currentSession = sessionID
 	cs.processingMu.Lock()
 	cs.processing[sessionID] = false
@@ -116,7 +132,9 @@ func (cs *ConversationService) AddUserMessage(ctx context.Context, sessionID, co
 	default:
 	}
 
+	cs.conversationsMu.RLock()
 	conversation, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return nil, ErrConversationNotFound
 	}
@@ -146,7 +164,9 @@ func (cs *ConversationService) AddToolResultMessage(
 	default:
 	}
 
+	cs.conversationsMu.RLock()
 	conversation, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return ErrConversationNotFound
 	}
@@ -222,7 +242,9 @@ func (cs *ConversationService) prepareAIRequest(
 	default:
 	}
 
+	cs.conversationsMu.RLock()
 	conversation, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return nil, nil, nil, nil, ErrConversationNotFound
 	}
@@ -277,8 +299,14 @@ func (cs *ConversationService) prepareAIRequest(
 		return nil, nil, nil, nil, err
 	}
 
-	toolParams := make([]port.ToolParam, len(tools))
-	for i, tool := range tools {
+	// Filter tools based on active skills' allowed-tools restrictions
+	filteredTools, err := cs.filterToolsByActiveSkills(sessionID, tools)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	toolParams := make([]port.ToolParam, len(filteredTools))
+	for i, tool := range filteredTools {
 		toolParams[i] = port.ToolParam{
 			Name:        tool.Name,
 			Description: tool.Description,
@@ -362,15 +390,23 @@ func (cs *ConversationService) ExecuteToolsInResponse(
 	default:
 	}
 
+	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
-		return nil, errors.New("conversation not found")
+		return nil, ErrConversationNotFound
 	}
 
 	toolRequests := cs.parseToolRequests(assistantMessage.Content)
 	results := make([]string, 0, len(toolRequests))
 
 	for _, request := range toolRequests {
+		// Enforce tool whitelisting
+		if err := cs.ValidateToolAllowed(sessionID, request.Name); err != nil {
+			results = append(results, fmt.Sprintf("tool blocked: %v", err))
+			continue
+		}
+
 		_, found := cs.toolExecutor.GetTool(request.Name)
 		if !found {
 			results = append(results, "tool not found")
@@ -397,6 +433,8 @@ func (cs *ConversationService) ExecuteToolsInResponse(
 
 // GetConversation retrieves a conversation by session ID.
 func (cs *ConversationService) GetConversation(sessionID string) (*entity.Conversation, error) {
+	cs.conversationsMu.RLock()
+	defer cs.conversationsMu.RUnlock()
 	conversation, exists := cs.conversations[sessionID]
 	if !exists {
 		return nil, ErrConversationNotFound
@@ -417,6 +455,9 @@ func (cs *ConversationService) EndConversation(ctx context.Context, sessionID st
 		return context.Canceled
 	default:
 	}
+
+	cs.conversationsMu.Lock()
+	defer cs.conversationsMu.Unlock()
 
 	_, exists := cs.conversations[sessionID]
 	if !exists {
@@ -453,6 +494,16 @@ func (cs *ConversationService) EndConversation(ctx context.Context, sessionID st
 	delete(cs.sessionTokenUsage, sessionID)
 	cs.sessionTokenUsageMu.Unlock()
 
+	// Remove active skills
+	cs.sessionActiveSkillsMu.Lock()
+	delete(cs.sessionActiveSkills, sessionID)
+	cs.sessionActiveSkillsMu.Unlock()
+
+	// Remove cached allowed tools
+	cs.sessionAllowedToolsMu.Lock()
+	delete(cs.sessionAllowedTools, sessionID)
+	cs.sessionAllowedToolsMu.Unlock()
+
 	// Clean up session state in tool executor if it supports it
 	if cleaner, ok := cs.toolExecutor.(port.SessionCleaner); ok {
 		cleaner.CleanupSession(sessionID)
@@ -466,7 +517,9 @@ func (cs *ConversationService) EndConversation(ctx context.Context, sessionID st
 
 // IsProcessing checks if the conversation is currently processing (waiting for tool results).
 func (cs *ConversationService) IsProcessing(sessionID string) (bool, error) {
+	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return false, ErrConversationNotFound
 	}
@@ -477,7 +530,9 @@ func (cs *ConversationService) IsProcessing(sessionID string) (bool, error) {
 
 // SetProcessingState sets the processing state of a conversation.
 func (cs *ConversationService) SetProcessingState(sessionID string, processing bool) error {
+	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return ErrConversationNotFound
 	}
@@ -487,12 +542,217 @@ func (cs *ConversationService) SetProcessingState(sessionID string, processing b
 	return nil
 }
 
+// AppendActiveSkill appends a single skill to the active skills for a session.
+// This method performs the read-modify-write atomically under a single lock to prevent race conditions.
+func (cs *ConversationService) AppendActiveSkill(sessionID string, skill entity.Skill) error {
+	cs.conversationsMu.RLock()
+	defer cs.conversationsMu.RUnlock()
+
+	_, exists := cs.conversations[sessionID]
+	if !exists {
+		return ErrConversationNotFound
+	}
+
+	cs.sessionActiveSkillsMu.Lock()
+	defer cs.sessionActiveSkillsMu.Unlock()
+
+	// Read existing skills
+	existingSkills := cs.sessionActiveSkills[sessionID]
+
+	// Dedup: skip if skill already active
+	for _, s := range existingSkills {
+		if s.Name == skill.Name {
+			return nil
+		}
+	}
+
+	// Create new slice with capacity for existing + 1 new skill
+	allSkills := make([]entity.Skill, 0, len(existingSkills)+1)
+	allSkills = append(allSkills, existingSkills...)
+	allSkills = append(allSkills, skill)
+
+	cs.sessionActiveSkills[sessionID] = allSkills
+
+	// Compute and cache the allowed tools union
+	allowedTools := cs.computeAllowedTools(allSkills)
+	cs.sessionAllowedToolsMu.Lock()
+	cs.sessionAllowedTools[sessionID] = allowedTools
+	cs.sessionAllowedToolsMu.Unlock()
+
+	return nil
+}
+
+// RemoveActiveSkill removes a skill from the active skills for a session.
+// This method is idempotent - returns nil if skill not found or not active.
+func (cs *ConversationService) RemoveActiveSkill(sessionID string, skillName string) error {
+	cs.conversationsMu.RLock()
+	defer cs.conversationsMu.RUnlock()
+
+	_, exists := cs.conversations[sessionID]
+	if !exists {
+		return ErrConversationNotFound
+	}
+
+	cs.sessionActiveSkillsMu.Lock()
+	defer cs.sessionActiveSkillsMu.Unlock()
+
+	// Read existing skills
+	existingSkills := cs.sessionActiveSkills[sessionID]
+	if len(existingSkills) == 0 {
+		return nil // No skills active, nothing to remove (idempotent)
+	}
+
+	// Filter out the skill with matching name
+	filteredSkills := make([]entity.Skill, 0, len(existingSkills))
+	for _, skill := range existingSkills {
+		if skill.Name != skillName {
+			filteredSkills = append(filteredSkills, skill)
+		}
+	}
+
+	cs.sessionActiveSkills[sessionID] = filteredSkills
+
+	// Recompute and cache the allowed tools union
+	allowedTools := cs.computeAllowedTools(filteredSkills)
+	cs.sessionAllowedToolsMu.Lock()
+	cs.sessionAllowedTools[sessionID] = allowedTools
+	cs.sessionAllowedToolsMu.Unlock()
+
+	return nil
+}
+
+// SetActiveSkills sets the active skills for a session.
+// These skills are used to determine which tools are allowed for execution.
+// The allowed tools cache is recomputed when skills are set.
+func (cs *ConversationService) SetActiveSkills(sessionID string, skills []entity.Skill) error {
+	cs.conversationsMu.RLock()
+	defer cs.conversationsMu.RUnlock()
+
+	_, exists := cs.conversations[sessionID]
+	if !exists {
+		return ErrConversationNotFound
+	}
+	cs.sessionActiveSkillsMu.Lock()
+	defer cs.sessionActiveSkillsMu.Unlock()
+
+	cs.sessionActiveSkills[sessionID] = skills
+
+	// Compute and cache the allowed tools union
+	allowedTools := cs.computeAllowedTools(skills)
+	cs.sessionAllowedToolsMu.Lock()
+	cs.sessionAllowedTools[sessionID] = allowedTools
+	cs.sessionAllowedToolsMu.Unlock()
+
+	return nil
+}
+
+// computeAllowedTools computes the union of allowed tools from all active skills.
+// Returns an empty map if no skills have restrictions (meaning all tools allowed).
+//
+// Important: Skills without allowed-tools fields do NOT relax restrictions imposed
+// by other skills. If any skill has allowed-tools, only those tools are permitted.
+// Example: skill A (allowed-tools: [read_file]) + skill B (no allowed-tools)
+// results in only [read_file] being allowed, not all tools.
+func (cs *ConversationService) computeAllowedTools(skills []entity.Skill) map[string]bool {
+	allowedTools := make(map[string]bool)
+	hasRestrictions := false
+	for _, skill := range skills {
+		if len(skill.AllowedTools) > 0 {
+			hasRestrictions = true
+			for _, tool := range skill.AllowedTools {
+				allowedTools[tool] = true
+			}
+		}
+	}
+	if !hasRestrictions {
+		return make(map[string]bool) // Empty map means all tools allowed
+	}
+	return allowedTools
+}
+
+// GetActiveSkills returns the active skills for a session.
+// Returns nil if no skills are active for the session.
+func (cs *ConversationService) GetActiveSkills(sessionID string) ([]entity.Skill, error) {
+	cs.conversationsMu.RLock()
+	defer cs.conversationsMu.RUnlock()
+
+	_, exists := cs.conversations[sessionID]
+	if !exists {
+		return nil, ErrConversationNotFound
+	}
+	cs.sessionActiveSkillsMu.RLock()
+	defer cs.sessionActiveSkillsMu.RUnlock()
+	skills := cs.sessionActiveSkills[sessionID]
+	if skills == nil {
+		return nil, nil
+	}
+	result := make([]entity.Skill, len(skills))
+	copy(result, skills)
+	return result, nil
+}
+
+// GetAllowedToolsForSession returns the cached union of all allowed tools from active skills.
+// Returns an empty map if no skills have allowed-tools restrictions (meaning all tools are allowed).
+// The cache is maintained by SetActiveSkills for O(1) lookup.
+func (cs *ConversationService) GetAllowedToolsForSession(sessionID string) (map[string]bool, error) {
+	cs.conversationsMu.RLock()
+	defer cs.conversationsMu.RUnlock()
+
+	_, exists := cs.conversations[sessionID]
+	if !exists {
+		return nil, ErrConversationNotFound
+	}
+
+	cs.sessionAllowedToolsMu.RLock()
+	defer cs.sessionAllowedToolsMu.RUnlock()
+
+	// Return a copy to prevent external modification
+	cached := cs.sessionAllowedTools[sessionID]
+	result := make(map[string]bool, len(cached))
+	maps.Copy(result, cached)
+	return result, nil
+}
+
+// ValidateToolAllowed checks if a tool is allowed for the given session.
+// Returns nil if allowed, or an error if blocked by skill restrictions.
+func (cs *ConversationService) ValidateToolAllowed(sessionID string, toolName string) error {
+	allowedTools, err := cs.GetAllowedToolsForSession(sessionID)
+	if err != nil {
+		return err
+	}
+
+	// If allowedTools is empty, no restrictions are in place
+	if len(allowedTools) == 0 {
+		return nil
+	}
+
+	if !allowedTools[toolName] {
+		// Return a formatted error message including the allowed tools list
+		return fmt.Errorf(safety.ErrFmtToolNotAllowed, toolName, cs.formatAllowedToolsList(allowedTools))
+	}
+	return nil
+}
+
+// formatAllowedToolsList formats the allowed tools map as a comma-separated list.
+// Tools are sorted alphabetically for deterministic output.
+func (cs *ConversationService) formatAllowedToolsList(allowedTools map[string]bool) string {
+	tools := make([]string, 0, len(allowedTools))
+	for tool := range allowedTools {
+		tools = append(tools, tool)
+	}
+	sort.Strings(tools)
+	return strings.Join(tools, ", ")
+}
+
 // Helper methods for ConversationService
 
 // generateSessionID generates a unique session ID using crypto/rand.
 func generateSessionID() string {
 	bytes := make([]byte, 16)
-	_, _ = rand.Read(bytes) // Ignore error for test implementation
+	if _, err := rand.Read(bytes); err != nil {
+		// Use fallback if crypto/rand fails (should be extremely rare)
+		fmt.Fprintf(os.Stderr, "[ConversationService] CRITICAL: crypto/rand failed: %v\n", err)
+	}
 	return hex.EncodeToString(bytes)
 }
 
@@ -527,7 +787,9 @@ func (cs *ConversationService) parseToolRequests(content string) []ToolRequest {
 // When plan mode is enabled, tool executions are written to plan files instead of being executed.
 // The operation is thread-safe.
 func (cs *ConversationService) SetPlanMode(sessionID string, enabled bool) error {
+	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return ErrConversationNotFound
 	}
@@ -541,7 +803,9 @@ func (cs *ConversationService) SetPlanMode(sessionID string, enabled bool) error
 // Returns false for non-existent sessions.
 // The operation is thread-safe for concurrent reads.
 func (cs *ConversationService) IsPlanMode(sessionID string) (bool, error) {
+	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return false, ErrConversationNotFound
 	}
@@ -554,7 +818,9 @@ func (cs *ConversationService) IsPlanMode(sessionID string) (bool, error) {
 // The configuration includes whether thinking is enabled, the token budget, and display settings.
 // The operation is thread-safe.
 func (cs *ConversationService) SetThinkingMode(sessionID string, info port.ThinkingModeInfo) error {
+	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return ErrConversationNotFound
 	}
@@ -568,7 +834,9 @@ func (cs *ConversationService) SetThinkingMode(sessionID string, info port.Think
 // Returns zero-value ThinkingModeInfo for non-existent sessions or if not set.
 // The operation is thread-safe for concurrent reads.
 func (cs *ConversationService) GetThinkingMode(sessionID string) (port.ThinkingModeInfo, error) {
+	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return port.ThinkingModeInfo{}, ErrConversationNotFound
 	}
@@ -588,7 +856,9 @@ func (cs *ConversationService) SetCustomSystemPrompt(ctx context.Context, sessio
 	default:
 	}
 
+	cs.conversationsMu.RLock()
 	_, exists := cs.conversations[sessionID]
+	cs.conversationsMu.RUnlock()
 	if !exists {
 		return ErrConversationNotFound
 	}
@@ -683,6 +953,32 @@ func truncateByRunes(s string, maxRunes int, suffix string) string {
 		return s
 	}
 	return string(runes[:maxRunes]) + suffix
+}
+
+// filterToolsByActiveSkills filters the tool list based on active skills' allowed-tools restrictions.
+// If no skills have allowed-tools restrictions, returns all tools.
+// If skills have allowed-tools, returns only tools that are in the union of all allowed tools.
+// Returns an error if the session is not found (fail-closed).
+func (cs *ConversationService) filterToolsByActiveSkills(sessionID string, tools []entity.Tool) ([]entity.Tool, error) {
+	allowedTools, err := cs.GetAllowedToolsForSession(sessionID)
+	if err != nil {
+		// If we can't get allowed tools, return error (fail-closed)
+		return nil, err
+	}
+
+	// If allowedTools is empty, no restrictions are in place
+	if len(allowedTools) == 0 {
+		return tools, nil
+	}
+
+	// Filter tools to only include allowed ones
+	filtered := make([]entity.Tool, 0, len(tools))
+	for _, tool := range tools {
+		if allowedTools[tool.Name] {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered, nil
 }
 
 // buildSummaryRequest formats conversation messages into a prompt for the AI to summarize.

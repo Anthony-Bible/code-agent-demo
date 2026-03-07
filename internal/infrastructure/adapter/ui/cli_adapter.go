@@ -633,7 +633,7 @@ func (c *CLIAdapter) ConfirmBashCommand(command string, isDangerous bool, reason
 	}
 	// Display description if provided
 	if description != "" {
-		fmt.Fprintf(c.output, "%s\x1b[0m\n", description)
+		fmt.Fprintf(c.output, "%s%s\x1b[0m\n", c.colors.System, description)
 	}
 	// Display standard prefix for non-dangerous commands
 	if !isDangerous {
@@ -663,6 +663,69 @@ func (c *CLIAdapter) ConfirmBashCommand(command string, isDangerous bool, reason
 
 	input = strings.TrimSpace(strings.ToLower(input))
 	return input == "y" || input == "yes"
+}
+
+// Confirm prompts the user for a generic yes/no confirmation.
+// It displays a [CONFIRM] header, optional description, and the prompt text,
+// then waits for user input.
+//
+// Returns true only if the user enters "y" or "yes" (case-insensitive).
+// Returns false for any other input, empty input, or EOF (safe default).
+func (c *CLIAdapter) Confirm(prompt string, description string) bool {
+	// Display header
+	fmt.Fprintf(c.output, "%s[CONFIRM]\x1b[0m\n", c.colors.System)
+	// Display description if provided
+	if description != "" {
+		fmt.Fprintf(c.output, "%s%s\x1b[0m\n", c.colors.System, description)
+	}
+	// Display prompt with indentation in tool color
+	fmt.Fprintf(c.output, "  %s%s\x1b[0m\n", c.colors.Tool, prompt)
+
+	var input string
+
+	// Use readline for interactive mode, bufio.Scanner for non-interactive
+	if c.useInteractive && c.historyFile != "" {
+		input = c.getGenericConfirmation()
+	} else {
+		fmt.Fprint(c.output, "Confirm? [y/N]: ")
+		if c.scanner == nil {
+			c.scanner = bufio.NewScanner(c.input)
+		}
+		if !c.scanner.Scan() {
+			return false
+		}
+		input = c.scanner.Text()
+	}
+
+	input = strings.TrimSpace(strings.ToLower(input))
+	return input == "y" || input == "yes"
+}
+
+// getGenericConfirmation uses readline for Y/N confirmation in interactive mode.
+// Returns the user's input string (to be checked by caller).
+// Ctrl+C returns empty string, which is treated as "no" (safe default).
+func (c *CLIAdapter) getGenericConfirmation() string {
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          c.colors.System + "Confirm? [y/N]: " + "\x1b[0m",
+		InterruptPrompt: "^C",
+	})
+	if err != nil {
+		fmt.Fprint(c.output, "Confirm? [y/N]: ")
+		if c.scanner == nil {
+			c.scanner = bufio.NewScanner(c.input)
+		}
+		if c.scanner.Scan() {
+			return c.scanner.Text()
+		}
+		return ""
+	}
+	defer rl.Close()
+
+	line, err := rl.Readline()
+	if err != nil {
+		return ""
+	}
+	return line
 }
 
 // GetPromptPrefix returns the current prompt prefix string displayed before user input.

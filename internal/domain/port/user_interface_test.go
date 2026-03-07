@@ -75,6 +75,10 @@ func (m *mockUserInterface) ConfirmBashCommand(
 	return false
 }
 
+func (m *mockUserInterface) Confirm(_ string, _ string) bool {
+	return false
+}
+
 // TestUserInterfaceGetUserInput_Exists validates GetUserInput method exists.
 func TestUserInterfaceGetUserInput_Exists(_ *testing.T) {
 	var ui UserInterface = (*mockUserInterface)(nil)

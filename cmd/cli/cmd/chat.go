@@ -105,6 +105,31 @@ func handleThinkingCommand(
 	return true
 }
 
+// handleSkillsCommand handles the :skills command for listing and resetting active skills.
+func handleSkillsCommand(
+	ctx context.Context,
+	sessionID, cmdText string,
+	chatService *appsvc.ChatService,
+	uiAdapter port.UserInterface,
+) bool {
+	if cmdText != ":skills" && !strings.HasPrefix(cmdText, ":skills ") {
+		return false
+	}
+
+	parts := strings.Fields(cmdText)
+	subcommand := "list"
+	if len(parts) > 1 {
+		subcommand = parts[1]
+	}
+
+	handled, err := chatService.HandleSkillsCommand(ctx, sessionID, subcommand)
+	if err != nil {
+		_ = uiAdapter.DisplayError(err)
+		return true
+	}
+	return handled
+}
+
 // runChat executes the chat command.
 func runChat(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
@@ -217,6 +242,11 @@ func runChat(cmd *cobra.Command, args []string) error {
 
 		// Check for :thinking command to toggle extended thinking mode
 		if handleThinkingCommand(ctx, sessionID, result.text, chatService, container, uiAdapter) {
+			continue
+		}
+
+		// Check for :skills command to list or reset active skills
+		if handleSkillsCommand(ctx, sessionID, result.text, chatService, uiAdapter) {
 			continue
 		}
 

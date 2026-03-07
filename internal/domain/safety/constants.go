@@ -111,6 +111,10 @@ const (
 
 	// ErrMsgMarkedDangerousByAI is the reason when only LLM flagged command as dangerous.
 	ErrMsgMarkedDangerousByAI = "marked dangerous by AI"
+
+	// ErrFmtToolNotAllowed formats tool validation errors with tool name and allowed list.
+	// Parameters: toolName, allowedToolsList.
+	ErrFmtToolNotAllowed = "tool '%s' is not allowed for active skills. Allowed tools: %s"
 )
 
 // commandExtractAction is called for each non-escaped, non-quote character during parsing.

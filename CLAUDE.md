@@ -396,6 +396,37 @@ The `source_type` helps the AI understand the correct context:
 
 This is crucial when skills reference scripts, as the AI needs to know the full path to execute them correctly.
 
+### Skill Tool Restrictions
+
+When an active skill defines `allowed-tools`, the entire session is restricted to the union of explicitly allowed tools from all active skills.
+
+**Important:** Skills without `allowed-tools` do NOT relax restrictions imposed by other skills.
+If you activate an unrestricted skill (no `allowed-tools`) alongside a restricted skill, the unrestricted skill will be silently restricted to the tools allowed by the restricted skill.
+
+To remove tool restrictions, you must deactivate the skills that are enforcing them.
+
+### Deactivating Skills
+
+Skills can be deactivated to remove their tool restrictions:
+
+- **Via tool:** Use `deactivate_skill` with `{"skill_name": "skill-name"}`
+- **Via command:** Use `:skills list` to see active skills, `:skills reset` to clear all
+
+Deactivation is idempotent - deactivating a non-active skill succeeds silently.
+
+**Example:**
+```yaml
+# Deactivate a specific skill
+tool: deactivate_skill
+input:
+  skill_name: code-review
+```
+
+When skills are deactivated, their `allowed-tools` restrictions are removed from the session. This allows you to:
+1. Activate a skill for a specific task
+2. Use its restricted tools
+3. Deactivate it when done to restore full tool access
+
 ### Adding a New Skill
 
 1. Create a directory under `./skills/skill-name/`

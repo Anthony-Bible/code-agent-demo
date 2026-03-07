@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -358,11 +359,17 @@ func (cs *ChatService) handleToolRequestCycle(
 }
 
 // executeToolsForSession executes the requested tools for a session.
+// It validates that all requested tools are allowed for the active skills before execution.
 func (cs *ChatService) executeToolsForSession(
 	ctx context.Context,
 	sessionID string,
 	toolCalls []dto.ToolCallInfo,
 ) (*dto.ToolExecutionBatchResponse, error) {
+	// Validate that all tools are allowed for active skills
+	if err := cs.validateToolsAllowedForSession(sessionID, toolCalls); err != nil {
+		return nil, err
+	}
+
 	toolReqs := make([]dto.ToolExecuteRequest, len(toolCalls))
 	for i, tc := range toolCalls {
 		toolReqs[i] = dto.ToolExecuteRequest{
@@ -376,6 +383,18 @@ func (cs *ChatService) executeToolsForSession(
 		return nil, fmt.Errorf("failed to execute tools: %w", err)
 	}
 	return batchResp, nil
+}
+
+// validateToolsAllowedForSession checks if all requested tools are allowed for the session's active skills.
+// Returns an error if any tool is not in the allowed set.
+func (cs *ChatService) validateToolsAllowedForSession(sessionID string, toolCalls []dto.ToolCallInfo) error {
+	// Check each tool call against the allowed set using ConversationService
+	for _, tc := range toolCalls {
+		if err := cs.conversationService.ValidateToolAllowed(sessionID, tc.ToolName); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // displayToolResults displays the results of executed tools.
@@ -792,6 +811,118 @@ func (cs *ChatService) HandleThinkingCommand(_ context.Context, sessionID string
 	default:
 		return errors.New("invalid thinking mode: must be 'on', 'off', or 'toggle'")
 	}
+}
+
+// HandleSkillsCommand handles the :skills command for listing and resetting active skills.
+//
+// Parameters:
+//   - ctx: Context for the operation
+//   - sessionID: The session ID
+//   - subcommand: The subcommand to execute ("list" or "reset")
+//
+// Returns:
+//   - bool: true if a command was handled, false if not recognized
+//   - error: An error if the command fails
+func (cs *ChatService) HandleSkillsCommand(_ context.Context, sessionID string, subcommand string) (bool, error) {
+	// Validate session exists first
+	_, err := cs.messageProcessUseCase.GetConversationState(sessionID)
+	if err != nil {
+		return true, errors.New("session not found")
+	}
+
+	switch strings.ToLower(subcommand) {
+	case "list":
+		return true, cs.handleSkillsList(sessionID)
+	case "reset":
+		return true, cs.handleSkillsReset(sessionID)
+	default:
+		return true, fmt.Errorf("unknown :skills subcommand %q. Available: list, reset", subcommand)
+	}
+}
+
+// handleSkillsList displays the list of currently active skills.
+func (cs *ChatService) handleSkillsList(sessionID string) error {
+	skills, err := cs.conversationService.GetActiveSkills(sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get active skills: %w", err)
+	}
+
+	if len(skills) == 0 {
+		_ = cs.userInterface.DisplaySystemMessage("No active skills")
+		return nil
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Active skills (%d):\n", len(skills))
+	
+	hasRestrictions := false
+	var globalAllowedTools []string
+	allowedToolsMap := make(map[string]bool)
+
+	for _, skill := range skills {
+		if len(skill.AllowedTools) > 0 {
+			hasRestrictions = true
+			for _, t := range skill.AllowedTools {
+				if !allowedToolsMap[t] {
+					allowedToolsMap[t] = true
+					globalAllowedTools = append(globalAllowedTools, t)
+				}
+			}
+		}
+	}
+
+	sort.Strings(globalAllowedTools)
+
+	for _, skill := range skills {
+		fmt.Fprintf(&sb, "  - %s", skill.Name)
+		if len(skill.AllowedTools) > 0 {
+			fmt.Fprintf(&sb, " (allowed-tools: %s)", strings.Join(skill.AllowedTools, ", "))
+		} else if hasRestrictions {
+			fmt.Fprintf(&sb, " (restricted by other skills)")
+		}
+		sb.WriteString("\n")
+	}
+	
+	if hasRestrictions {
+		sb.WriteString("\nImportant: Session is restricted to tools: ")
+		sb.WriteString(strings.Join(globalAllowedTools, ", "))
+		sb.WriteString("\n")
+	}
+	
+	_ = cs.userInterface.DisplaySystemMessage(sb.String())
+	return nil
+}
+
+// handleSkillsReset clears all active skills after user confirmation.
+func (cs *ChatService) handleSkillsReset(sessionID string) error {
+	skills, err := cs.conversationService.GetActiveSkills(sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get active skills: %w", err)
+	}
+
+	if len(skills) == 0 {
+		_ = cs.userInterface.DisplaySystemMessage("No active skills to reset")
+		return nil
+	}
+
+	// Ask for confirmation
+	confirmed := cs.userInterface.Confirm(
+		fmt.Sprintf("Clear %d active skill(s)?", len(skills)),
+		"This will remove all skill tool restrictions",
+	)
+
+	if !confirmed {
+		_ = cs.userInterface.DisplaySystemMessage("Skills reset cancelled")
+		return nil
+	}
+
+	// Clear all active skills
+	if err := cs.conversationService.SetActiveSkills(sessionID, nil); err != nil {
+		return fmt.Errorf("failed to reset skills: %w", err)
+	}
+
+	_ = cs.userInterface.DisplaySystemMessage(fmt.Sprintf("Cleared %d active skill(s)", len(skills)))
+	return nil
 }
 
 // GetPorts returns references to the internal ports for advanced use cases.
