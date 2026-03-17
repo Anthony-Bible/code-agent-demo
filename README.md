@@ -2,9 +2,11 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-blue.svg)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Build Status](https://github.com/Anthony-Bible/code-editing-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Anthony-Bible/code-editing-agent/actions)
+[![Build Status](https://github.com/Anthony-Bible/github.com/anthony-bible/code-agent-demo/actions/workflows/ci.yml/badge.svg)](https://github.com/Anthony-Bible/github.com/anthony-bible/code-agent-demo/actions)
 
 A sophisticated AI-powered command-line coding assistant built with Go using hexagonal (clean) architecture principles. The agent provides an interactive chat interface for code exploration, editing, and analysis with integrated tool capabilities and advanced AI features.
+
+![Demo](demo.gif)
 
 ## 🌟 Key Features
 
@@ -209,7 +211,7 @@ flowchart TB
 ## Project Structure
 
 ```
-code-editing-agent/
+github.com/anthony-bible/code-agent-demo/
 ├── cmd/
 │   └── cli/
 │       ├── main.go              # CLI entry point
@@ -262,8 +264,8 @@ code-editing-agent/
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/anthony-bible/code-editing-agent.git
-   cd code-editing-agent
+   git clone https://github.com/anthony-bible/github.com/anthony-bible/code-agent-demo.git
+   cd github.com/anthony-bible/code-agent-demo
    ```
 
 2. **Install dependencies**
@@ -279,7 +281,7 @@ code-editing-agent/
 #### Method 2: Global Install via Go
 
 ```bash
-go install github.com/anthony-bible/code-editing-agent/cmd/cli@latest
+go install github.com/anthony-bible/github.com/anthony-bible/code-agent-demo/cmd/cli@latest
 ```
 
 ### Verify Installation
@@ -903,10 +905,10 @@ go test ./internal/application/usecase -run TestAlertInvestigation -v
 
 ```bash
 # Standard build
-go build -o code-editing-agent ./cmd/cli
+go build -o github.com/anthony-bible/code-agent-demo ./cmd/cli
 
 # Optimized build (smaller binary)
-go build -ldflags="-s -w" -o code-editing-agent ./cmd/cli
+go build -ldflags="-s -w" -o github.com/anthony-bible/code-agent-demo ./cmd/cli
 ```
 
 ### Code Quality
@@ -1013,8 +1015,8 @@ Implementations of the ports defined in the domain:
 package alert
 
 import (
-    "code-editing-agent/internal/domain/entity"
-    "code-editing-agent/internal/domain/port"
+    "github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+    "github.com/anthony-bible/code-agent-demo/internal/domain/port"
     "context"
 )
 
