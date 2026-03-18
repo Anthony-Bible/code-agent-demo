@@ -2,11 +2,12 @@
 package usecase
 
 import (
-	"code-editing-agent/internal/domain/entity"
-	"code-editing-agent/internal/domain/port"
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 )
 
 // Sentinel errors for prompt builder operations.

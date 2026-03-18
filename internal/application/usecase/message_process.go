@@ -4,13 +4,14 @@
 package usecase
 
 import (
-	"code-editing-agent/internal/application/dto"
-	"code-editing-agent/internal/domain/port"
-	"code-editing-agent/internal/domain/service"
 	"context"
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/application/dto"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/service"
 )
 
 var (

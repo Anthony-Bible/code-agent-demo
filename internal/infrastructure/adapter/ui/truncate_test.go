@@ -1,11 +1,12 @@
 package ui_test
 
 import (
-	"code-editing-agent/internal/infrastructure/adapter/ui"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/ui"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

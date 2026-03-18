@@ -11,15 +11,16 @@
 package tool
 
 import (
-	"code-editing-agent/internal/application/usecase"
-	"code-editing-agent/internal/domain/port"
-	"code-editing-agent/internal/infrastructure/adapter/file"
 	"context"
 	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/application/usecase"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
 )
 
 // =============================================================================

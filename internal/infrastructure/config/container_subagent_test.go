@@ -1,11 +1,12 @@
 package config
 
 import (
-	"code-editing-agent/internal/domain/entity"
 	"context"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 )
 
 // =============================================================================

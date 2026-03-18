@@ -2,7 +2,6 @@ package ui
 
 import (
 	"bufio"
-	"code-editing-agent/internal/domain/port"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,6 +11,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 
 	"github.com/chzyer/readline"
 )
@@ -25,7 +27,7 @@ const (
 // defaultMaxHistoryEntries is the default number of history entries to store.
 const defaultMaxHistoryEntries = 100
 
-// CLIAdapter implements the UserInterface port using the command line.
+// CLIAdapter implements the UserInterface and RCAReporter ports using the command line.
 type CLIAdapter struct {
 	input              io.Reader
 	output             io.Writer
@@ -53,6 +55,7 @@ func defaultColorScheme() port.ColorScheme {
 		Tool:      "\x1b[92m", // Green
 		Prompt:    "\x1b[94m", // Blue
 		Thinking:  "\x1b[95m", // Bright Magenta
+		Reset:     "\x1b[0m",  // Reset
 	}
 }
 
@@ -410,6 +413,72 @@ func (c *CLIAdapter) DisplayThinking(content string) error {
 	defer c.mu.Unlock()
 	_, err := c.output.Write([]byte(buf.String()))
 	return err
+}
+
+// DisplayRCAFindings displays structured Root Cause Analysis findings.
+func (c *CLIAdapter) DisplayRCAFindings(findings []entity.RCAFinding) error {
+	if len(findings) == 0 {
+		return nil
+	}
+
+	var buf strings.Builder
+	c.writeRCAHeader(&buf)
+
+	for i, finding := range findings {
+		if i > 0 {
+			buf.WriteString("\n---\n")
+		}
+		c.writeRCAFinding(&buf, finding)
+	}
+	c.writeRCAFooter(&buf)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, err := c.output.Write([]byte(buf.String()))
+	return err
+}
+
+func (c *CLIAdapter) writeRCAHeader(buf *strings.Builder) {
+	buf.WriteString("\n" + c.colors.System + "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" + c.colors.Reset + "\n")
+	buf.WriteString(c.colors.System + "ROOT CAUSE ANALYSIS" + c.colors.Reset + "\n")
+	buf.WriteString(c.colors.System + "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" + c.colors.Reset + "\n")
+}
+
+func (c *CLIAdapter) writeRCAFooter(buf *strings.Builder) {
+	buf.WriteString(c.colors.System + "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" + c.colors.Reset + "\n\n")
+}
+
+func (c *CLIAdapter) writeRCAFinding(buf *strings.Builder, finding entity.RCAFinding) {
+	fmt.Fprintf(buf, "\n%sSUMMARY: %s%s\n", c.colors.Assistant, finding.Summary, c.colors.Reset)
+
+	fmt.Fprintf(buf, "\n%sIDENTIFIED CAUSES:%s\n", c.colors.Error, c.colors.Reset)
+	for _, cause := range finding.Causes {
+		c.writeCause(buf, cause)
+	}
+
+	fmt.Fprintf(buf, "\n%sSUGGESTED REMEDIES:%s\n", c.colors.Tool, c.colors.Reset)
+	for _, remedy := range finding.Remedies {
+		c.writeRemedy(buf, remedy)
+	}
+}
+
+func (c *CLIAdapter) writeCause(buf *strings.Builder, cause entity.Cause) {
+	fmt.Fprintf(buf, "  • [%s] %s (Confidence: %.2f)\n", cause.ID, cause.Description, cause.ConfidenceScore)
+	if len(cause.Evidence) > 0 {
+		buf.WriteString("    Evidence:\n")
+		for _, ev := range cause.Evidence {
+			fmt.Fprintf(buf, "      - %s\n", ev)
+		}
+	}
+}
+
+func (c *CLIAdapter) writeRemedy(buf *strings.Builder, remedy entity.Remedy) {
+	fmt.Fprintf(buf, "  • %s (Impact: %s)\n", remedy.Description, remedy.Impact)
+	if len(remedy.ActionableSteps) > 0 {
+		for _, step := range remedy.ActionableSteps {
+			fmt.Fprintf(buf, "    - %s\n", step)
+		}
+	}
 }
 
 // DisplaySubagentStatus displays a status message for subagent execution.

@@ -23,13 +23,14 @@
 package subagent
 
 import (
-	"code-editing-agent/internal/domain/entity"
-	"code-editing-agent/internal/domain/port"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 )
 
 // DirConfig represents a directory to search for subagents with its source type.

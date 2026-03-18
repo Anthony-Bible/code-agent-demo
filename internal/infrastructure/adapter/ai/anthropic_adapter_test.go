@@ -1,9 +1,10 @@
 package ai
 
 import (
-	"code-editing-agent/internal/domain/port"
 	"context"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 )
 
 // TestConvertTools_WithRequiredField verifies that when a tool has a required field,

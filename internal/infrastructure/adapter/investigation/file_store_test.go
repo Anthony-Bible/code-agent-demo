@@ -1,8 +1,6 @@
 package investigation
 
 import (
-	"code-editing-agent/internal/application/service"
-	"code-editing-agent/internal/test/helpers"
 	"context"
 	"errors"
 	"os"
@@ -10,6 +8,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/application/service"
+	"github.com/anthony-bible/code-agent-demo/internal/test/helpers"
 )
 
 // =============================================================================

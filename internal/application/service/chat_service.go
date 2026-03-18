@@ -3,11 +3,6 @@
 package service
 
 import (
-	"code-editing-agent/internal/application/dto"
-	"code-editing-agent/internal/application/usecase"
-	"code-editing-agent/internal/domain/entity"
-	"code-editing-agent/internal/domain/port"
-	"code-editing-agent/internal/domain/service"
 	"context"
 	"errors"
 	"fmt"
@@ -15,6 +10,12 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/application/dto"
+	"github.com/anthony-bible/code-agent-demo/internal/application/usecase"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/service"
 )
 
 var (
@@ -854,7 +855,7 @@ func (cs *ChatService) handleSkillsList(sessionID string) error {
 
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Active skills (%d):\n", len(skills))
-	
+
 	hasRestrictions := false
 	var globalAllowedTools []string
 	allowedToolsMap := make(map[string]bool)
@@ -882,13 +883,13 @@ func (cs *ChatService) handleSkillsList(sessionID string) error {
 		}
 		sb.WriteString("\n")
 	}
-	
+
 	if hasRestrictions {
 		sb.WriteString("\nImportant: Session is restricted to tools: ")
 		sb.WriteString(strings.Join(globalAllowedTools, ", "))
 		sb.WriteString("\n")
 	}
-	
+
 	_ = cs.userInterface.DisplaySystemMessage(sb.String())
 	return nil
 }

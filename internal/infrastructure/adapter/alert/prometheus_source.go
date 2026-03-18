@@ -3,36 +3,13 @@
 package alert
 
 import (
-	"code-editing-agent/internal/domain/entity"
-	"code-editing-agent/internal/domain/port"
 	"context"
 	"encoding/json"
-	"errors"
-	"strings"
 	"time"
-)
 
-// Configuration errors for alert sources.
-var (
-	errSourceNameRequired   = errors.New("source name is required")
-	errWebhookPathRequired  = errors.New("webhook path is required")
-	errWebhookPathNoSlash   = errors.New("webhook path must start with a leading slash")
-	errWebhookPathTraversal = errors.New("webhook path contains path traversal")
-	errEmptyPayload         = errors.New("empty payload")
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 )
-
-// SourceConfig contains configuration for creating an alert source.
-// It provides a unified configuration structure for all alert source types.
-type SourceConfig struct {
-	// Type specifies the alert source type (e.g., "prometheus", "grafana").
-	Type string
-	// Name is the unique identifier for this source instance.
-	Name string
-	// WebhookPath is the HTTP path for receiving webhooks (required for webhook sources).
-	WebhookPath string
-	// Extra contains additional source-specific configuration options.
-	Extra map[string]string
-}
 
 // PrometheusSource implements port.WebhookAlertSource for Prometheus Alertmanager.
 // It parses Alertmanager webhook payloads and converts them to domain Alert entities.
@@ -60,17 +37,8 @@ type alertmanagerAlert struct {
 // NewPrometheusSource creates a new Prometheus alert source from the given configuration.
 // Returns an error if the name or webhook path is invalid.
 func NewPrometheusSource(config SourceConfig) (port.AlertSource, error) {
-	if strings.TrimSpace(config.Name) == "" {
-		return nil, errSourceNameRequired
-	}
-	if strings.TrimSpace(config.WebhookPath) == "" {
-		return nil, errWebhookPathRequired
-	}
-	if !strings.HasPrefix(config.WebhookPath, "/") {
-		return nil, errWebhookPathNoSlash
-	}
-	if strings.Contains(config.WebhookPath, "..") {
-		return nil, errWebhookPathTraversal
+	if err := validateSourceConfig(config); err != nil {
+		return nil, err
 	}
 
 	return &PrometheusSource{

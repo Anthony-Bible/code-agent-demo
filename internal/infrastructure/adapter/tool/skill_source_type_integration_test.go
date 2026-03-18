@@ -1,14 +1,15 @@
 package tool
 
 import (
-	"code-editing-agent/internal/domain/entity"
-	"code-editing-agent/internal/infrastructure/adapter/file"
-	"code-editing-agent/internal/infrastructure/adapter/skill"
 	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/skill"
 )
 
 // TestSkillActivationShowsCorrectSourceType verifies that skills from different

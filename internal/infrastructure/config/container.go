@@ -3,28 +3,29 @@
 package config
 
 import (
-	appconfig "code-editing-agent/internal/application/config"
-	appsvc "code-editing-agent/internal/application/service"
-	"code-editing-agent/internal/application/usecase"
-	"code-editing-agent/internal/domain/entity"
-	"code-editing-agent/internal/domain/port"
-	"code-editing-agent/internal/domain/safety"
-	"code-editing-agent/internal/domain/service"
-	"code-editing-agent/internal/infrastructure/adapter/ai"
-	"code-editing-agent/internal/infrastructure/adapter/alert"
-	"code-editing-agent/internal/infrastructure/adapter/file"
-	"code-editing-agent/internal/infrastructure/adapter/investigation"
-	"code-editing-agent/internal/infrastructure/adapter/skill"
-	"code-editing-agent/internal/infrastructure/adapter/subagent"
-	"code-editing-agent/internal/infrastructure/adapter/tool"
-	"code-editing-agent/internal/infrastructure/adapter/ui"
-	"code-editing-agent/internal/infrastructure/adapter/webhook"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
+
+	appconfig "github.com/anthony-bible/code-agent-demo/internal/application/config"
+	appsvc "github.com/anthony-bible/code-agent-demo/internal/application/service"
+	"github.com/anthony-bible/code-agent-demo/internal/application/usecase"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/safety"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/service"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/ai"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/alert"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/investigation"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/skill"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/subagent"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/tool"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/ui"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/webhook"
 )
 
 // investigationStoreAdapter adapts FileInvestigationStore to the usecase.InvestigationStoreWriter interface.
@@ -189,7 +190,7 @@ func NewContainer(cfg *Config) (*Container, error) {
 
 	// Step 4: Create investigation and alert handling components
 	investigationUseCase, alertSourceManager, webhookAdapter, err := createInvestigationComponents(
-		cfg, convService, toolExecutor, skillManager, uiAdapter,
+		cfg, convService, toolExecutor, skillManager, uiAdapter, aiAdapter,
 	)
 	if err != nil {
 		return nil, err
@@ -225,6 +226,7 @@ func createInvestigationComponents(
 	toolExecutor port.ToolExecutor,
 	skillManager port.SkillManager,
 	uiAdapter port.UserInterface,
+	aiAdapter port.AIProvider,
 ) (*usecase.AlertInvestigationUseCase, port.AlertSourceManager, *webhook.HTTPAdapter, error) {
 	// Create safety config (single source of truth for safety settings)
 	safetyConfig := appconfig.DefaultInvestigationConfig()
@@ -265,6 +267,13 @@ func createInvestigationComponents(
 	investigationUseCase.SetToolExecutor(toolExecutor)
 	investigationUseCase.SetSkillManager(skillManager)
 	investigationUseCase.SetUIAdapter(uiAdapter)
+	if reporter, ok := uiAdapter.(port.RCAReporter); ok {
+		investigationUseCase.SetRCAReporter(reporter)
+	}
+
+	// Wire RCA service
+	rcaService := service.NewRCAService(aiAdapter)
+	investigationUseCase.SetRCAService(rcaService)
 
 	// Wire prompt builder (generic builder for all alert types)
 	promptRegistry := usecase.NewPromptBuilderRegistry()

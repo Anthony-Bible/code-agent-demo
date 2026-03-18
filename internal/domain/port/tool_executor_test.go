@@ -1,9 +1,10 @@
 package port
 
 import (
-	"code-editing-agent/internal/domain/entity"
 	"context"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 )
 
 // TestToolExecutorInterface_Contract validates that ToolExecutor interface exists with expected methods.

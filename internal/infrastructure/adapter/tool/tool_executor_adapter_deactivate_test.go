@@ -1,12 +1,13 @@
 package tool
 
 import (
-	"code-editing-agent/internal/domain/port"
-	"code-editing-agent/internal/infrastructure/adapter/file"
 	"context"
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
 )
 
 func TestDeactivateSkill_WithCallback(t *testing.T) {

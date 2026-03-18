@@ -40,7 +40,7 @@ type Config struct {
 	GoodbyeMessage string
 
 	// HistoryFile is the path to the command history file.
-	// Defaults to "~/.code-editing-agent-history".
+	// Defaults to "~/.code-agent-demo-history".
 	// Set to empty string to disable history persistence.
 	HistoryFile string
 
@@ -101,7 +101,7 @@ func Defaults() *Config {
 		WorkingDir:               ".",
 		WelcomeMessage:           "Chat with Claude (use 'ctrl+c' to quit)",
 		GoodbyeMessage:           "Bye!",
-		HistoryFile:              "~/.code-editing-agent-history",
+		HistoryFile:              "~/.code-agent-demo-history",
 		HistoryMaxEntries:        1000,
 		ExtendedThinking:         false,
 		ThinkingBudget:           10000,

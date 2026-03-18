@@ -1,7 +1,6 @@
 package subagent
 
 import (
-	"code-editing-agent/internal/domain/entity"
 	"context"
 	"errors"
 	"os"
@@ -9,6 +8,8 @@ import (
 	"sort"
 	"sync"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 )
 
 // =============================================================================

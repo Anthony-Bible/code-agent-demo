@@ -2,10 +2,11 @@
 package config
 
 import (
-	"code-editing-agent/internal/domain/safety"
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/safety"
 )
 
 // Sentinel errors for InvestigationConfig validation.

@@ -3,12 +3,13 @@
 package alert
 
 import (
-	"code-editing-agent/internal/domain/entity"
-	"code-editing-agent/internal/domain/port"
 	"context"
 	"encoding/json"
 	"strings"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 )
 
 // GCPMonitoringSource implements port.WebhookAlertSource for Google Cloud Monitoring.
@@ -66,17 +67,8 @@ type gcpMetadata struct {
 // NewGCPMonitoringSource creates a new GCP Monitoring alert source from the given configuration.
 // Returns an error if the name or webhook path is invalid.
 func NewGCPMonitoringSource(config SourceConfig) (port.AlertSource, error) {
-	if strings.TrimSpace(config.Name) == "" {
-		return nil, errSourceNameRequired
-	}
-	if strings.TrimSpace(config.WebhookPath) == "" {
-		return nil, errWebhookPathRequired
-	}
-	if !strings.HasPrefix(config.WebhookPath, "/") {
-		return nil, errWebhookPathNoSlash
-	}
-	if strings.Contains(config.WebhookPath, "..") {
-		return nil, errWebhookPathTraversal
+	if err := validateSourceConfig(config); err != nil {
+		return nil, err
 	}
 
 	return &GCPMonitoringSource{

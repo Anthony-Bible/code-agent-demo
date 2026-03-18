@@ -2,16 +2,16 @@
 package usecase
 
 import (
-	"code-editing-agent/internal/domain/entity"
-	"code-editing-agent/internal/domain/port"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 )
 
 // Special tool names for investigation control.
@@ -26,6 +26,11 @@ const (
 // context was cancelled.
 const conversationCleanupTimeout = 5 * time.Second
 
+// RCAServiceInterface defines the interface for Root Cause Analysis correlation.
+type RCAServiceInterface interface {
+	Correlate(ctx context.Context, findings []entity.InvestigationFinding) ([]entity.RCAFinding, error)
+}
+
 // InvestigationRunner orchestrates AI-driven alert investigations.
 // It manages the conversation loop with an AI provider, executes tools,
 // and tracks investigation progress.
@@ -35,6 +40,7 @@ type InvestigationRunner struct {
 	safetyEnforcer SafetyEnforcer
 	promptBuilder  PromptBuilderRegistry
 	skillManager   port.SkillManager
+	rcaService     RCAServiceInterface
 	store          InvestigationStoreWriter
 	uiAdapter      port.UserInterface
 	config         AlertInvestigationUseCaseConfig
@@ -48,6 +54,7 @@ type InvestigationRunner struct {
 //   - safetyEnforcer: Enforcer for safety policies during investigation (optional, can be nil)
 //   - promptBuilder: Registry for building investigation prompts
 //   - skillManager: Manager for discovering and loading skills (optional, can be nil)
+//   - rcaService: Service for Root Cause Analysis correlation (optional, can be nil)
 //   - uiAdapter: User interface for displaying thinking and messages (optional, can be nil)
 //   - config: Configuration for investigation limits and behavior
 //
@@ -58,6 +65,7 @@ func NewInvestigationRunner(
 	safetyEnforcer SafetyEnforcer,
 	promptBuilder PromptBuilderRegistry,
 	skillManager port.SkillManager,
+	rcaService RCAServiceInterface,
 	uiAdapter port.UserInterface,
 	config AlertInvestigationUseCaseConfig,
 ) *InvestigationRunner {
@@ -70,7 +78,7 @@ func NewInvestigationRunner(
 	if promptBuilder == nil {
 		panic("promptBuilder cannot be nil")
 	}
-	// safetyEnforcer, skillManager, and uiAdapter are optional and can be nil
+	// safetyEnforcer, skillManager, rcaService, and uiAdapter are optional and can be nil
 
 	return &InvestigationRunner{
 		convService:    convService,
@@ -78,6 +86,7 @@ func NewInvestigationRunner(
 		safetyEnforcer: safetyEnforcer,
 		promptBuilder:  promptBuilder,
 		skillManager:   skillManager,
+		rcaService:     rcaService,
 		uiAdapter:      uiAdapter,
 		config:         config,
 	}
@@ -91,6 +100,7 @@ func NewInvestigationRunner(
 //   - safetyEnforcer: Enforcer for safety policies during investigation (optional, can be nil)
 //   - promptBuilder: Registry for building investigation prompts
 //   - skillManager: Manager for discovering and loading skills (optional, can be nil)
+//   - rcaService: Service for Root Cause Analysis correlation (optional, can be nil)
 //   - uiAdapter: User interface for displaying thinking and messages (optional, can be nil)
 //   - store: Store for persisting investigation state
 //   - config: Configuration for investigation limits and behavior
@@ -102,6 +112,7 @@ func NewInvestigationRunnerWithStore(
 	safetyEnforcer SafetyEnforcer,
 	promptBuilder PromptBuilderRegistry,
 	skillManager port.SkillManager,
+	rcaService RCAServiceInterface,
 	uiAdapter port.UserInterface,
 	store InvestigationStoreWriter,
 	config AlertInvestigationUseCaseConfig,
@@ -115,7 +126,7 @@ func NewInvestigationRunnerWithStore(
 	if promptBuilder == nil {
 		panic("promptBuilder cannot be nil")
 	}
-	// safetyEnforcer, skillManager, and uiAdapter are optional and can be nil
+	// safetyEnforcer, skillManager, rcaService, and uiAdapter are optional and can be nil
 
 	return &InvestigationRunner{
 		convService:    convService,
@@ -123,10 +134,18 @@ func NewInvestigationRunnerWithStore(
 		safetyEnforcer: safetyEnforcer,
 		promptBuilder:  promptBuilder,
 		skillManager:   skillManager,
+		rcaService:     rcaService,
 		uiAdapter:      uiAdapter,
 		store:          store,
 		config:         config,
 	}
+}
+
+// SetRCAService sets the RCA service for the runner.
+// SetRCAService sets the RCA service. InvestigationRunner is not shared across
+// goroutines; each investigation creates a new runner instance.
+func (r *InvestigationRunner) SetRCAService(rcaService RCAServiceInterface) {
+	r.rcaService = rcaService
 }
 
 // runContext holds state for an investigation run.
@@ -307,6 +326,38 @@ func (r *InvestigationRunner) Run(
 
 	result, err := r.runInvestigationLoop(rc)
 
+	// Perform Root Cause Analysis if findings were gathered and RCA service is available
+	if result != nil && (result.Status == "completed" || result.Status == "escalated") && len(result.Findings) > 0 && r.rcaService != nil {
+		slog.Info("findings gathered, triggering RCA correlation",
+			"investigation_id", result.InvestigationID,
+			"findings_count", len(result.Findings))
+
+		// Convert findings to InvestigationFinding entities for the RCA service
+		// In a real scenario, we might want to store InvestigationFinding entities in the result directly.
+		// For now, we'll create simple observation findings from the string findings.
+		invFindings := make([]entity.InvestigationFinding, len(result.Findings))
+		for i, f := range result.Findings {
+			invFindings[i] = entity.InvestigationFinding{
+				Type:        "observation",
+				Description: f,
+				Severity:    "info",
+				Timestamp:   time.Now(),
+			}
+		}
+
+		rcaFindings, rcaErr := r.rcaService.Correlate(ctx, invFindings)
+		if rcaErr != nil {
+			slog.Error("RCA correlation failed",
+				"investigation_id", result.InvestigationID,
+				"error", rcaErr)
+		} else {
+			result.RCAFindings = rcaFindings
+			slog.Info("RCA correlation successful",
+				"investigation_id", result.InvestigationID,
+				"rca_findings_count", len(rcaFindings))
+		}
+	}
+
 	// Persist result to store if configured
 	if r.store != nil && result != nil {
 		stub := &simpleInvestigationRecord{
@@ -324,12 +375,9 @@ func (r *InvestigationRunner) Run(
 			escalateReason: result.EscalateReason,
 		}
 		if err := r.store.Store(ctx, stub); err != nil {
-			fmt.Fprintf(
-				os.Stderr,
-				"[InvestigationRunner] Failed to store result for %s: %v\n",
-				result.InvestigationID,
-				err,
-			)
+			slog.Error("failed to store result",
+				"investigation_id", result.InvestigationID,
+				"error", err)
 		}
 	}
 
@@ -584,15 +632,12 @@ func (r *InvestigationRunner) runInvestigationLoop(rc *runContext) (*Investigati
 
 		if rc.actionsTaken >= rc.maxActions {
 			if err := r.handleMaxActionsReached(rc); err != nil {
-				fmt.Fprintf(os.Stderr, "[InvestigationRunner] Error handling max actions: %v\n", err)
+				slog.Error("error handling max actions", "error", err)
 			}
 			break
 		}
 	}
-	fmt.Fprintf(
-		os.Stderr,
-		"[InvestigationRunner] Investigation loop ended naturally (no complete_investigation call). Using default completedResult.\n",
-	)
+	slog.Info("investigation loop ended naturally", "investigation_id", rc.investigationID)
 	return rc.completedResult(), nil
 }
 
@@ -612,13 +657,9 @@ func (r *InvestigationRunner) handleNoToolCalls(rc *runContext, msg *entity.Mess
 			msgContent = msgContent[:200] + "..."
 		}
 	}
-	fmt.Fprintf(os.Stderr, "[InvestigationRunner] AI responded without tool calls. Message: %s\n", msgContent)
+	slog.Info("AI responded without tool calls", "message_preview", msgContent)
 
 	// End loop naturally and return completed result
-	fmt.Fprintf(
-		os.Stderr,
-		"[InvestigationRunner] Investigation loop ended naturally (no complete_investigation call). Using default completedResult.\n",
-	)
 	return rc.completedResult(), nil
 }
 
@@ -628,7 +669,7 @@ func (r *InvestigationRunner) injectTurnWarningIfNeeded(rc *runContext) {
 	warningMsg := r.buildTurnWarningMessage(remaining)
 	if warningMsg != "" {
 		if _, err := r.convService.AddUserMessage(rc.ctx, rc.sessionID, warningMsg); err != nil {
-			fmt.Fprintf(os.Stderr, "[InvestigationRunner] Failed to add warning message: %v\n", err)
+			slog.Error("failed to add warning message", "error", err)
 		}
 	}
 }
@@ -636,22 +677,19 @@ func (r *InvestigationRunner) injectTurnWarningIfNeeded(rc *runContext) {
 // handleMaxActionsReached handles the scenario where max actions limit is reached.
 // Sends a summary request and allows one final AI response.
 func (r *InvestigationRunner) handleMaxActionsReached(rc *runContext) error {
-	fmt.Fprintf(
-		os.Stderr,
-		"[InvestigationRunner] Max actions limit reached (%d/%d). Requesting summary.\n",
-		rc.actionsTaken,
-		rc.maxActions,
-	)
+	slog.Info("max actions limit reached, requesting summary",
+		"actions_taken", rc.actionsTaken,
+		"max_actions", rc.maxActions)
 
 	summaryMsg := "TURN LIMIT REACHED: You have reached the maximum number of allowed turns for this investigation. Please provide a summary of your findings and conclusions based on the investigation performed so far."
 	if _, err := r.convService.AddUserMessage(rc.ctx, rc.sessionID, summaryMsg); err != nil {
-		fmt.Fprintf(os.Stderr, "[InvestigationRunner] Failed to add summary request: %v\n", err)
+		slog.Error("failed to add summary request", "error", err)
 		return err
 	}
 
 	_, _, err := r.convService.ProcessAssistantResponse(rc.ctx, rc.sessionID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[InvestigationRunner] Error processing final summary response: %v\n", err)
+		slog.Error("error processing final summary response", "error", err)
 		return err
 	}
 
@@ -667,8 +705,8 @@ func (r *InvestigationRunner) displayThinkingContent(content string) {
 		_ = r.uiAdapter.DisplayThinking(content)
 		return
 	}
-	// Fallback to stderr if no UI adapter (for backward compatibility)
-	fmt.Fprintf(os.Stderr, "\x1b[95m[THINKING]\x1b[0m %s\n", content)
+	// Fallback to slog if no UI adapter - log ONLY the length for security
+	slog.Debug("THINKING_CONTENT_RECEIVED", "length", len(content))
 }
 
 // getNextToolCalls retrieves and limits the next batch of tool calls.
@@ -714,9 +752,13 @@ func (r *InvestigationRunner) processLoopIteration(
 	}
 
 	if separated.completion != nil {
-		// Log the raw input for debugging
+		// Log the truncated input for debugging without leaking full sensitive findings
 		inputJSON, _ := json.Marshal(separated.completion.Input)
-		fmt.Fprintf(os.Stderr, "[InvestigationRunner] complete_investigation called with input: %s\n", inputJSON)
+		inputPreview := string(inputJSON)
+		if len(inputPreview) > 200 {
+			inputPreview = inputPreview[:200] + "..."
+		}
+		slog.Info("complete_investigation called", "input_preview", inputPreview)
 
 		return rc.buildCompletionResult(separated.completion.Input), true, nil
 	}

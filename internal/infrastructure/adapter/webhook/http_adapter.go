@@ -4,8 +4,6 @@
 package webhook
 
 import (
-	"code-editing-agent/internal/domain/entity"
-	"code-editing-agent/internal/domain/port"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,6 +12,9 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 )
 
 // maxBodySize is the maximum allowed size for webhook request bodies (10MB).
@@ -117,7 +118,7 @@ func (a *HTTPAdapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	path := "/alerts/" + sourcePath
 
 	// Find the matching webhook source
-	source := a.findWebhookSource(path)
+	source := a.sourceManager.GetWebhookSourceByPath(path)
 	if source == nil {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"error":"unknown webhook path"}`))
@@ -243,19 +244,6 @@ func (a *HTTPAdapter) handleWebhookAsync(
 		"message": "no investigations started (alerts filtered)",
 	})
 	_, _ = w.Write(resp)
-}
-
-// findWebhookSource finds a webhook source by its path.
-func (a *HTTPAdapter) findWebhookSource(path string) port.WebhookAlertSource {
-	sources := a.sourceManager.ListSources()
-	for _, src := range sources {
-		if webhookSrc, ok := src.(port.WebhookAlertSource); ok {
-			if webhookSrc.WebhookPath() == path {
-				return webhookSrc
-			}
-		}
-	}
-	return nil
 }
 
 // SetAlertHandler sets the callback for handling parsed alerts synchronously.

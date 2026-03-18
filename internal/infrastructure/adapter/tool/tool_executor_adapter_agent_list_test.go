@@ -1,14 +1,15 @@
 package tool_test
 
 import (
-	"code-editing-agent/internal/domain/entity"
-	"code-editing-agent/internal/infrastructure/adapter/file"
-	"code-editing-agent/internal/infrastructure/adapter/subagent"
-	"code-editing-agent/internal/infrastructure/adapter/tool"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/subagent"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/tool"
 )
 
 func TestTaskToolIncludesAvailableAgents(t *testing.T) {

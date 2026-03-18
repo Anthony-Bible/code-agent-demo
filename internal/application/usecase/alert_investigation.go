@@ -1,14 +1,15 @@
 package usecase
 
 import (
-	"code-editing-agent/internal/domain/entity"
-	"code-editing-agent/internal/domain/port"
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 )
 
 // ConversationServiceInterface defines the interface for managing AI conversation sessions.
@@ -170,16 +171,17 @@ func (a *AlertForInvestigation) IsCritical() bool {
 // InvestigationResult represents the outcome of an investigation.
 // It provides a summary of what happened during the investigation.
 type InvestigationResult struct {
-	InvestigationID string        // Unique identifier for this investigation
-	AlertID         string        // ID of the investigated alert
-	Status          string        // Final status (completed, failed, escalated)
-	Findings        []string      // Summary of findings discovered
-	ActionsTaken    int           // Number of tool executions performed
-	Duration        time.Duration // Total investigation time
-	Confidence      float64       // Confidence level in the outcome [0.0, 1.0]
-	Escalated       bool          // Whether the investigation was escalated
-	EscalateReason  string        // Reason for escalation, if applicable
-	Error           error         // Any error that occurred
+	InvestigationID string              // Unique identifier for this investigation
+	AlertID         string              // ID of the investigated alert
+	Status          string              // Final status (completed, failed, escalated)
+	Findings        []string            // Summary of findings discovered
+	RCAFindings     []entity.RCAFinding // Structured Root Cause Analysis findings
+	ActionsTaken    int                 // Number of tool executions performed
+	Duration        time.Duration       // Total investigation time
+	Confidence      float64             // Confidence level in the outcome [0.0, 1.0]
+	Escalated       bool                // Whether the investigation was escalated
+	EscalateReason  string              // Reason for escalation, if applicable
+	Error           error               // Any error that occurred
 }
 
 // AlertInvestigationUseCaseConfig holds configuration for the investigation use case.
@@ -210,7 +212,9 @@ type AlertInvestigationUseCase struct {
 	convService           ConversationServiceInterface    // Conversation service for AI interaction
 	toolExecutor          port.ToolExecutor               // Tool executor for running tools
 	skillManager          port.SkillManager               // Skill manager for discovering skills
+	rcaService            RCAServiceInterface             // RCA correlation service
 	uiAdapter             port.UserInterface              // User interface for displaying output
+	rcaReporter           port.RCAReporter                // Reporter for RCA findings
 	shutdown              bool                            // True after Shutdown is called
 	idCounter             int64                           // Counter for generating unique IDs
 }
@@ -303,6 +307,7 @@ func (uc *AlertInvestigationUseCase) RunInvestigation(
 	toolExecutor := uc.toolExecutor
 	promptBuilder := uc.promptBuilderRegistry
 	skillManager := uc.skillManager
+	rcaService := uc.rcaService
 	uiAdapter := uc.uiAdapter
 	config := uc.config
 	store := uc.investigationStore
@@ -321,6 +326,7 @@ func (uc *AlertInvestigationUseCase) RunInvestigation(
 		enforcer,
 		promptBuilder,
 		skillManager,
+		rcaService,
 		uiAdapter,
 		config,
 	)
@@ -393,7 +399,9 @@ func (uc *AlertInvestigationUseCase) StartInvestigation(
 	if uc.investigationStore != nil {
 		stub := newSimpleInvestigationRecord(invID, alert.ID(), "", "started")
 		if err := uc.investigationStore.Store(ctx, stub); err != nil {
-			fmt.Fprintf(os.Stderr, "[AlertInvestigation] Failed to store investigation %s: %v\n", invID, err)
+			slog.Error("failed to store investigation",
+				"investigation_id", invID,
+				"error", err)
 		}
 	}
 
@@ -424,7 +432,9 @@ func (uc *AlertInvestigationUseCase) StopInvestigation(ctx context.Context, invI
 	if uc.investigationStore != nil {
 		stub := newSimpleInvestigationRecord(invID, inv.alertID, "", "stopped")
 		if err := uc.investigationStore.Update(ctx, stub); err != nil {
-			fmt.Fprintf(os.Stderr, "[AlertInvestigation] Failed to update investigation %s: %v\n", invID, err)
+			slog.Error("failed to update investigation",
+				"investigation_id", invID,
+				"error", err)
 		}
 	}
 
@@ -546,6 +556,34 @@ func (uc *AlertInvestigationUseCase) SetUIAdapter(ui port.UserInterface) {
 	uc.mu.Lock()
 	defer uc.mu.Unlock()
 	uc.uiAdapter = ui
+}
+
+// SetRCAReporter configures the RCA reporter for displaying structured findings.
+func (uc *AlertInvestigationUseCase) SetRCAReporter(reporter port.RCAReporter) {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
+	uc.rcaReporter = reporter
+}
+
+// SetRCAService configures the RCA correlation service.
+func (uc *AlertInvestigationUseCase) SetRCAService(rca RCAServiceInterface) {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
+	uc.rcaService = rca
+}
+
+// UIAdapter returns the current user interface adapter.
+func (uc *AlertInvestigationUseCase) UIAdapter() port.UserInterface {
+	uc.mu.RLock()
+	defer uc.mu.RUnlock()
+	return uc.uiAdapter
+}
+
+// RCAReporter returns the current RCA reporter.
+func (uc *AlertInvestigationUseCase) RCAReporter() port.RCAReporter {
+	uc.mu.RLock()
+	defer uc.mu.RUnlock()
+	return uc.rcaReporter
 }
 
 // IsToolAllowed checks if a tool name is allowed by the safety enforcer.

@@ -1,8 +1,9 @@
 package subagent
 
 import (
-	"code-editing-agent/internal/domain/entity"
 	"errors"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 )
 
 var (

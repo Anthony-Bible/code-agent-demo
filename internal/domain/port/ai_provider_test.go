@@ -1,10 +1,11 @@
 package port
 
 import (
-	"code-editing-agent/internal/domain/entity"
 	"context"
 	"encoding/json"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 )
 
 // TestAIProviderInterface_Contract validates that AIProvider interface exists with expected methods.

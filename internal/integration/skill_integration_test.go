@@ -3,17 +3,18 @@
 package integration
 
 import (
-	"code-editing-agent/internal/domain/port"
-	"code-editing-agent/internal/infrastructure/adapter/ai"
-	"code-editing-agent/internal/infrastructure/adapter/file"
-	"code-editing-agent/internal/infrastructure/adapter/skill"
-	"code-editing-agent/internal/infrastructure/adapter/tool"
 	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/ai"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/skill"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/tool"
 )
 
 // newTestSkillManager creates a skill manager for testing with only the specified directory.

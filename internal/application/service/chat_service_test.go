@@ -1,15 +1,16 @@
 package service
 
 import (
-	"code-editing-agent/internal/domain/entity"
-	"code-editing-agent/internal/domain/port"
-	serviceDomain "code-editing-agent/internal/domain/service"
-	"code-editing-agent/internal/infrastructure/adapter/file"
-	"code-editing-agent/internal/infrastructure/adapter/tool"
-	"code-editing-agent/internal/infrastructure/adapter/ui"
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
+	serviceDomain "github.com/anthony-bible/code-agent-demo/internal/domain/service"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/tool"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/ui"
 )
 
 // =============================================================================

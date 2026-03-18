@@ -18,7 +18,6 @@
 package file
 
 import (
-	"code-editing-agent/internal/domain/port"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -26,6 +25,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 )
 
 // Custom error types for better error handling and context.

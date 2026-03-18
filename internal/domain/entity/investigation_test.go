@@ -587,3 +587,47 @@ func TestInvestigationStatusConstants(t *testing.T) {
 		t.Errorf("InvestigationStatusEscalated = %v, want escalated", InvestigationStatusEscalated)
 	}
 }
+
+// =============================================================================
+// RCA Finding Tests
+// =============================================================================
+
+func TestInvestigation_InitialRCAFindingsEmpty(t *testing.T) {
+	inv, err := NewInvestigation("inv-001", "alert-001", "session-001")
+	if err != nil {
+		t.Fatalf("NewInvestigation() error = %v", err)
+	}
+	if inv.RCAFindings() == nil {
+		t.Error("RCAFindings() should not be nil")
+	}
+	if len(inv.RCAFindings()) != 0 {
+		t.Errorf("RCAFindings() should be empty, got %v items", len(inv.RCAFindings()))
+	}
+}
+
+func TestInvestigation_AddRCAFinding(t *testing.T) {
+	inv, err := NewInvestigation("inv-001", "alert-001", "session-001")
+	if err != nil {
+		t.Fatalf("NewInvestigation() error = %v", err)
+	}
+
+	finding := RCAFinding{
+		Summary: "Summary of the issue",
+		Causes: []Cause{
+			{ID: "C1", Description: "Cause 1", ConfidenceScore: 0.9},
+		},
+		Remedies: []Remedy{
+			{Description: "Remedy 1", Impact: "High", ActionableSteps: []string{"Step 1"}},
+		},
+	}
+
+	inv.AddRCAFinding(finding)
+
+	findings := inv.RCAFindings()
+	if len(findings) != 1 {
+		t.Fatalf("RCAFindings() len = %v, want 1", len(findings))
+	}
+	if findings[0].Summary != "Summary of the issue" {
+		t.Errorf("RCAFinding Summary = %v, want 'Summary of the issue'", findings[0].Summary)
+	}
+}

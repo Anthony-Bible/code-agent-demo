@@ -3,14 +3,16 @@ package ui_test
 import (
 	"bufio"
 	"bytes"
-	"code-editing-agent/internal/domain/port"
-	"code-editing-agent/internal/infrastructure/adapter/ui"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/ui"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -2069,5 +2071,58 @@ func TestCLIAdapter_GetUserInput_InteractiveMode(t *testing.T) {
 		assert.True(t, adapter.IsInteractive(),
 			"SetInteractive(true) should set interactive mode flag")
 		_ = ok // Result depends on implementation
+	})
+}
+
+func TestCLIAdapter_DisplayRCAFindings(t *testing.T) {
+	t.Run("successfully displays RCA findings", func(t *testing.T) {
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(strings.NewReader(""), output)
+
+		findings := []entity.RCAFinding{
+			{
+				Summary: "Test RCA Summary",
+				Causes: []entity.Cause{
+					{
+						ID:              "C1",
+						Description:     "Test Cause",
+						ConfidenceScore: 0.9,
+						Evidence:        []string{"Test Evidence"},
+					},
+				},
+				Remedies: []entity.Remedy{
+					{
+						Description:     "Test Remedy",
+						ActionableSteps: []string{"Step 1"},
+						Impact:          "High",
+					},
+				},
+			},
+		}
+
+		err := adapter.DisplayRCAFindings(findings)
+
+		require.NoError(t, err)
+		out := output.String()
+		assert.Contains(t, out, "ROOT CAUSE ANALYSIS")
+		assert.Contains(t, out, "SUMMARY: Test RCA Summary")
+		assert.Contains(t, out, "IDENTIFIED CAUSES:")
+		assert.Contains(t, out, "[C1] Test Cause")
+		assert.Contains(t, out, "Confidence: 0.90")
+		assert.Contains(t, out, "Test Evidence")
+		assert.Contains(t, out, "SUGGESTED REMEDIES:")
+		assert.Contains(t, out, "Test Remedy")
+		assert.Contains(t, out, "Impact: High")
+		assert.Contains(t, out, "Step 1")
+	})
+
+	t.Run("does nothing for empty findings", func(t *testing.T) {
+		output := &strings.Builder{}
+		adapter := ui.NewCLIAdapterWithIO(strings.NewReader(""), output)
+
+		err := adapter.DisplayRCAFindings(nil)
+
+		require.NoError(t, err)
+		assert.Empty(t, output.String())
 	})
 }

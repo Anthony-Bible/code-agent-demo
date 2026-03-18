@@ -1,11 +1,12 @@
 package config
 
 import (
-	"code-editing-agent/internal/domain/safety"
-	"code-editing-agent/internal/infrastructure/adapter/ui"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/safety"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/ui"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -44,10 +45,10 @@ func TestContainer_UsesHistoryConfig(t *testing.T) {
 		cliAdapter, ok := container.UIAdapter().(*ui.CLIAdapter)
 		require.True(t, ok, "UIAdapter should be a *ui.CLIAdapter")
 
-		// Default HistoryFile gets expanded from "~/.code-editing-agent-history"
+		// Default HistoryFile gets expanded from "~/.code-agent-demo-history"
 		homeDir, err := os.UserHomeDir()
 		require.NoError(t, err, "should be able to get home directory")
-		expectedPath := filepath.Join(homeDir, ".code-editing-agent-history")
+		expectedPath := filepath.Join(homeDir, ".code-agent-demo-history")
 		assert.Equal(t, expectedPath, cliAdapter.GetHistoryFile(),
 			"CLIAdapter should expand ~ in HistoryFile from config")
 	})

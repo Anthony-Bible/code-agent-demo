@@ -13,9 +13,9 @@ func TestConfig_HistoryDefaults(t *testing.T) {
 	t.Run("HistoryFile has default value", func(t *testing.T) {
 		cfg := Defaults()
 
-		// HistoryFile should default to ~/.code-editing-agent-history
-		assert.Equal(t, "~/.code-editing-agent-history", cfg.HistoryFile,
-			"HistoryFile should default to ~/.code-editing-agent-history")
+		// HistoryFile should default to ~/.code-agent-demo-history
+		assert.Equal(t, "~/.code-agent-demo-history", cfg.HistoryFile,
+			"HistoryFile should default to ~/.code-agent-demo-history")
 	})
 
 	t.Run("HistoryMaxEntries has default value of 1000", func(t *testing.T) {

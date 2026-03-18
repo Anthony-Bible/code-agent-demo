@@ -1,7 +1,6 @@
 package investigation
 
 import (
-	"code-editing-agent/internal/application/service"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/application/service"
 )
 
 // investigationJSON is the JSON representation of an investigation for file storage.

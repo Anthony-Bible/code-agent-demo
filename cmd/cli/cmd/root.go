@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"code-editing-agent/internal/infrastructure/config"
-	signalhandler "code-editing-agent/internal/infrastructure/signal"
 	"context"
 	"errors"
 	"fmt"
@@ -10,6 +8,9 @@ import (
 	"net/http/pprof"
 	"os"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/config"
+	signalhandler "github.com/anthony-bible/code-agent-demo/internal/infrastructure/signal"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -70,7 +71,7 @@ var executeChat func(cmd *cobra.Command, args []string) error
 
 // rootCmd represents the base command when called without any subcommands.
 var rootCmd = &cobra.Command{
-	Use:   "code-editing-agent",
+	Use:   "code-agent-demo",
 	Short: "AI-powered code editing assistant",
 	Long: `Code Editing Agent is an AI-powered assistant that helps you
 write, edit, and understand code through an interactive chat interface.

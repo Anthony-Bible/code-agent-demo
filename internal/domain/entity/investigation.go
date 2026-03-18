@@ -1,4 +1,4 @@
-// Package entity contains the core domain entities for the code-editing-agent.
+// Package entity contains the core domain entities for the github.com/anthony-bible/code-agent-demo.
 package entity
 
 import (
@@ -104,6 +104,7 @@ type Investigation struct {
 	isEscalated bool                   // Whether investigation was escalated to humans
 	startedAt   time.Time              // When the investigation began
 	completedAt time.Time              // When the investigation finished (zero if ongoing)
+	rcaFindings []RCAFinding           // Root Cause Analysis findings
 }
 
 // NewInvestigation creates a new Investigation with the required fields.
@@ -130,13 +131,14 @@ func NewInvestigation(id, alertID, sessionID string) (*Investigation, error) {
 	}
 
 	return &Investigation{
-		id:        id,
-		alertID:   alertID,
-		sessionID: sessionID,
-		status:    InvestigationStatusStarted,
-		findings:  []InvestigationFinding{},
-		actions:   []InvestigationAction{},
-		startedAt: time.Now(),
+		id:          id,
+		alertID:     alertID,
+		sessionID:   sessionID,
+		status:      InvestigationStatusStarted,
+		findings:    []InvestigationFinding{},
+		actions:     []InvestigationAction{},
+		rcaFindings: []RCAFinding{},
+		startedAt:   time.Now(),
 	}, nil
 }
 
@@ -333,4 +335,13 @@ func (i *Investigation) TransitionTo(newStatus string) error {
 // has already progressed beyond the initial state.
 func (i *Investigation) Start() error {
 	return i.TransitionTo(InvestigationStatusRunning)
+}
+
+// RCAFindings returns the list of Root Cause Analysis findings.
+// The returned slice should be treated as read-only.
+func (i *Investigation) RCAFindings() []RCAFinding { return i.rcaFindings }
+
+// AddRCAFinding appends a new RCA finding to the investigation's RCA findings list.
+func (i *Investigation) AddRCAFinding(finding RCAFinding) {
+	i.rcaFindings = append(i.rcaFindings, finding)
 }

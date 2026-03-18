@@ -3,15 +3,40 @@
 package alert
 
 import (
-	"code-editing-agent/internal/domain/port"
+	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
+)
+
+// Configuration errors for alert sources.
+var (
+	errSourceNameRequired   = errors.New("source name is required")
+	errWebhookPathRequired  = errors.New("webhook path is required")
+	errWebhookPathNoSlash   = errors.New("webhook path must start with a leading slash")
+	errWebhookPathTraversal = errors.New("webhook path contains path traversal")
+	errEmptyPayload         = errors.New("empty payload")
 )
 
 // AlertSourceFactory creates a source from configuration.
 // Implementations should validate config and return an error if invalid.
 type AlertSourceFactory func(cfg SourceConfig) (port.AlertSource, error)
+
+// SourceConfig contains configuration for creating an alert source.
+// It provides a unified configuration structure for all alert source types.
+type SourceConfig struct {
+	// Type specifies the alert source type (e.g., "prometheus", "grafana").
+	Type string
+	// Name is the unique identifier for this source instance.
+	Name string
+	// WebhookPath is the HTTP path for receiving webhooks (required for webhook sources).
+	WebhookPath string
+	// Extra contains additional source-specific configuration options.
+	Extra map[string]string
+}
 
 // SourceRegistry manages alert source factories using a thread-safe registry.
 // It provides a central place to register and instantiate alert sources.
@@ -68,4 +93,22 @@ func (r *SourceRegistry) SupportedTypes() []string {
 func (r *SourceRegistry) RegisterBuiltinFactories() {
 	r.RegisterFactory("prometheus", NewPrometheusSource)
 	r.RegisterFactory("gcp_monitoring", NewGCPMonitoringSource)
+}
+
+// validateSourceConfig performs common validation for alert source configurations.
+// Returns an error if the name or webhook path is invalid.
+func validateSourceConfig(config SourceConfig) error {
+	if strings.TrimSpace(config.Name) == "" {
+		return errSourceNameRequired
+	}
+	if strings.TrimSpace(config.WebhookPath) == "" {
+		return errWebhookPathRequired
+	}
+	if !strings.HasPrefix(config.WebhookPath, "/") {
+		return errWebhookPathNoSlash
+	}
+	if strings.Contains(config.WebhookPath, "..") {
+		return errWebhookPathTraversal
+	}
+	return nil
 }

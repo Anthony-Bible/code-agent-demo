@@ -2,13 +2,14 @@
 package usecase
 
 import (
-	"code-editing-agent/internal/domain/entity"
-	"code-editing-agent/internal/domain/port"
 	"context"
 	"errors"
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 )
 
 // SubagentRunnerInterface defines the interface for running subagents.

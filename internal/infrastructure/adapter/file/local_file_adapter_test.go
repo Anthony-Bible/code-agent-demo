@@ -1,13 +1,14 @@
 package file_test
 
 import (
-	"code-editing-agent/internal/infrastructure/adapter/file"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
