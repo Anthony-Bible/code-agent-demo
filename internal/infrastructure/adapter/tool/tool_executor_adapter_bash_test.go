@@ -1,13 +1,14 @@
 package tool
 
 import (
-	"code-editing-agent/internal/infrastructure/adapter/file"
 	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
 )
 
 // bashOutput represents the expected output structure from bash tool.

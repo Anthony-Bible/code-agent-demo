@@ -3,8 +3,6 @@
 package usecase
 
 import (
-	"code-editing-agent/internal/domain/entity"
-	"code-editing-agent/internal/domain/port"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +10,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 )
 
 // =============================================================================
@@ -363,6 +364,7 @@ func TestInvestigationRunner_CreatesSession(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxConcurrent: 5,
@@ -402,6 +404,7 @@ func TestInvestigationRunner_EndsSessionOnCompletion(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -440,6 +443,7 @@ func TestInvestigationRunner_EndsSessionOnError(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -476,6 +480,7 @@ func TestInvestigationRunner_StartConversationError(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -518,6 +523,7 @@ func TestInvestigationRunner_SendsAlertContext(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -576,6 +582,7 @@ func TestInvestigationRunner_UsesPromptBuilder(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -623,6 +630,7 @@ func TestInvestigationRunner_PromptBuilderError(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -682,6 +690,7 @@ func TestInvestigationRunner_ExecutesToolCalls(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -739,6 +748,7 @@ func TestInvestigationRunner_FeedsResultsBack(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -812,6 +822,7 @@ func TestInvestigationRunner_MultipleIterations(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -877,6 +888,7 @@ func TestInvestigationRunner_StopsAtMaxActions(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -933,6 +945,7 @@ func TestInvestigationRunner_ToolExecutionError(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -986,6 +999,7 @@ func TestInvestigationRunner_BlockedToolByEnforcer(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -1049,6 +1063,7 @@ func TestInvestigationRunner_MultipleToolsInSingleIteration(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -1111,6 +1126,7 @@ func TestInvestigationRunner_RespectsContextCancellation(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -1148,6 +1164,7 @@ func TestInvestigationRunner_RespectsTimeout(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -1189,6 +1206,7 @@ func TestInvestigationRunner_ReturnsCorrectResultStructure(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -1233,6 +1251,7 @@ func TestInvestigationRunner_NilAlertReturnsError(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -1364,6 +1383,7 @@ func TestInvestigationRunner_Run_TableDriven(t *testing.T) {
 				safetyEnforcer,
 				promptBuilder,
 				nil, // skillManager
+				nil, // rcaService
 				nil, // uiAdapter
 				tt.config,
 			)
@@ -1456,6 +1476,7 @@ func TestNewInvestigationRunner_NotNil(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		config,
 	)
@@ -1488,6 +1509,7 @@ func TestInvestigationRunner_EmptyInvestigationID(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -1521,6 +1543,7 @@ func TestInvestigationRunner_WhitespaceInvestigationID(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -1553,6 +1576,7 @@ func TestInvestigationRunner_AlertWithEmptyID(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -1614,6 +1638,7 @@ func TestInvestigationRunner_SafetyEnforcerBlocksCommand(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -1675,6 +1700,7 @@ func TestInvestigationRunner_SafetyEnforcerActionBudgetExceeded(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -1718,6 +1744,7 @@ func TestInvestigationRunner_SafetyEnforcerTimeout(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -1775,6 +1802,7 @@ func TestInvestigationRunner_EscalatesOnConsecutiveErrors(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -1811,6 +1839,7 @@ func TestInvestigationRunner_EscalatesForCriticalAlert(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			AutoStartForCritical: true,
@@ -1849,6 +1878,7 @@ func TestInvestigationRunner_DoesNotEscalateOnHighConfidence(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -1899,6 +1929,7 @@ func TestInvestigationRunner_FiltersToolsByAllowedList(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -1943,6 +1974,7 @@ func TestInvestigationRunner_EmptyAllowedToolsBlocksAll(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -1987,6 +2019,7 @@ func TestInvestigationRunner_EmptyAssistantResponse(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -2035,6 +2068,7 @@ func TestInvestigationRunner_MalformedToolInput(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -2071,6 +2105,7 @@ func TestInvestigationRunner_NilToolCallInfo(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -2112,6 +2147,7 @@ func TestInvestigationRunner_PersistsToStore(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		store,
 		AlertInvestigationUseCaseConfig{},
@@ -2159,6 +2195,7 @@ func TestInvestigationRunner_UpdatesStoreOnCompletion(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		store,
 		AlertInvestigationUseCaseConfig{},
@@ -2196,6 +2233,7 @@ func TestInvestigationRunner_UpdatesStoreOnError(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		store,
 		AlertInvestigationUseCaseConfig{},
@@ -2247,6 +2285,7 @@ func TestInvestigationRunner_CollectsFindings(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -2289,6 +2328,7 @@ func TestInvestigationRunner_ResultContainsSummary(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -2331,6 +2371,7 @@ func TestInvestigationRunner_ConcurrentRuns(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{
 			MaxConcurrent: 10,
@@ -2412,6 +2453,7 @@ func TestInvestigationRunner_TracksDuration(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -2461,6 +2503,7 @@ func TestInvestigationRunner_ErrorContainsContext(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -2501,6 +2544,7 @@ func TestInvestigationRunner_AddUserMessageError(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -2550,6 +2594,7 @@ func TestInvestigationRunner_AddToolResultMessageError(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -2602,6 +2647,7 @@ func TestInvestigationRunner_HandlesLongToolOutput(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -2641,6 +2687,7 @@ func TestInvestigationRunner_HandlesSpecialCharactersInAlert(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -2736,6 +2783,7 @@ func TestNewInvestigationRunner_WithNilDependencies(t *testing.T) {
 				tt.safetyEnforcer,
 				tt.promptBuilder,
 				nil, // skillManager
+				nil, // rcaService
 				nil, // uiAdapter
 				AlertInvestigationUseCaseConfig{},
 			)
@@ -2757,6 +2805,7 @@ func TestNewInvestigationRunnerWithStore_NotNil(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		store,
 		config,
@@ -2794,6 +2843,7 @@ func TestInvestigationRunner_ZeroMaxActions(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -2831,6 +2881,7 @@ func TestInvestigationRunner_ZeroDuration(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -2866,6 +2917,7 @@ func TestInvestigationRunner_NegativeValues(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -2924,6 +2976,7 @@ func TestInvestigationRunner_DetectsCompleteInvestigation(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -2990,6 +3043,7 @@ func TestInvestigationRunner_ExtractsCompletionData(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -3064,6 +3118,7 @@ func TestInvestigationRunner_DetectsEscalateInvestigation(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -3131,6 +3186,7 @@ func TestInvestigationRunner_ExtractsEscalationData(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -3213,6 +3269,7 @@ func TestInvestigationRunner_CompletionStopsLoop(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -3282,6 +3339,7 @@ func TestInvestigationRunner_EscalationStopsLoop(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -3361,6 +3419,7 @@ func TestInvestigationRunner_MixedToolCallsWithCompletion(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -3448,6 +3507,7 @@ func TestInvestigationRunner_Run_CallsSetCustomSystemPrompt(t *testing.T) {
 		nil,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -3519,6 +3579,7 @@ func TestInvestigationRunner_Run_SetCustomSystemPromptCalledBeforeAddUserMessage
 		nil,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -3578,6 +3639,7 @@ func TestInvestigationRunner_Run_AddUserMessageContainsMinimalAlertOnly(t *testi
 		nil,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -3656,6 +3718,7 @@ func TestInvestigationRunner_Run_SetCustomSystemPromptErrorPropagated(t *testing
 		nil,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -3775,6 +3838,7 @@ Please prioritize your remaining actions carefully. Consider using the batch_too
 				nil, // safetyEnforcer
 				promptBuilder,
 				nil, // skillManager
+				nil, // rcaService
 				nil, // uiAdapter
 				AlertInvestigationUseCaseConfig{},
 			)
@@ -3845,6 +3909,7 @@ func TestInvestigationRunner_InjectsWarningAtMaxActionsMinus5(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -3976,6 +4041,7 @@ func TestInvestigationRunner_InjectsCountdownWarnings(t *testing.T) {
 				safetyEnforcer, // safetyEnforcer
 				promptBuilder,
 				nil, // skillManager
+				nil, // rcaService
 				nil, // uiAdapter
 				AlertInvestigationUseCaseConfig{},
 			)
@@ -4048,6 +4114,7 @@ func TestInvestigationRunner_SendsSummaryRequestAtMaxActions(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -4147,6 +4214,7 @@ func TestInvestigationRunner_WarningMessageOrdering(t *testing.T) {
 		safetyEnforcer,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -4237,6 +4305,7 @@ func TestInvestigationRunner_NoWarningsWhenNotReachingLimit(t *testing.T) {
 		nil,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		AlertInvestigationUseCaseConfig{},
 	)
@@ -4302,6 +4371,7 @@ func TestInvestigationRunner_Run_ThinkingModeEnabled(t *testing.T) {
 		nil, // no safety enforcer
 		promptBuilder,
 		nil, // no skill manager
+		nil, // rcaService
 		nil, // uiAdapter
 		config,
 	)
@@ -4364,6 +4434,7 @@ func TestInvestigationRunner_Run_ThinkingModeDisabled(t *testing.T) {
 		nil,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		config,
 	)
@@ -4411,6 +4482,7 @@ func TestInvestigationRunner_Run_ThinkingModeDefaultBudget(t *testing.T) {
 		nil,
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		nil, // uiAdapter
 		config,
 	)
@@ -4476,6 +4548,7 @@ func TestInvestigationRunner_DisplayThinkingViaUIAdapter(t *testing.T) {
 		nil, // safetyEnforcer
 		promptBuilder,
 		nil, // skillManager
+		nil, // rcaService
 		uiAdapter,
 		config,
 	)
@@ -4531,4 +4604,161 @@ func (t *testUIAdapter) ConfirmBashCommand(command string, isDangerous bool, rea
 
 func (t *testUIAdapter) Confirm(_ string, _ string) bool {
 	return false
+}
+
+// mockRCAService implements RCAServiceInterface for testing.
+type mockRCAService struct {
+	mu                sync.Mutex
+	correlateCalls    int
+	correlateFindings []entity.InvestigationFinding
+	correlateResult   []entity.RCAFinding
+	correlateError    error
+}
+
+func (m *mockRCAService) Correlate(ctx context.Context, findings []entity.InvestigationFinding) ([]entity.RCAFinding, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.correlateCalls++
+	m.correlateFindings = findings
+	return m.correlateResult, m.correlateError
+}
+
+func TestInvestigationRunner_RCA(t *testing.T) {
+	// Arrange
+	convService := newInvestigationRunnerConvServiceMock()
+	convService.startConversationSession = "inv-session-rca"
+
+	// Configure AI to return a completion message with findings
+	convService.processResponseMessages = []*entity.Message{
+		createAssistantMessage("Investigation complete."),
+	}
+	// The completion tool call will contain findings
+	completionToolCall := port.ToolCallInfo{
+		ToolID:   "call-123",
+		ToolName: toolCompleteInvestigation,
+		Input: map[string]interface{}{
+			"confidence": 0.9,
+			"findings": []interface{}{
+				"High CPU detected",
+				"Indexer process is leaking resources",
+			},
+		},
+	}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{{completionToolCall}}
+
+	toolExecutor := newInvestigationRunnerToolExecutorMock()
+	safetyEnforcer := NewMockSafetyEnforcer()
+	promptBuilder := newInvestigationRunnerPromptBuilderMock()
+
+	rcaService := &mockRCAService{
+		correlateResult: []entity.RCAFinding{
+			{
+				Summary: "Memory leak in indexer",
+				Causes: []entity.Cause{
+					{ID: "C1", Description: "Resource leak", ConfidenceScore: 0.95},
+				},
+				Remedies: []entity.Remedy{
+					{Description: "Restart indexer", ActionableSteps: []string{"systemctl restart indexer"}, Impact: "High"},
+					{Description: "Fix leak", ActionableSteps: []string{"Update code"}, Impact: "High"},
+				},
+			},
+		},
+	}
+
+	runner := NewInvestigationRunner(
+		convService,
+		toolExecutor,
+		safetyEnforcer,
+		promptBuilder,
+		nil, // skillManager
+		rcaService,
+		nil, // uiAdapter
+		AlertInvestigationUseCaseConfig{},
+	)
+
+	alert := createTestAlert("alert-rca", "critical", "RCA Test")
+
+	// Act
+	result, err := runner.Run(context.Background(), alert, "inv-rca-001")
+	// Assert
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+	if rcaService.correlateCalls != 1 {
+		t.Errorf("Correlate() called %d times, want 1", rcaService.correlateCalls)
+	}
+	if len(result.RCAFindings) != 1 {
+		t.Errorf("len(result.RCAFindings) = %d, want 1", len(result.RCAFindings))
+	}
+	if result.RCAFindings[0].Summary != "Memory leak in indexer" {
+		t.Errorf("RCAFinding summary = %v, want 'Memory leak in indexer'", result.RCAFindings[0].Summary)
+	}
+}
+
+func TestInvestigationRunner_RCA_Escalated(t *testing.T) {
+	// Arrange
+	convService := newInvestigationRunnerConvServiceMock()
+	convService.startConversationSession = "inv-session-rca-escalated"
+
+	// Configure AI to return an escalation message
+	convService.processResponseMessages = []*entity.Message{
+		createAssistantMessage("I need human help."),
+	}
+	// The escalation tool call will contain partial findings
+	escalateToolCall := port.ToolCallInfo{
+		ToolID:   "call-escalate",
+		ToolName: toolEscalateInvestigation,
+		Input: map[string]interface{}{
+			"reason": "Too complex",
+			"partial_findings": []interface{}{
+				"Found unusual logs",
+				"Database connection is flapping",
+			},
+		},
+	}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{{escalateToolCall}}
+
+	toolExecutor := newInvestigationRunnerToolExecutorMock()
+	safetyEnforcer := NewMockSafetyEnforcer()
+	promptBuilder := newInvestigationRunnerPromptBuilderMock()
+
+	rcaService := &mockRCAService{
+		correlateResult: []entity.RCAFinding{
+			{
+				Summary: "Network instability suspected",
+			},
+		},
+	}
+
+	runner := NewInvestigationRunner(
+		convService,
+		toolExecutor,
+		safetyEnforcer,
+		promptBuilder,
+		nil, // skillManager
+		rcaService,
+		nil, // uiAdapter
+		AlertInvestigationUseCaseConfig{},
+	)
+
+	alert := createTestAlert("alert-escalate-rca", "critical", "Escalate RCA Test")
+
+	// Act
+	result, err := runner.Run(context.Background(), alert, "inv-rca-escalated-001")
+	// Assert
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+	if result.Status != "escalated" {
+		t.Errorf("Status = %v, want 'escalated'", result.Status)
+	}
+	if rcaService.correlateCalls != 1 {
+		t.Errorf("Correlate() called %d times, want 1", rcaService.correlateCalls)
+	}
+	if len(result.RCAFindings) != 1 {
+		t.Errorf("len(result.RCAFindings) = %d, want 1", len(result.RCAFindings))
+	}
+	if result.RCAFindings[0].Summary != "Network instability suspected" {
+		t.Errorf("RCAFinding summary = %v, want 'Network instability suspected'", result.RCAFindings[0].Summary)
+	}
 }

@@ -1,8 +1,9 @@
 package port
 
 import (
-	"code-editing-agent/internal/domain/entity"
 	"context"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 )
 
 // ToolExecutor defines the interface for tool execution and management.

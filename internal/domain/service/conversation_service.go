@@ -1,9 +1,6 @@
 package service
 
 import (
-	"code-editing-agent/internal/domain/entity"
-	"code-editing-agent/internal/domain/port"
-	"code-editing-agent/internal/domain/safety"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -15,6 +12,10 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/safety"
 )
 
 var (

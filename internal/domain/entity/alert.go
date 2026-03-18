@@ -1,4 +1,4 @@
-// Package entity contains the core domain entities for the code-editing-agent.
+// Package entity contains the core domain entities for the github.com/anthony-bible/code-agent-demo.
 // These entities represent the fundamental business objects and their behaviors.
 package entity
 

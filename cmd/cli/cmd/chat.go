@@ -1,13 +1,14 @@
 package cmd
 
 import (
-	appsvc "code-editing-agent/internal/application/service"
-	"code-editing-agent/internal/domain/port"
-	"code-editing-agent/internal/infrastructure/config"
 	"context"
 	"errors"
 	"fmt"
 	"strings"
+
+	appsvc "github.com/anthony-bible/code-agent-demo/internal/application/service"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/config"
 
 	"github.com/spf13/cobra"
 )

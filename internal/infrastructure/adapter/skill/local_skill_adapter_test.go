@@ -1,13 +1,14 @@
 package skill
 
 import (
-	"code-editing-agent/internal/domain/entity"
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"sort"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 )
 
 func TestLocalSkillManager_DiscoverSkills_EmptySkillsDirectory(t *testing.T) {

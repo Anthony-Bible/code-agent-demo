@@ -1,9 +1,11 @@
 package service
 
 import (
-	"code-editing-agent/internal/domain/entity"
 	"context"
+	"errors"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 )
 
 func TestValidateToolAllowed(t *testing.T) {
@@ -64,7 +66,7 @@ func TestValidateToolAllowed(t *testing.T) {
 		if err := service.ValidateToolAllowed(sessionID, "tool2"); err != nil {
 			t.Errorf("tool2 should be allowed")
 		}
-		
+
 		// Unrelated tool blocked
 		if err := service.ValidateToolAllowed(sessionID, "tool3"); err == nil {
 			t.Error("tool3 should be blocked")
@@ -80,7 +82,7 @@ func TestValidateToolAllowed(t *testing.T) {
 	// Test 4: Non-existent session
 	t.Run("non-existent session", func(t *testing.T) {
 		err := service.ValidateToolAllowed("fake-session", "any_tool")
-		if err != ErrConversationNotFound {
+		if !errors.Is(err, ErrConversationNotFound) {
 			t.Errorf("Expected ErrConversationNotFound, got: %v", err)
 		}
 	})

@@ -1,18 +1,18 @@
 package alert
 
 import (
-	"code-editing-agent/internal/domain/port"
 	"context"
 	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 )
 
 // Manager errors for source registration and lookup.
 var (
 	errSourceAlreadyRegistered = errors.New("source already registered")
 	errSourceNotFound          = errors.New("source not found")
-	errFailedToCloseSources    = errors.New("failed to close one or more sources")
 )
 
 // ErrorCallback is called when a source reports an error during operation.
@@ -24,6 +24,7 @@ type ErrorCallback func(source string, err error)
 type LocalAlertSourceManager struct {
 	mu            sync.RWMutex
 	sources       map[string]port.AlertSource
+	paths         map[string]port.WebhookAlertSource
 	alertHandler  port.AlertHandler
 	errorCallback ErrorCallback
 	started       bool
@@ -35,6 +36,7 @@ type LocalAlertSourceManager struct {
 func NewLocalAlertSourceManager() *LocalAlertSourceManager {
 	return &LocalAlertSourceManager{
 		sources: make(map[string]port.AlertSource),
+		paths:   make(map[string]port.WebhookAlertSource),
 	}
 }
 
@@ -50,6 +52,12 @@ func (m *LocalAlertSourceManager) RegisterSource(source port.AlertSource) error 
 	}
 
 	m.sources[name] = source
+
+	// If it's a webhook source, register its path
+	if webhookSrc, ok := source.(port.WebhookAlertSource); ok {
+		m.paths[webhookSrc.WebhookPath()] = webhookSrc
+	}
+
 	return nil
 }
 
@@ -65,6 +73,11 @@ func (m *LocalAlertSourceManager) UnregisterSource(name string) error {
 	}
 
 	delete(m.sources, name)
+
+	// Remove from paths map if it was a webhook source
+	if webhookSrc, ok := source.(port.WebhookAlertSource); ok {
+		delete(m.paths, webhookSrc.WebhookPath())
+	}
 
 	if err := source.Close(); err != nil {
 		return err
@@ -98,6 +111,15 @@ func (m *LocalAlertSourceManager) ListSources() []port.AlertSource {
 		sources = append(sources, source)
 	}
 	return sources
+}
+
+// GetWebhookSourceByPath retrieves a registered webhook source by its HTTP path.
+// Returns nil if no matching webhook source is found.
+func (m *LocalAlertSourceManager) GetWebhookSourceByPath(path string) port.WebhookAlertSource {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return m.paths[path]
 }
 
 // SetAlertHandler sets the callback function for processing incoming alerts.
@@ -148,7 +170,7 @@ func (m *LocalAlertSourceManager) Shutdown() error {
 	m.started = false
 
 	if len(closeErrors) > 0 {
-		return errFailedToCloseSources
+		return errors.Join(closeErrors...)
 	}
 
 	return nil

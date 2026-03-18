@@ -2,78 +2,22 @@ package webhook
 
 import (
 	"bytes"
-	"code-editing-agent/internal/domain/entity"
-	"code-editing-agent/internal/domain/port"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port/porttest"
 )
-
-var errSourceNotFound = errors.New("source not found")
-
-// mockAlertSource implements port.AlertSource for testing.
-type mockAlertSource struct {
-	name       string
-	sourceType port.SourceType
-}
-
-func (m *mockAlertSource) Name() string          { return m.name }
-func (m *mockAlertSource) Type() port.SourceType { return m.sourceType }
-func (m *mockAlertSource) Close() error          { return nil }
-
-// mockWebhookSource implements port.WebhookAlertSource for testing.
-type mockWebhookSource struct {
-	mockAlertSource
-
-	webhookPath string
-	handleFunc  func(ctx context.Context, payload []byte) ([]*entity.Alert, error)
-}
-
-func (m *mockWebhookSource) WebhookPath() string { return m.webhookPath }
-func (m *mockWebhookSource) HandleWebhook(ctx context.Context, payload []byte) ([]*entity.Alert, error) {
-	if m.handleFunc != nil {
-		return m.handleFunc(ctx, payload)
-	}
-	return nil, nil
-}
-
-// mockSourceManager implements port.AlertSourceManager for testing.
-type mockSourceManager struct {
-	sources      []port.AlertSource
-	alertHandler port.AlertHandler
-}
-
-func (m *mockSourceManager) RegisterSource(source port.AlertSource) error {
-	m.sources = append(m.sources, source)
-	return nil
-}
-
-func (m *mockSourceManager) UnregisterSource(_ string) error { return nil }
-func (m *mockSourceManager) GetSource(name string) (port.AlertSource, error) {
-	for _, s := range m.sources {
-		if s.Name() == name {
-			return s, nil
-		}
-	}
-	return nil, errSourceNotFound
-}
-
-func (m *mockSourceManager) ListSources() []port.AlertSource {
-	return m.sources
-}
-
-func (m *mockSourceManager) SetAlertHandler(handler port.AlertHandler) {
-	m.alertHandler = handler
-}
 
 func TestHTTPAdapter_HealthEndpoint(t *testing.T) {
 	t.Run("returns 200 OK", func(t *testing.T) {
-		manager := &mockSourceManager{}
+		manager := &porttest.MockAlertSourceManager{}
 		adapter := NewHTTPAdapter(manager, DefaultConfig())
 
 		req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -97,7 +41,7 @@ func TestHTTPAdapter_HealthEndpoint(t *testing.T) {
 
 func TestHTTPAdapter_ReadyEndpoint(t *testing.T) {
 	t.Run("returns 503 when no sources", func(t *testing.T) {
-		manager := &mockSourceManager{sources: []port.AlertSource{}}
+		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{}}
 		adapter := NewHTTPAdapter(manager, DefaultConfig())
 
 		req := httptest.NewRequest(http.MethodGet, "/ready", nil)
@@ -111,9 +55,9 @@ func TestHTTPAdapter_ReadyEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns 200 when sources registered", func(t *testing.T) {
-		manager := &mockSourceManager{
-			sources: []port.AlertSource{
-				&mockAlertSource{name: "test", sourceType: port.SourceTypeWebhook},
+		manager := &porttest.MockAlertSourceManager{
+			SourcesVal: []port.AlertSource{
+				&porttest.MockAlertSource{NameVal: "test", SourceTypeVal: port.SourceTypeWebhook},
 			},
 		}
 		adapter := NewHTTPAdapter(manager, DefaultConfig())
@@ -140,16 +84,16 @@ func TestHTTPAdapter_ReadyEndpoint(t *testing.T) {
 func TestHTTPAdapter_WebhookRouting(t *testing.T) {
 	t.Run("routes to correct source by path", func(t *testing.T) {
 		var receivedPayload []byte
-		webhookSource := &mockWebhookSource{
-			mockAlertSource: mockAlertSource{name: "prometheus", sourceType: port.SourceTypeWebhook},
-			webhookPath:     "/alerts/prometheus",
-			handleFunc: func(_ context.Context, payload []byte) ([]*entity.Alert, error) {
+		webhookSource := &porttest.MockWebhookSource{
+			MockAlertSource: &porttest.MockAlertSource{NameVal: "prometheus", SourceTypeVal: port.SourceTypeWebhook},
+			PathVal:         "/alerts/prometheus",
+			HandleFunc: func(_ context.Context, payload []byte) ([]*entity.Alert, error) {
 				receivedPayload = payload
 				alert, _ := entity.NewAlert("test-id", "prometheus", "warning", "Test Alert")
 				return []*entity.Alert{alert}, nil
 			},
 		}
-		manager := &mockSourceManager{sources: []port.AlertSource{webhookSource}}
+		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
 		adapter := NewHTTPAdapter(manager, DefaultConfig())
 
 		payload := `{"alerts":[]}`
@@ -177,7 +121,7 @@ func TestHTTPAdapter_WebhookRouting(t *testing.T) {
 	})
 
 	t.Run("returns 404 for unknown path", func(t *testing.T) {
-		manager := &mockSourceManager{sources: []port.AlertSource{}}
+		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{}}
 		adapter := NewHTTPAdapter(manager, DefaultConfig())
 
 		req := httptest.NewRequest(http.MethodPost, "/alerts/unknown", bytes.NewBufferString("{}"))
@@ -191,11 +135,11 @@ func TestHTTPAdapter_WebhookRouting(t *testing.T) {
 	})
 
 	t.Run("returns 404 for nested unknown path", func(t *testing.T) {
-		webhookSource := &mockWebhookSource{
-			mockAlertSource: mockAlertSource{name: "prometheus", sourceType: port.SourceTypeWebhook},
-			webhookPath:     "/alerts/prometheus",
+		webhookSource := &porttest.MockWebhookSource{
+			MockAlertSource: &porttest.MockAlertSource{NameVal: "prometheus", SourceTypeVal: port.SourceTypeWebhook},
+			PathVal:         "/alerts/prometheus",
 		}
-		manager := &mockSourceManager{sources: []port.AlertSource{webhookSource}}
+		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
 		adapter := NewHTTPAdapter(manager, DefaultConfig())
 
 		req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus/extra", bytes.NewBufferString("{}"))
@@ -209,14 +153,14 @@ func TestHTTPAdapter_WebhookRouting(t *testing.T) {
 	})
 
 	t.Run("routes to nested path correctly", func(t *testing.T) {
-		webhookSource := &mockWebhookSource{
-			mockAlertSource: mockAlertSource{name: "prometheus-staging", sourceType: port.SourceTypeWebhook},
-			webhookPath:     "/alerts/prometheus/staging",
-			handleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
+		webhookSource := &porttest.MockWebhookSource{
+			MockAlertSource: &porttest.MockAlertSource{NameVal: "prometheus-staging", SourceTypeVal: port.SourceTypeWebhook},
+			PathVal:         "/alerts/prometheus/staging",
+			HandleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
 				return []*entity.Alert{}, nil
 			},
 		}
-		manager := &mockSourceManager{sources: []port.AlertSource{webhookSource}}
+		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
 		adapter := NewHTTPAdapter(manager, DefaultConfig())
 
 		req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus/staging", bytes.NewBufferString("{}"))
@@ -232,11 +176,11 @@ func TestHTTPAdapter_WebhookRouting(t *testing.T) {
 
 func TestHTTPAdapter_MethodRouting(t *testing.T) {
 	t.Run("GET on webhook path returns 405", func(t *testing.T) {
-		webhookSource := &mockWebhookSource{
-			mockAlertSource: mockAlertSource{name: "prometheus", sourceType: port.SourceTypeWebhook},
-			webhookPath:     "/alerts/prometheus",
+		webhookSource := &porttest.MockWebhookSource{
+			MockAlertSource: &porttest.MockAlertSource{NameVal: "prometheus", SourceTypeVal: port.SourceTypeWebhook},
+			PathVal:         "/alerts/prometheus",
 		}
-		manager := &mockSourceManager{sources: []port.AlertSource{webhookSource}}
+		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
 		adapter := NewHTTPAdapter(manager, DefaultConfig())
 
 		req := httptest.NewRequest(http.MethodGet, "/alerts/prometheus", nil)
@@ -251,7 +195,7 @@ func TestHTTPAdapter_MethodRouting(t *testing.T) {
 	})
 
 	t.Run("POST on health endpoint returns 405", func(t *testing.T) {
-		manager := &mockSourceManager{}
+		manager := &porttest.MockAlertSourceManager{}
 		adapter := NewHTTPAdapter(manager, DefaultConfig())
 
 		req := httptest.NewRequest(http.MethodPost, "/health", nil)
@@ -268,16 +212,16 @@ func TestHTTPAdapter_MethodRouting(t *testing.T) {
 func TestHTTPAdapter_AlertHandlerIntegration(t *testing.T) {
 	t.Run("dispatches alerts to handler", func(t *testing.T) {
 		var handledAlerts []*entity.Alert
-		webhookSource := &mockWebhookSource{
-			mockAlertSource: mockAlertSource{name: "prometheus", sourceType: port.SourceTypeWebhook},
-			webhookPath:     "/alerts/prometheus",
-			handleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
+		webhookSource := &porttest.MockWebhookSource{
+			MockAlertSource: &porttest.MockAlertSource{NameVal: "prometheus", SourceTypeVal: port.SourceTypeWebhook},
+			PathVal:         "/alerts/prometheus",
+			HandleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
 				alert1, _ := entity.NewAlert("alert-1", "prometheus", "critical", "High CPU")
 				alert2, _ := entity.NewAlert("alert-2", "prometheus", "warning", "High Memory")
 				return []*entity.Alert{alert1, alert2}, nil
 			},
 		}
-		manager := &mockSourceManager{sources: []port.AlertSource{webhookSource}}
+		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
 		adapter := NewHTTPAdapter(manager, DefaultConfig())
 		adapter.SetAlertHandler(func(_ context.Context, alert *entity.Alert) error {
 			handledAlerts = append(handledAlerts, alert)
@@ -299,15 +243,15 @@ func TestHTTPAdapter_AlertHandlerIntegration(t *testing.T) {
 	})
 
 	t.Run("counts handler errors", func(t *testing.T) {
-		webhookSource := &mockWebhookSource{
-			mockAlertSource: mockAlertSource{name: "prometheus", sourceType: port.SourceTypeWebhook},
-			webhookPath:     "/alerts/prometheus",
-			handleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
+		webhookSource := &porttest.MockWebhookSource{
+			MockAlertSource: &porttest.MockAlertSource{NameVal: "prometheus", SourceTypeVal: port.SourceTypeWebhook},
+			PathVal:         "/alerts/prometheus",
+			HandleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
 				alert, _ := entity.NewAlert("alert-1", "prometheus", "critical", "Test")
 				return []*entity.Alert{alert}, nil
 			},
 		}
-		manager := &mockSourceManager{sources: []port.AlertSource{webhookSource}}
+		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
 		adapter := NewHTTPAdapter(manager, DefaultConfig())
 		adapter.SetAlertHandler(func(_ context.Context, _ *entity.Alert) error {
 			return context.DeadlineExceeded // Simulate error
@@ -334,14 +278,14 @@ func TestHTTPAdapter_AlertHandlerIntegration(t *testing.T) {
 
 func TestHTTPAdapter_ErrorHandling(t *testing.T) {
 	t.Run("returns 400 for invalid payload", func(t *testing.T) {
-		webhookSource := &mockWebhookSource{
-			mockAlertSource: mockAlertSource{name: "prometheus", sourceType: port.SourceTypeWebhook},
-			webhookPath:     "/alerts/prometheus",
-			handleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
+		webhookSource := &porttest.MockWebhookSource{
+			MockAlertSource: &porttest.MockAlertSource{NameVal: "prometheus", SourceTypeVal: port.SourceTypeWebhook},
+			PathVal:         "/alerts/prometheus",
+			HandleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
 				return nil, context.DeadlineExceeded
 			},
 		}
-		manager := &mockSourceManager{sources: []port.AlertSource{webhookSource}}
+		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
 		adapter := NewHTTPAdapter(manager, DefaultConfig())
 
 		req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString("invalid"))
@@ -358,7 +302,7 @@ func TestHTTPAdapter_ErrorHandling(t *testing.T) {
 func TestHTTPAdapter_Config(t *testing.T) {
 	t.Run("Addr returns configured address", func(t *testing.T) {
 		config := HTTPAdapterConfig{Addr: ":9090"}
-		manager := &mockSourceManager{}
+		manager := &porttest.MockAlertSourceManager{}
 		adapter := NewHTTPAdapter(manager, config)
 
 		if adapter.Addr() != ":9090" {
@@ -372,28 +316,28 @@ func TestHTTPAdapter_Config(t *testing.T) {
 		if config.Addr != ":8080" {
 			t.Errorf("expected :8080, got %s", config.Addr)
 		}
-		if config.ReadTimeout != 30*1e9 {
+		if config.ReadTimeout != 30*time.Second {
 			t.Errorf("expected 30s, got %v", config.ReadTimeout)
 		}
-		if config.WriteTimeout != 30*1e9 {
+		if config.WriteTimeout != 30*time.Second {
 			t.Errorf("expected 30s, got %v", config.WriteTimeout)
 		}
-		if config.ShutdownTimeout != 10*1e9 {
+		if config.ShutdownTimeout != 10*time.Second {
 			t.Errorf("expected 10s, got %v", config.ShutdownTimeout)
 		}
 	})
 }
 
 func TestHTTPAdapter_AsyncHandler_Returns202(t *testing.T) {
-	webhookSource := &mockWebhookSource{
-		mockAlertSource: mockAlertSource{name: "prometheus", sourceType: port.SourceTypeWebhook},
-		webhookPath:     "/alerts/prometheus",
-		handleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
+	webhookSource := &porttest.MockWebhookSource{
+		MockAlertSource: &porttest.MockAlertSource{NameVal: "prometheus", SourceTypeVal: port.SourceTypeWebhook},
+		PathVal:         "/alerts/prometheus",
+		HandleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
 			alert, _ := entity.NewAlert("alert-1", "prometheus", "critical", "High CPU")
 			return []*entity.Alert{alert}, nil
 		},
 	}
-	manager := &mockSourceManager{sources: []port.AlertSource{webhookSource}}
+	manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
 	adapter := NewHTTPAdapter(manager, DefaultConfig())
 
 	var runnerCalled bool
@@ -438,15 +382,15 @@ func TestHTTPAdapter_AsyncHandler_Returns202(t *testing.T) {
 }
 
 func TestHTTPAdapter_AsyncHandler_FilteredAlerts(t *testing.T) {
-	webhookSource := &mockWebhookSource{
-		mockAlertSource: mockAlertSource{name: "prometheus", sourceType: port.SourceTypeWebhook},
-		webhookPath:     "/alerts/prometheus",
-		handleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
+	webhookSource := &porttest.MockWebhookSource{
+		MockAlertSource: &porttest.MockAlertSource{NameVal: "prometheus", SourceTypeVal: port.SourceTypeWebhook},
+		PathVal:         "/alerts/prometheus",
+		HandleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
 			alert, _ := entity.NewAlert("alert-1", "prometheus", "info", "Info Alert")
 			return []*entity.Alert{alert}, nil
 		},
 	}
-	manager := &mockSourceManager{sources: []port.AlertSource{webhookSource}}
+	manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
 	adapter := NewHTTPAdapter(manager, DefaultConfig())
 
 	adapter.SetAsyncAlertHandler(
@@ -478,20 +422,20 @@ func TestHTTPAdapter_AsyncHandler_FilteredAlerts(t *testing.T) {
 }
 
 func TestHTTPAdapter_AsyncHandler_StartError(t *testing.T) {
-	webhookSource := &mockWebhookSource{
-		mockAlertSource: mockAlertSource{name: "prometheus", sourceType: port.SourceTypeWebhook},
-		webhookPath:     "/alerts/prometheus",
-		handleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
+	webhookSource := &porttest.MockWebhookSource{
+		MockAlertSource: &porttest.MockAlertSource{NameVal: "prometheus", SourceTypeVal: port.SourceTypeWebhook},
+		PathVal:         "/alerts/prometheus",
+		HandleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
 			alert, _ := entity.NewAlert("alert-1", "prometheus", "critical", "Critical Alert")
 			return []*entity.Alert{alert}, nil
 		},
 	}
-	manager := &mockSourceManager{sources: []port.AlertSource{webhookSource}}
+	manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
 	adapter := NewHTTPAdapter(manager, DefaultConfig())
 
 	adapter.SetAsyncAlertHandler(
 		func(_ context.Context, _ *entity.Alert) (string, error) {
-			return "", errors.New("start failed")
+			return "", context.DeadlineExceeded
 		},
 		func(_ context.Context, _ *entity.Alert, _ string) error {
 			t.Error("runner should not be called when start fails")
@@ -510,15 +454,15 @@ func TestHTTPAdapter_AsyncHandler_StartError(t *testing.T) {
 }
 
 func TestHTTPAdapter_AsyncHandler_ShutdownWaits(t *testing.T) {
-	webhookSource := &mockWebhookSource{
-		mockAlertSource: mockAlertSource{name: "prometheus", sourceType: port.SourceTypeWebhook},
-		webhookPath:     "/alerts/prometheus",
-		handleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
+	webhookSource := &porttest.MockWebhookSource{
+		MockAlertSource: &porttest.MockAlertSource{NameVal: "prometheus", SourceTypeVal: port.SourceTypeWebhook},
+		PathVal:         "/alerts/prometheus",
+		HandleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
 			alert, _ := entity.NewAlert("alert-1", "prometheus", "critical", "Critical Alert")
 			return []*entity.Alert{alert}, nil
 		},
 	}
-	manager := &mockSourceManager{sources: []port.AlertSource{webhookSource}}
+	manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
 	adapter := NewHTTPAdapter(manager, DefaultConfig())
 
 	runnerStarted := make(chan struct{})
@@ -570,15 +514,15 @@ func TestHTTPAdapter_AsyncHandler_ShutdownWaits(t *testing.T) {
 
 func TestHTTPAdapter_AsyncAndSyncHandlerPrecedence(t *testing.T) {
 	t.Run("async handler takes precedence over sync handler", func(t *testing.T) {
-		webhookSource := &mockWebhookSource{
-			mockAlertSource: mockAlertSource{name: "prometheus", sourceType: port.SourceTypeWebhook},
-			webhookPath:     "/alerts/prometheus",
-			handleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
+		webhookSource := &porttest.MockWebhookSource{
+			MockAlertSource: &porttest.MockAlertSource{NameVal: "prometheus", SourceTypeVal: port.SourceTypeWebhook},
+			PathVal:         "/alerts/prometheus",
+			HandleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
 				alert, _ := entity.NewAlert("alert-1", "prometheus", "critical", "High CPU")
 				return []*entity.Alert{alert}, nil
 			},
 		}
-		manager := &mockSourceManager{sources: []port.AlertSource{webhookSource}}
+		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
 		adapter := NewHTTPAdapter(manager, DefaultConfig())
 
 		// Set both sync and async handlers

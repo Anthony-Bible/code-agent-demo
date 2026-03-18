@@ -19,6 +19,7 @@ type ColorScheme struct {
 	Tool      string `json:"tool"`      // Color for tool results
 	Prompt    string `json:"prompt"`    // Color for user prompt
 	Thinking  string `json:"thinking"`  // Color for thinking content
+	Reset     string `json:"reset"`     // Reset color code
 }
 
 // UserInterface defines the interface for CLI interactions.

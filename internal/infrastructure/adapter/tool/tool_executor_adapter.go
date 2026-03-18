@@ -3,10 +3,6 @@ package tool
 import (
 	"bufio"
 	"bytes"
-	"code-editing-agent/internal/application/usecase"
-	"code-editing-agent/internal/domain/entity"
-	"code-editing-agent/internal/domain/port"
-	"code-editing-agent/internal/domain/safety"
 	"context"
 	"encoding/json"
 	"errors"
@@ -23,7 +19,12 @@ import (
 	"sync"
 	"time"
 
-	fileadapter "code-editing-agent/internal/infrastructure/adapter/file"
+	"github.com/anthony-bible/code-agent-demo/internal/application/usecase"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/safety"
+
+	fileadapter "github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
 
 	"golang.org/x/net/html"
 )
@@ -1602,7 +1603,7 @@ func (a *ExecutorAdapter) executeFetch(ctx context.Context, input json.RawMessag
 	}
 
 	// Set user agent
-	req.Header.Set("User-Agent", "code-editing-agent/1.0")
+	req.Header.Set("User-Agent", "github.com/anthony-bible/code-agent-demo/1.0")
 
 	// Make HTTP request using a dedicated client with timeout and redirect policy
 	client := &http.Client{

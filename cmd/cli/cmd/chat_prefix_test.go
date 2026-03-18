@@ -10,7 +10,7 @@ func TestHandleSkillsCommand_Prefix(t *testing.T) {
 	// Since handleSkillsCommand is unexported, we can access it from the same package.
 	// We pass nil for dependencies because we expect the function to return false early
 	// for invalid prefixes, before using any dependencies.
-	
+
 	tests := []struct {
 		name     string
 		cmdText  string

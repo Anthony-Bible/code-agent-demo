@@ -1,10 +1,11 @@
 package usecase
 
 import (
-	"code-editing-agent/internal/domain/entity"
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 )
 
 // =============================================================================

@@ -1,8 +1,6 @@
 package tool_test
 
 import (
-	"code-editing-agent/internal/infrastructure/adapter/file"
-	"code-editing-agent/internal/infrastructure/adapter/tool"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +8,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/tool"
 )
 
 // =============================================================================

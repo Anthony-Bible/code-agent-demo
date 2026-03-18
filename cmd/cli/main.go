@@ -1,9 +1,10 @@
 package main
 
 import (
-	"code-editing-agent/cmd/cli/cmd"
 	"fmt"
 	"os"
+
+	"github.com/anthony-bible/code-agent-demo/cmd/cli/cmd"
 )
 
 func main() {

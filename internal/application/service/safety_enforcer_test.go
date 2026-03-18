@@ -1,12 +1,13 @@
 package service
 
 import (
-	"code-editing-agent/internal/application/config"
-	"code-editing-agent/internal/domain/safety"
 	"context"
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/application/config"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/safety"
 )
 
 // mockValidator is a test double for safety.CommandValidator.

@@ -4,17 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A Go-based AI coding agent using hexagonal (clean) architecture. Provides an interactive CLI chat with file manipulation tools, interfacing with the Anthropic API.
+A Go-based AI coding agent using hexagonal (clean) architecture. Provides an interactive CLI chat with file manipulation tools, a webhook server for automated alert investigation with root cause analysis, and interfaces with the Anthropic API.
 
 ## Development Commands
 
 ```bash
 # Build and run
-go build -o code-editing-agent ./cmd/cli
-./code-editing-agent chat
+go build -o code-agent-demo ./cmd/cli
+./code-agent-demo chat                           # Interactive chat
+./code-agent-demo serve                          # Webhook server for alerts
 
 # Run directly
 go run ./cmd/cli/main.go chat
+go run ./cmd/cli/main.go serve
 
 # Testing
 go test ./...                                    # All tests
@@ -35,29 +37,39 @@ Presentation (cmd/cli/) → Application (internal/application/) → Domain (inte
 ```
 
 **Domain Layer** (`internal/domain/`) - No external dependencies
-- `entity/` - Core objects: `Conversation`, `Message`, `Tool`
-- `port/` - Interface contracts: `AIProvider`, `ToolExecutor`, `FileManager`, `UserInterface`
-- `service/` - Business logic: `ConversationService`, `ToolService`
+- `entity/` - Core objects: `Conversation`, `Message`, `Tool`, `Investigation`, `Alert`, `RCAFinding`
+- `port/` - Interface contracts (see Ports table below)
+- `service/` - Business logic: `ConversationService`, `ToolService`, `RCAService`
+- `safety/` - Command validation: whitelist/blacklist patterns, dangerous command detection
 
 **Application Layer** (`internal/application/`)
-- `service/ChatService` - High-level orchestration
-- `usecase/` - `MessageProcessUseCase`, `ToolExecutionUseCase`
+- `service/ChatService` - High-level chat orchestration
+- `service/InvestigationStore` - File-based investigation persistence
+- `service/SafetyEnforcer` - Command safety validation
+- `service/SkillService` - Skill discovery and management
+- `usecase/` - `MessageProcessUseCase`, `ToolExecutionUseCase`, `AlertHandler`, `AlertInvestigation`, `InvestigationRunner`, `EscalationHandler`, `SubagentRunner`, `SubagentUseCase`
 - `dto/` - Data transfer objects between layers
+- `config/` - Application-level config (e.g., `InvestigationConfig`)
 
 **Infrastructure Layer** (`internal/infrastructure/`)
-- `adapter/ai/anthropic_adapter.go` - Implements `AIProvider`
-- `adapter/file/local_file_adapter.go` - Implements `FileManager` (with path traversal protection)
-- `adapter/tool/tool_executor_adapter.go` - Implements `ToolExecutor` (bash, read_file, list_files, edit_file)
-- `adapter/tool/planning_executor_adapter.go` - Decorator that wraps `ToolExecutor` for plan mode
-- `adapter/ui/cli_adapter.go` - Implements `UserInterface`
+- `adapter/ai/` - `AnthropicAdapter` implements `AIProvider`
+- `adapter/file/` - `LocalFileManager` implements `FileManager` (with path traversal protection)
+- `adapter/tool/` - `ExecutorAdapter` implements `ToolExecutor` (bash, read_file, list_files, edit_file); `PlanningExecutorAdapter` decorator for plan mode
+- `adapter/ui/` - `CLIAdapter` implements `UserInterface`
+- `adapter/alert/` - Alert source adapters: `PrometheusSource`, `GCPMonitoringSource`, `SourceManager`, `SourceRegistry`
+- `adapter/webhook/` - HTTP server for receiving alert webhooks
+- `adapter/investigation/` - File-based investigation storage
+- `adapter/subagent/` - `LocalSubagentManager` for file-based agent discovery
 - `config/container.go` - Dependency injection wiring
-- `signal/interrupt_handler.go` - Double Ctrl+C exit handling
+- `signal/` - Double Ctrl+C exit handling
 
 ### Key Data Flows
 
 **Chat Flow**: User Input → `ChatService.SendMessage()` → `ConversationService.ProcessAssistantResponse()` → `AIProvider.SendMessage()` → Tool execution if needed → Response
 
-**Tool Execution**: AI requests tool → `ToolExecutionUseCase.ExecuteToolsInSession()` → `PlanningExecutorAdapter` (if plan mode enabled) → `ExecutorAdapter.ExecuteTool()` → Results fed back to AI
+**Tool Execution**: AI requests tool → `ToolExecutionUseCase.ExecuteToolsInSession()` → `PlanningExecutorAdapter` (if plan mode) → `ExecutorAdapter.ExecuteTool()` → Results fed back to AI
+
+**Alert Investigation Flow**: Webhook received → `AlertHandler` → `AlertInvestigation.Investigate()` → `InvestigationRunner` (AI-driven investigation with tools) → `RCAService.Correlate()` → `EscalationHandler` (if needed)
 
 ### Ports (Interfaces)
 
@@ -67,6 +79,10 @@ Presentation (cmd/cli/) → Application (internal/application/) → Domain (inte
 | `FileManager` | Sandboxed file operations | `LocalFileManager` |
 | `ToolExecutor` | Tool registry & execution | `ExecutorAdapter` (decorated by `PlanningExecutorAdapter`) |
 | `UserInterface` | Terminal I/O | `CLIAdapter` |
+| `AlertSourceManager` | Alert source lifecycle & dispatch | `SourceManager` |
+| `WebhookAlertSource` | HTTP webhook alert ingestion | `PrometheusSource`, `GCPMonitoringSource` |
+| `SkillManager` | Skill discovery & loading | `LocalSkillManager` |
+| `SubagentManager` | Subagent discovery & loading | `LocalSubagentManager` |
 
 ## Adding New Tools
 
@@ -86,619 +102,64 @@ Environment variables with `AGENT_` prefix:
 - `AGENT_ASK_LLM_ON_UNKNOWN` - Ask LLM before blocking non-whitelisted commands (default: `true`)
 - `AGENT_COMPACTION_THRESHOLD` - Token threshold for auto-compaction of conversation history (default: `160000`, minimum: `10000`)
 
+## Logging
+
+Uses `log/slog` for structured logging throughout. Do not use `fmt.Fprintf(os.Stderr, ...)` or `log.Printf` — use `slog.Info`, `slog.Error`, etc.
+
 ## Testing Patterns
 
-Table-driven tests throughout. Example pattern:
-```go
-tests := []struct {
-    name    string
-    input   Type
-    want    Expected
-    wantErr bool
-}{...}
-for _, tt := range tests {
-    t.Run(tt.name, func(t *testing.T) { ... })
-}
-```
+Table-driven tests throughout. Mock implementations of ports for isolated testing — see `conversation_service_test.go`.
 
-Mock implementations of ports for isolated testing - see `conversation_service_test.go`.
+## Alert Investigation & RCA System
 
-## Security Features
+The agent can receive alerts via webhooks and automatically investigate them using AI.
 
-- **Path traversal prevention** in `LocalFileManager` - validates paths stay within baseDir
-- **Dangerous command detection** in `ExecutorAdapter` - patterns like `rm -rf`, `dd`, etc. require confirmation
-- **Command validation modes** - blacklist (default) or whitelist approach for bash commands
-- **Input validation** at entity and DTO levels
+**Entities:**
+- `Alert` - Incoming alert with source, severity, labels
+- `Investigation` - Tracks investigation state, findings, and RCA results
+- `RCAFinding` - Root cause analysis output with `Cause` (confidence-scored) and `Remedy` (with actionable steps and impact level)
 
-## Command Validation Modes
+**Webhook Server** (`serve` command):
+- `GET /health` - Health check
+- `GET /ready` - Readiness check
+- `POST /alerts/{source-path}` - Receive webhooks from registered alert sources
 
-The agent supports two modes for validating bash commands:
+**Alert Sources** implement `WebhookAlertSource` port:
+- `PrometheusSource` - Parses Prometheus Alertmanager webhook payloads
+- `GCPMonitoringSource` - Parses GCP Monitoring notification payloads
+- New sources: implement `WebhookAlertSource` interface and register in `SourceRegistry`
 
-### Blacklist Mode (Default)
+**Investigation Workflow:**
+1. Alert received via webhook → parsed by source adapter
+2. `AlertHandler` creates investigation, runs async
+3. `InvestigationRunner` orchestrates AI-driven investigation (uses tools to gather evidence)
+4. `RCAService` correlates findings into structured root causes
+5. `EscalationHandler` determines if escalation is needed based on severity/confidence
 
-Blocks known dangerous commands while allowing everything else. Dangerous patterns include:
-- Destructive operations: `rm -rf /`, `dd if=`, `mkfs`
-- Privilege escalation: `sudo`, `su`
-- System modifications: `chmod 777`, `chown root`
-- Network piping: `curl | bash`, `wget | sh`
-- Dangerous find operations: `find -exec`, `find -execdir`, `find -delete`, `find -ok`, `find -okdir`
+## Command Validation
 
-Commands matching these patterns require user confirmation before execution.
+Two modes for bash command safety. See `internal/domain/safety/` for implementation.
 
-### Whitelist Mode
+**Blacklist mode** (default): Blocks known dangerous patterns (`rm -rf /`, `sudo`, `curl | bash`, etc.). Matching commands require user confirmation.
 
-Only allows explicitly whitelisted commands. Everything else is blocked by default.
+**Whitelist mode** (`AGENT_COMMAND_VALIDATION_MODE=whitelist`): Only allows explicitly whitelisted commands (read-only operations by default). Custom patterns via `AGENT_COMMAND_WHITELIST_JSON`. Piped commands require all segments to be whitelisted.
 
-Enable with: `AGENT_COMMAND_VALIDATION_MODE=whitelist`
+Key files: `command_whitelist.go`, `dangerous_commands.go`, `constants.go`
 
-**Default whitelisted categories (read-only operations):**
+## Skills System
 
-| Category | Examples |
-|----------|----------|
-| File reading | `ls`, `cat`, `head`, `tail`, `less`, `wc`, `file`, `stat` |
-| Search | `grep`, `rg`, `find` (read-only), `fd`, `ag`, `which`, `locate` |
-| Text processing | `sort`, `uniq`, `cut`, `tr`, `diff`, `jq`, `yq` |
-| Git (read) | `git status`, `git log`, `git diff`, `git show`, `git branch` |
-| Go (info) | `go version`, `go env`, `go list`, `go doc`, `go vet` |
-| Node/npm (info) | `npm version`, `npm ls`, `npm outdated`, `npm audit` |
-| System info | `pwd`, `whoami`, `ps`, `df`, `du`, `free`, `uname` |
-| Docker (read) | `docker ps`, `docker images`, `docker logs`, `docker inspect` |
-| Kubectl (read) | `kubectl get`, `kubectl describe`, `kubectl logs` |
-
-**NOT whitelisted by default (write operations):**
-- `mkdir`, `touch`, `cp`, `mv`, `rm`
-- `git add`, `git commit`, `git push`
-- `go build`, `go run`, `npm install`, `make`
-- `curl`, `wget` (network operations)
-
-### Adding Custom Whitelist Patterns
-
-Add custom whitelist patterns via JSON environment variable:
-
-```bash
-export AGENT_COMMAND_WHITELIST_JSON='[
-  {"pattern": "^my-safe-tool(\\s|$)", "description": "my safe tool"},
-  {"pattern": "^another-tool\\s", "description": "another tool"}
-]'
-```
-
-Each entry in the JSON array can have:
-- `pattern` (required): Regex pattern to match commands
-- `exclude_pattern` (optional): Regex pattern to block even if the main pattern matches
-- `description` (optional): Human-readable description of the pattern
-
-**Example with exclude pattern:**
-
-```bash
-export AGENT_COMMAND_WHITELIST_JSON='[
-  {
-    "pattern": "^find(\\s|$)",
-    "exclude_pattern": "(-exec\\s|-delete)",
-    "description": "find without dangerous flags"
-  }
-]'
-```
-
-This allows `find . -name "*.go"` but blocks `find . -exec rm {} \;`.
-
-### Whitelist Override Mode
-
-By default, custom patterns extend the defaults. To replace defaults entirely:
-
-```bash
-export AGENT_COMMAND_WHITELIST_OVERRIDE=true
-```
-
-**Example: Minimal whitelist**
-```bash
-export AGENT_COMMAND_VALIDATION_MODE=whitelist
-export AGENT_COMMAND_WHITELIST_OVERRIDE=true
-export AGENT_COMMAND_WHITELIST_JSON='[
-  {"pattern": "^ls(\\s|$)", "description": "list files"},
-  {"pattern": "^cat(\\s|$)", "description": "read files"}
-]'
-```
-
-| Scenario | Behavior |
-|----------|----------|
-| `OVERRIDE=true`, no JSON | Empty whitelist, blocks all commands |
-| `OVERRIDE=true`, with JSON | Only custom patterns active |
-| `OVERRIDE=false` (default) | Custom patterns extend defaults |
-| `OVERRIDE=true`, blacklist mode | Setting ignored (only applies to whitelist mode) |
-
-**Warning:** `OVERRIDE=true` with no custom patterns blocks ALL commands.
-
-### LLM Fallback for Non-Whitelisted Commands
-
-When `AGENT_ASK_LLM_ON_UNKNOWN=true` (default), non-whitelisted commands trigger a confirmation callback instead of being immediately blocked. This allows:
-1. The LLM to assess if the command is dangerous
-2. User confirmation before execution
-
-Set to `false` for strict whitelist-only mode (blocks without asking).
-
-### Piped Commands
-
-In whitelist mode, piped commands (e.g., `ls | grep foo`) are checked by verifying **each segment**. All parts must be whitelisted for the command to execute.
-
-### Exclude Patterns
-
-Whitelist patterns support an optional `ExcludePattern` (or `exclude_pattern` in JSON) field that blocks commands even if they match the main pattern. This simulates negative lookahead in Go's regexp (which doesn't support it natively).
-
-**Via JSON configuration:**
-```bash
-export AGENT_COMMAND_WHITELIST_JSON='[
-  {
-    "pattern": "^find(\\s|$)",
-    "exclude_pattern": "(?i)(-exec\\s|-execdir\\s|-delete(\\s|$)|-ok\\s|-okdir\\s)",
-    "description": "find files (read-only)"
-  }
-]'
-```
-
-**Programmatic (internal):**
-```go
-type WhitelistPattern struct {
-    Pattern        *regexp.Regexp
-    Description    string
-    ExcludePattern *regexp.Regexp // Optional: if matches, command is NOT allowed
-}
-```
-
-The `(?i)` flag makes exclusions case-insensitive.
-
-### Implementation
-
-Key files:
-- `internal/domain/safety/command_whitelist.go` - Whitelist types and patterns
-- `internal/domain/safety/dangerous_commands.go` - Blacklist patterns
-- `internal/domain/safety/constants.go` - Shared constants and error format templates
-- `internal/infrastructure/adapter/tool/tool_executor_adapter.go` - Validation logic
-- `internal/infrastructure/config/container.go` - Configuration wiring
-
-### Error Message Constants
-
-Error messages are defined as constants in `internal/domain/safety/constants.go` for consistency:
-
-| Constant | Format | Description |
-|----------|--------|-------------|
-| `ErrFmtWhitelistBlocked` | `"whitelist: command blocked: %s"` | Non-whitelisted command, no LLM fallback |
-| `ErrFmtWhitelistDenied` | `"whitelist: user denied: %s"` | User denied via callback |
-| `ErrFmtDangerousBlocked` | `"dangerous command blocked: %s (%s)"` | Dangerous, no callback |
-| `ErrFmtDangerousDenied` | `"dangerous command denied by user: %s (%s)"` | User denied dangerous |
-| `ErrFmtCommandDenied` | `"command denied by user: %s"` | User denied non-dangerous |
-| `ErrMsgLLMFailedToDetect` | `"(WARNING: LLM failed to identify this as dangerous)"` | Pattern caught what LLM missed |
-| `ErrMsgMarkedDangerousByAI` | `"marked dangerous by AI"` | LLM-only detection |
-
-Format parameters are documented in comments: `ErrFmt*` constants use `fmt.Errorf`, `ErrMsg*` constants are plain strings.
-
-### Security Considerations
-
-#### Quote Handling
-- Shell quoting is recognized (single, double, backticks)
-- Unbalanced quotes are blocked (secure default)
-- Test complex commands before deployment
-
-#### Case Sensitivity
-- Patterns are case-sensitive by default (matches Linux behavior)
-- Use `case_insensitive: true` in JSON or `(?i)` prefix for case-insensitive
-
-#### Exclude Pattern Complexity
-Avoid in custom patterns:
-- Nested quantifiers: `(a+)+`
-- Large repetitions: `{100,}`
-- Complex alternations with outer quantifiers
-
-#### ReDoS Protection
-- Commands > 10,000 chars auto-blocked
-- Dangerous regex constructs rejected at parse time
-
-#### Environment Variable Expansion
-- Variables like `$VAR` and `${VAR}` are NOT expanded during validation
-- Validation sees literal text; shell expands variables at runtime
-- Example: `echo $SECRET` passes validation but may leak sensitive data
-- **Note:** Command substitutions (`$()` and backticks) ARE validated recursively
-- Recommendation: Be cautious with commands that output environment variables
-
-## Agent Skills
-
-This agent supports skills following the [agentskills.io](https://agentskills.io) specification.
-
-### Skill Discovery Locations
-
-Skills are discovered from three directories in priority order:
-
-1. `./skills` (project root, **highest priority**)
-2. `./.claude/skills` (project .claude directory)
-3. `~/.claude/skills` (user global, **lowest priority**)
-
-When the same skill name exists in multiple directories, the highest priority version is used.
-Each discovered skill includes a `source_type` field indicating its origin ("project", "project-claude", or "user").
-
-### Skill Directory Structure
-
-Each skill directory follows the [agentskills.io](https://agentskills.io) specification:
-
-```
-skills/                    # or ~/.claude/skills/ or ./.claude/skills/
-├── skill-name/
-│   └── SKILL.md          # Required
-├── other-skill/
-│   ├── SKILL.md          # Required
-│   ├── scripts/          # Optional - executable code
-│   ├── references/       # Optional - documentation
-│   └── assets/           # Optional - static resources
-└── README.md             # Optional
-```
-
-### SKILL.md Format
-
-Each skill must contain a `SKILL.md` file with YAML frontmatter:
-
-```yaml
----
-name: skill-name
-description: A description of what this skill does and when to use it.
-license: MIT              # Optional
-compatibility: Go 1.22+   # Optional
-metadata:
-  key: value              # Optional map
-allowed-tools: read_file list_files  # Optional space-delimited list
----
-
-# Skill Content
-
-Detailed instructions, patterns, and examples for using the skill.
-```
-
-### Required Frontmatter Fields
-
-- `name`: Skill name (lowercase alphanumeric and hyphens, max 64 chars)
-- `description`: What the skill does and when to use it (max 1024 chars)
-
-### Optional Frontmatter Fields
-
-- `license`: License name or reference
-- `compatibility`: Environment requirements
-- `metadata`: Additional key-value pairs
-- `allowed-tools`: Pre-approved tools for this skill
-
-### How Skills Work
-
-1. **Discovery**: Skills are automatically discovered from `./skills` at startup
-2. **Metadata**: Skill name, description, and source type are shown in the `activate_skill` tool description
-3. **Activation**: Use the `activate_skill` tool to load full skill content on demand
-4. **Scripts**: Skills can reference scripts in a `scripts/` subdirectory (executed via bash tool)
-
-### Skill Activation
-
-When a skill is activated via the `activate_skill` tool, it returns the skill content with additional metadata:
-
-- `source_type`: Indicates where the skill is located ("project", "project-claude", or "user")
-- `directory_path`: The path to the skill directory for script execution
-
-Example activation output:
-```yaml
----
-name: my-skill
-description: A skill description
-source_type: project
-directory_path: skills/my-skill
----
-# Skill Content
-
-To run a script: `bash {directory_path}/scripts/setup.sh`
-```
-
-The `source_type` helps the AI understand the correct context:
-- `project` - Skills from `./skills/` (highest priority)
-- `project-claude` - Skills from `./.claude/skills/`
-- `user` - Skills from `~/.claude/skills/` (user global)
-
-This is crucial when skills reference scripts, as the AI needs to know the full path to execute them correctly.
-
-### Skill Tool Restrictions
-
-When an active skill defines `allowed-tools`, the entire session is restricted to the union of explicitly allowed tools from all active skills.
-
-**Important:** Skills without `allowed-tools` do NOT relax restrictions imposed by other skills.
-If you activate an unrestricted skill (no `allowed-tools`) alongside a restricted skill, the unrestricted skill will be silently restricted to the tools allowed by the restricted skill.
-
-To remove tool restrictions, you must deactivate the skills that are enforcing them.
-
-### Deactivating Skills
-
-Skills can be deactivated to remove their tool restrictions:
-
-- **Via tool:** Use `deactivate_skill` with `{"skill_name": "skill-name"}`
-- **Via command:** Use `:skills list` to see active skills, `:skills reset` to clear all
-
-Deactivation is idempotent - deactivating a non-active skill succeeds silently.
-
-**Example:**
-```yaml
-# Deactivate a specific skill
-tool: deactivate_skill
-input:
-  skill_name: code-review
-```
-
-When skills are deactivated, their `allowed-tools` restrictions are removed from the session. This allows you to:
-1. Activate a skill for a specific task
-2. Use its restricted tools
-3. Deactivate it when done to restore full tool access
-
-### Adding a New Skill
-
-1. Create a directory under `./skills/skill-name/`
-2. Create `SKILL.md` following the format above
-3. (Optional) Add `scripts/`, `references/`, `assets/` subdirectories
-4. The skill will be automatically discovered at next startup
-
-### Example Skill
-
-See `skills/test-skill/SKILL.md` and `skills/code-review/SKILL.md` for examples.
+Skills follow the [agentskills.io](https://agentskills.io) spec. Discovered from `./skills`, `./.claude/skills`, `~/.claude/skills` (priority order). Each skill has a `SKILL.md` with YAML frontmatter (`name`, `description`, optional `allowed-tools`). Activated on demand via `activate_skill` tool. See `skills/` for examples.
 
 ## Subagent System
 
-This agent supports spawning specialized AI subagents to handle delegated tasks in isolated conversation contexts. Subagents are useful for complex workflows requiring specialized expertise or parallel execution.
+Subagents are isolated AI agents for delegated tasks. Discovered from `./agents`, `./.claude/agents`, `~/.claude/agents`. Each has an `AGENT.md` with frontmatter (`name`, `description`, optional `allowed_tools`, `model`, `max_actions`). Spawned via `task` tool (synchronous) or `SubagentUseCase` (async/parallel). Subagents cannot spawn other subagents (recursion prevention). See `agents/` for examples.
 
-### What are Subagents?
+## Plan Mode
 
-Subagents are isolated AI agents that:
-- Run in their own conversation session (separate from the main agent)
-- Have custom system prompts defining their specialized role
-- Can have restricted tool access for safety
-- Can use different AI models (haiku for speed, sonnet for quality)
-- Execute independently and return results to the main agent
+Toggle with `:mode` command in CLI. In plan mode, tool executions are written as JSON to `.agent/plans/` instead of being executed. `PlanningExecutorAdapter` decorates the base executor using the decorator pattern.
 
-### Subagent Discovery Locations
+## CI/CD
 
-Subagents are discovered from three directories in priority order:
-
-1. `./agents` (project root, **highest priority**)
-2. `./.claude/agents` (project .claude directory)
-3. `~/.claude/agents` (user global, **lowest priority**)
-
-When the same agent name exists in multiple directories, the highest priority version is used.
-
-### Agent Directory Structure
-
-Each agent directory contains an `AGENT.md` file:
-
-```
-agents/                    # or ~/.claude/agents/ or ./.claude/agents/
-├── code-reviewer/
-│   └── AGENT.md          # Required
-├── test-writer/
-│   └── AGENT.md          # Required
-└── documentation-writer/
-    └── AGENT.md          # Required
-```
-
-### AGENT.md Format
-
-Each agent must contain an `AGENT.md` file with YAML frontmatter:
-
-```yaml
----
-name: code-reviewer
-description: Expert code reviewer for security and best practices analysis
-allowed_tools:
-  - read_file
-  - list_files
-  - grep
-model: sonnet
-max_actions: 15
----
-
-# Agent System Prompt
-
-Detailed instructions for the agent's role, responsibilities, and behavior.
-```
-
-### Required Frontmatter Fields
-
-- `name`: Agent name (lowercase alphanumeric and hyphens, max 64 chars)
-- `description`: What the agent does and when to use it (max 1024 chars)
-
-### Optional Frontmatter Fields
-
-- `allowed_tools`: List of tools this agent can use (default: all tools)
-  - Use to restrict agent capabilities for safety
-  - Empty list `[]` blocks all tools
-  - Omit field or use `null` to allow all tools
-- `model`: AI model to use (`haiku`, `sonnet`, `opus`, `inherit`)
-  - `haiku` - Fast, cost-effective for simple tasks
-  - `sonnet` - Balanced quality and speed (recommended)
-  - `opus` - Highest quality for complex reasoning
-  - `inherit` - Use same model as parent agent (default)
-- `max_actions`: Maximum tool calls before stopping (default: 20)
-  - Prevents infinite loops in runaway agents
-  - Recommended: 10-20 for most tasks
-
-### Using Subagents
-
-#### Method 1: Task Tool (Synchronous)
-
-Use the `task` tool to spawn a subagent and wait for results:
-
-```json
-{
-  "tool": "task",
-  "input": {
-    "agent_name": "code-reviewer",
-    "prompt": "Review the authentication module for security issues"
-  }
-}
-```
-
-The task tool:
-- Spawns the subagent in an isolated session
-- Waits for completion
-- Returns the subagent's output
-- Cannot be called from within a subagent (prevents recursion)
-
-#### Method 2: Programmatic (Advanced)
-
-For parallel execution or async workflows, use the SubagentUseCase directly:
-
-```go
-// Synchronous spawn
-result, err := subagentUseCase.SpawnSubagent(ctx, "code-reviewer", "Review auth.go")
-
-// Asynchronous spawn (returns immediately)
-handle, err := subagentUseCase.SpawnSubagentAsync(ctx, "test-writer", "Write tests for payment.go")
-select {
-case result := <-handle.Result:
-    // Handle success
-case err := <-handle.Error:
-    // Handle error
-}
-
-// Parallel spawn (multiple agents concurrently)
-requests := []*SubagentRequest{
-    {AgentName: "code-reviewer", Prompt: "Review file1.go"},
-    {AgentName: "test-writer", Prompt: "Write tests for file2.go"},
-}
-batchResult, _ := subagentUseCase.SpawnMultiple(ctx, requests)
-```
-
-### Example Agents
-
-This repository includes three example agents in `./agents/`:
-
-**code-reviewer** - Security and quality analysis
-- Identifies vulnerabilities (SQL injection, XSS, etc.)
-- Reviews code quality and best practices
-- Provides actionable, prioritized feedback
-- Tools: read_file, list_files, grep
-
-**test-writer** - Comprehensive test creation
-- Writes tests for happy paths and edge cases
-- Uses table-driven test patterns
-- Focuses on maintainability and coverage
-- Tools: read_file, list_files, grep, write_file, edit_file
-
-**documentation-writer** - Technical documentation
-- Creates godoc comments and README files
-- Documents APIs, configuration, and architecture
-- Provides clear examples and explanations
-- Tools: read_file, list_files, grep, write_file, edit_file
-
-### Creating Custom Agents
-
-1. Create a directory under `./agents/your-agent-name/`
-2. Create `AGENT.md` with proper frontmatter and system prompt
-3. Define the agent's role, responsibilities, and behavior
-4. Specify allowed tools if restricting access
-5. Test by spawning the agent with the task tool
-
-### Best Practices
-
-**Agent Design:**
-- Give agents clear, focused responsibilities
-- Write detailed system prompts explaining the agent's role
-- Provide examples and guidelines in the agent's prompt
-- Use tool restrictions to prevent dangerous operations
-
-**Tool Selection:**
-- Use `haiku` for simple, fast tasks (linting, formatting)
-- Use `sonnet` for balanced quality (code review, testing)
-- Use `opus` for complex reasoning (architecture design)
-- Use `inherit` when agent should match parent capabilities
-
-**Safety:**
-- Set `max_actions` to prevent runaway agents (recommended: 10-20)
-- Restrict tools with `allowed_tools` for sensitive operations
-- Test agents in safe environments before production use
-- Monitor agent behavior and adjust system prompts as needed
-
-**Recursion Prevention:**
-- Subagents cannot spawn other subagents (blocked by design)
-- Task tool will error if called from within a subagent context
-- This prevents infinite recursion and resource exhaustion
-
-### Architecture
-
-The subagent system uses clean architecture with clear separation:
-
-**Domain Layer:**
-- `entity.Subagent` - Agent metadata and configuration
-- `port.SubagentManager` - Discovery and loading interface
-
-**Infrastructure Layer:**
-- `adapter/subagent.LocalSubagentManager` - File-based discovery
-
-**Application Layer:**
-- `usecase.SubagentRunner` - Isolated execution orchestration
-- `usecase.SubagentUseCase` - High-level spawn operations
-
-**Tool Integration:**
-- `adapter/tool.ExecutorAdapter` - Task tool implementation
-- Context-based recursion prevention
-
-### Configuration
-
-Subagent behavior is configured in the container:
-
-```go
-SubagentConfig{
-    MaxActions:    20,              // Max tool calls per agent
-    MaxDuration:   5 * time.Minute, // Timeout for execution
-    MaxConcurrent: 5,               // Parallel agent limit
-    AllowedTools:  nil,             // nil = allow all (can be overridden per agent)
-}
-```
-
-## Mode Toggle Feature (Plan Mode)
-
-The agent supports a "plan mode" where tool executions are written to `.agent/plans/` instead of being executed directly. This allows reviewing proposed changes before applying them.
-
-### Enabling Plan Mode
-
-In the CLI, use the `:mode` command:
-- `:mode` or `:mode toggle` - Toggle between plan and normal mode
-- `:mode plan` - Enable plan mode
-- `:mode normal` - Disable plan mode
-
-### Visual Indicators
-
-When in plan mode:
-- Assistant responses are prefixed with `[PLAN MODE]`
-- Tools write JSON plans to `{workingDir}/.agent/plans/{sessionID}_{timestamp}.json`
-- System message confirms mode status when toggled
-
-### Plan File Format
-
-Plans are written as JSON with the following structure:
-```json
-{
-  "session_id": "...",
-  "tool_name": "bash",
-  "input": {"command": "ls -la"},
-  "timestamp": "2024-01-20T15:30:01Z"
-}
-```
-
-### Architecture
-
-The `PlanningExecutorAdapter` decorates the base `ExecutorAdapter` using the decorator pattern:
-- Checks mode state per session via `ConversationService.SetPlanMode()`
-- In plan mode: writes tool execution plans to files instead of executing
-- In normal mode: delegates execution to the wrapped executor
-- Uses thread-safe `sessionModes` map for concurrent access
-
-### Implementation Details
-
-Key files:
-- `internal/infrastructure/adapter/tool/planning_executor_adapter.go` - Decorator implementation
-- `internal/domain/service/conversation_service.go` - Session mode state management
-- `internal/application/service/chat_service.go` - Mode command handling
-- `cmd/cli/cmd/chat.go` - CLI integration of `:mode` command
-- `internal/infrastructure/config/container.go` - Decorator wiring
-
-The decorator is wired in the container:
-```go
-baseExecutor := tool.NewExecutorAdapter(fileManager)
-toolExecutor := tool.NewPlanningExecutorAdapter(baseExecutor, fileManager, cfg.WorkingDir)
-```
+GitHub Actions workflows in `.github/workflows/`:
+- `claude-code-review.yml` - Automated PR review using Claude Code
+- `claude.yml` - Interactive Claude assistance triggered by PR comments

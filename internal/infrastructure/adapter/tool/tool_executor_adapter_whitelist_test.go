@@ -1,12 +1,13 @@
 package tool
 
 import (
-	"code-editing-agent/internal/domain/safety"
-	"code-editing-agent/internal/infrastructure/adapter/file"
 	"context"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/safety"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
 )
 
 func TestWhitelistMode_AllowsWhitelistedCommands(t *testing.T) {

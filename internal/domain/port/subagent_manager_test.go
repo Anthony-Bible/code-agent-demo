@@ -1,9 +1,10 @@
 package port
 
 import (
-	"code-editing-agent/internal/domain/entity"
 	"context"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 )
 
 // TestSubagentManagerInterface_Contract validates that SubagentManager interface exists with expected methods.

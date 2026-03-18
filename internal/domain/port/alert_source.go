@@ -4,8 +4,9 @@
 package port
 
 import (
-	"code-editing-agent/internal/domain/entity"
 	"context"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 )
 
 // SourceType represents the type of alert source, determining how alerts are received.
@@ -74,6 +75,9 @@ type AlertSourceManager interface {
 	GetSource(name string) (AlertSource, error)
 	// ListSources returns all registered alert sources.
 	ListSources() []AlertSource
+	// GetWebhookSourceByPath retrieves a registered webhook source by its HTTP path.
+	// Returns nil if no matching webhook source is found.
+	GetWebhookSourceByPath(path string) WebhookAlertSource
 	// SetAlertHandler sets the callback function for processing incoming alerts.
 	SetAlertHandler(handler AlertHandler)
 }

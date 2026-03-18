@@ -1,13 +1,14 @@
 package tool
 
 import (
-	"code-editing-agent/internal/infrastructure/adapter/file"
-	"code-editing-agent/internal/infrastructure/adapter/skill"
 	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/skill"
 )
 
 // TestSkillsInToolDescription verifies that skills are included in the activate_skill tool description.

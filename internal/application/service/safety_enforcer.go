@@ -1,10 +1,11 @@
 package service
 
 import (
-	"code-editing-agent/internal/application/config"
-	"code-editing-agent/internal/domain/safety"
 	"context"
 	"errors"
+
+	"github.com/anthony-bible/code-agent-demo/internal/application/config"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/safety"
 )
 
 // Sentinel errors for SafetyEnforcer operations.

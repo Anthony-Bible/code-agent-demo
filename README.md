@@ -2,7 +2,7 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-blue.svg)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Build Status](https://github.com/Anthony-Bible/github.com/anthony-bible/code-agent-demo/actions/workflows/ci.yml/badge.svg)](https://github.com/Anthony-Bible/github.com/anthony-bible/code-agent-demo/actions)
+[![Build Status](https://github.com/Anthony-Bible/code-agent-demo/actions/workflows/ci.yml/badge.svg)](https://github.com/Anthony-Bible/code-agent-demo/actions)
 
 A sophisticated AI-powered command-line coding assistant built with Go using hexagonal (clean) architecture principles. The agent provides an interactive chat interface for code exploration, editing, and analysis with integrated tool capabilities and advanced AI features.
 
@@ -51,8 +51,8 @@ A sophisticated AI-powered command-line coding assistant built with Go using hex
 export ANTHROPIC_API_KEY=your-api-key-here
 
 # Build and run the agent
-go build -o agent ./cmd/cli
-./agent chat
+go build -o code-agent-demo ./cmd/cli
+./code-agent-demo chat
 
 # Or run directly with Go
 go run ./cmd/cli/main.go chat
@@ -65,8 +65,8 @@ go run ./cmd/cli/main.go chat
 export ANTHROPIC_API_KEY=your-api-key-here
 
 # Build and run the webhook server
-go build -o agent ./cmd/cli
-./agent serve --config config/alert-sources.yaml
+go build -o code-agent-demo ./cmd/cli
+./code-agent-demo serve --config config/alert-sources.yaml
 
 # The server will start listening on http://localhost:8080 by default
 ```
@@ -264,9 +264,8 @@ github.com/anthony-bible/code-agent-demo/
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/anthony-bible/github.com/anthony-bible/code-agent-demo.git
-   cd github.com/anthony-bible/code-agent-demo
-   ```
+   git clone https://github.com/anthony-bible/code-agent-demo.git
+   cd code-agent-demo   ```
 
 2. **Install dependencies**
    ```bash
@@ -275,26 +274,26 @@ github.com/anthony-bible/code-agent-demo/
 
 3. **Build the application**
    ```bash
-   go build -o agent ./cmd/cli
+   go build -o code-agent-demo ./cmd/cli
    ```
 
 #### Method 2: Global Install via Go
 
 ```bash
-go install github.com/anthony-bible/github.com/anthony-bible/code-agent-demo/cmd/cli@latest
+go install github.com/anthony-bible/code-agent-demo/cmd/cli@latest
 ```
 
 ### Verify Installation
 
 ```bash
 # List available commands
-./agent --help
+./code-agent-demo --help
 
 # Test chat command
-./agent chat --help
+./code-agent-demo chat --help
 
 # Test serve command
-./agent serve --help
+./code-agent-demo serve --help
 ```
 
 ## 🎯 Usage
@@ -306,7 +305,7 @@ The agent supports two main modes of operation:
 #### Chat Mode
 
 ```bash
-./agent chat [flags]
+./code-agent-demo chat [flags]
 ```
 
 Start an interactive CLI session for code exploration, editing, and analysis.
@@ -314,7 +313,7 @@ Start an interactive CLI session for code exploration, editing, and analysis.
 #### Webhook Server Mode
 
 ```bash
-./agent serve [flags]
+./code-agent-demo serve [flags]
 ```
 
 Start an HTTP server to receive webhook alerts from monitoring systems.
@@ -322,7 +321,7 @@ Start an HTTP server to receive webhook alerts from monitoring systems.
 ### Chat Mode
 
 ```bash
-./agent chat
+./code-agent-demo chat
 ```
 
 Once started, you can interact naturally:
@@ -342,10 +341,10 @@ The agent includes a built-in webhook server for receiving alerts from monitorin
 
 ```bash
 # Start the webhook server
-./agent serve --addr :8080 --config config/alert-sources.yaml
+./code-agent-demo serve --addr :8080 --config config/alert-sources.yaml
 
 # With auto-approval for safe bash commands
-./agent serve --addr :8080 --auto-approve-safe
+./code-agent-demo serve --addr :8080 --auto-approve-safe
 ```
 
 #### Supported Alert Sources
@@ -413,10 +412,10 @@ Extended thinking allows Claude to show its internal reasoning process before ge
 **Via CLI flags:**
 ```bash
 # Enable with defaults (10,000 token budget, thinking hidden)
-./agent chat --thinking
+./code-agent-demo chat --thinking
 
 # Enable with custom budget and show thinking
-./agent chat --thinking --thinking-budget 15000 --show-thinking
+./code-agent-demo chat --thinking --thinking-budget 15000 --show-thinking
 ```
 
 **Via environment variables:**
@@ -424,7 +423,7 @@ Extended thinking allows Claude to show its internal reasoning process before ge
 export AGENT_THINKING_ENABLED=true
 export AGENT_THINKING_BUDGET=10000
 export AGENT_SHOW_THINKING=true
-./agent chat
+./code-agent-demo chat
 ```
 
 **Via runtime commands:**
@@ -639,7 +638,7 @@ When the subagent completes, its output is returned to the parent as a condensed
 #### Pre-defined Subagents
 
 Subagents are discovered from three directories in **priority order**:
-1. `./agents` (project root, highest priority)
+1. `./code-agent-demo` (project root, highest priority)
 2. `./.claude/agents` (project .claude directory)
 3. `~/.claude/agents` (user global, lowest priority)
 
@@ -712,11 +711,11 @@ The minimum allowed threshold is `10,000` tokens. Values below this floor are au
 
 ```bash
 # Use default (160,000 tokens)
-./agent chat
+./code-agent-demo chat
 
 # Set a custom threshold
 export AGENT_COMPACTION_THRESHOLD=100000
-./agent chat
+./code-agent-demo chat
 ```
 
 #### What the Summary Preserves
@@ -820,7 +819,7 @@ The application supports configuration via:
 
 **Command-line flags:**
 ```bash
-./agent chat --model "hf:zai-org/GLM-4.7" --max-tokens 20000 --thinking
+./code-agent-demo chat --model "hf:zai-org/GLM-4.7" --max-tokens 20000 --thinking
 ```
 
 **Environment variables (AGENT_* prefix):**
@@ -863,7 +862,7 @@ export AGENT_ASK_LLM_ON_UNKNOWN=true            # Ask before blocking non-whitel
 
 ```bash
 # Webhook server configuration
-./agent serve --addr :8080 --config config/alert-sources.yaml
+./code-agent-demo serve --addr :8080 --config config/alert-sources.yaml
 
 # Available flags:
 --addr                 Address to listen on (default: :8080)
@@ -905,10 +904,10 @@ go test ./internal/application/usecase -run TestAlertInvestigation -v
 
 ```bash
 # Standard build
-go build -o github.com/anthony-bible/code-agent-demo ./cmd/cli
+go build -o code-agent-demo ./cmd/cli
 
 # Optimized build (smaller binary)
-go build -ldflags="-s -w" -o github.com/anthony-bible/code-agent-demo ./cmd/cli
+go build -ldflags="-s -w" -o code-agent-demo ./cmd/cli
 ```
 
 ### Code Quality

@@ -1,4 +1,4 @@
-// Package service provides application services for the code-editing-agent.
+// Package service provides application services for the github.com/anthony-bible/code-agent-demo.
 package service
 
 import (

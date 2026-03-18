@@ -2,8 +2,9 @@
 package dto
 
 import (
-	"code-editing-agent/internal/domain/entity"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 )
 
 // SendMessageResponse represents the response after sending a user message.

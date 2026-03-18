@@ -1,13 +1,16 @@
 package alert
 
 import (
-	"code-editing-agent/internal/domain/entity"
-	"code-editing-agent/internal/domain/port"
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port/porttest"
 )
 
 // =============================================================================
@@ -16,320 +19,347 @@ import (
 // All tests should FAIL until the implementation is complete.
 // =============================================================================
 
-// mockAlertSource is a test double for port.AlertSource.
-type mockAlertSource struct {
-	name       string
-	sourceType port.SourceType
-	closed     bool
-	closeErr   error
-}
-
-func newMockAlertSource(name string, sourceType port.SourceType) *mockAlertSource {
-	return &mockAlertSource{
-		name:       name,
-		sourceType: sourceType,
-	}
-}
-
-func (m *mockAlertSource) Name() string {
-	return m.name
-}
-
-func (m *mockAlertSource) Type() port.SourceType {
-	return m.sourceType
-}
-
-func (m *mockAlertSource) Close() error {
-	m.closed = true
-	return m.closeErr
-}
-
-// mockWebhookSource is a test double for port.WebhookAlertSource.
-type mockWebhookSource struct {
-	*mockAlertSource
-
-	webhookPath  string
-	handleFunc   func(ctx context.Context, payload []byte) ([]*entity.Alert, error)
-	handledCalls int
-	lastPayload  []byte
-}
-
-func newMockWebhookSource(name, path string) *mockWebhookSource {
-	return &mockWebhookSource{
-		mockAlertSource: newMockAlertSource(name, port.SourceTypeWebhook),
-		webhookPath:     path,
-	}
-}
-
-func (m *mockWebhookSource) WebhookPath() string {
-	return m.webhookPath
-}
-
-func (m *mockWebhookSource) HandleWebhook(ctx context.Context, payload []byte) ([]*entity.Alert, error) {
-	m.handledCalls++
-	m.lastPayload = payload
-	if m.handleFunc != nil {
-		return m.handleFunc(ctx, payload)
-	}
-	return nil, nil
-}
-
 func TestNewLocalAlertSourceManager(t *testing.T) {
-	t.Run("should create new manager", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
+	tests := []struct {
+		name string
+		test func(t *testing.T)
+	}{
+		{
+			name: "should create new manager",
+			test: func(t *testing.T) {
+				manager := NewLocalAlertSourceManager()
+				if manager == nil {
+					t.Fatal("NewLocalAlertSourceManager() returned nil")
+				}
+			},
+		},
+		{
+			name: "should implement AlertSourceManager interface",
+			test: func(t *testing.T) {
+				manager := NewLocalAlertSourceManager()
+				var _ port.AlertSourceManager = manager
+			},
+		},
+		{
+			name: "should start with empty source list",
+			test: func(t *testing.T) {
+				manager := NewLocalAlertSourceManager()
+				sources := manager.ListSources()
+				if len(sources) != 0 {
+					t.Errorf("ListSources() = %d sources, want 0", len(sources))
+				}
+			},
+		},
+	}
 
-		if manager == nil {
-			t.Fatal("NewLocalAlertSourceManager() returned nil")
-		}
-	})
-
-	t.Run("should implement AlertSourceManager interface", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
-
-		var _ port.AlertSourceManager = manager
-	})
-
-	t.Run("should start with empty source list", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
-
-		sources := manager.ListSources()
-		if len(sources) != 0 {
-			t.Errorf("ListSources() = %d sources, want 0", len(sources))
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, tt.test)
+	}
 }
 
 func TestLocalAlertSourceManager_RegisterSource(t *testing.T) {
-	t.Run("should register valid source", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
-		source := newMockAlertSource("test-source", port.SourceTypeWebhook)
+	tests := []struct {
+		name      string
+		setup     func(m port.AlertSourceManager)
+		source    port.AlertSource
+		wantErr   bool
+		wantCount int
+	}{
+		{
+			name:      "should register valid source",
+			source:    porttest.NewMockAlertSource("test-source", port.SourceTypeWebhook),
+			wantErr:   false,
+			wantCount: 1,
+		},
+		{
+			name: "should reject duplicate registration",
+			setup: func(m port.AlertSourceManager) {
+				m.RegisterSource(porttest.NewMockAlertSource("test-source", port.SourceTypeWebhook))
+			},
+			source:    porttest.NewMockAlertSource("test-source", port.SourceTypePoll),
+			wantErr:   true,
+			wantCount: 1,
+		},
+		{
+			name: "should register multiple unique sources",
+			setup: func(m port.AlertSourceManager) {
+				m.RegisterSource(porttest.NewMockAlertSource("source-1", port.SourceTypeWebhook))
+				m.RegisterSource(porttest.NewMockAlertSource("source-2", port.SourceTypePoll))
+			},
+			source:    porttest.NewMockAlertSource("source-3", port.SourceTypeStream),
+			wantErr:   false,
+			wantCount: 3,
+		},
+	}
 
-		err := manager.RegisterSource(source)
-		if err != nil {
-			t.Errorf("RegisterSource() error = %v", err)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manager := NewLocalAlertSourceManager()
+			if tt.setup != nil {
+				tt.setup(manager)
+			}
 
-		sources := manager.ListSources()
-		if len(sources) != 1 {
-			t.Errorf("ListSources() = %d sources, want 1", len(sources))
-		}
-	})
+			err := manager.RegisterSource(tt.source)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("RegisterSource() error = %v, wantErr %v", err, tt.wantErr)
+			}
 
-	t.Run("should reject duplicate registration", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
-		source1 := newMockAlertSource("test-source", port.SourceTypeWebhook)
-		source2 := newMockAlertSource("test-source", port.SourceTypePoll)
-
-		err := manager.RegisterSource(source1)
-		if err != nil {
-			t.Fatalf("First RegisterSource() error = %v", err)
-		}
-
-		err = manager.RegisterSource(source2)
-		if err == nil {
-			t.Error("Second RegisterSource() should return error for duplicate name")
-		}
-
-		sources := manager.ListSources()
-		if len(sources) != 1 {
-			t.Errorf("ListSources() = %d sources, want 1 (duplicate rejected)", len(sources))
-		}
-	})
-
-	t.Run("should register multiple unique sources", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
-		source1 := newMockAlertSource("source-1", port.SourceTypeWebhook)
-		source2 := newMockAlertSource("source-2", port.SourceTypePoll)
-		source3 := newMockAlertSource("source-3", port.SourceTypeStream)
-
-		if err := manager.RegisterSource(source1); err != nil {
-			t.Fatalf("RegisterSource(source-1) error = %v", err)
-		}
-		if err := manager.RegisterSource(source2); err != nil {
-			t.Fatalf("RegisterSource(source-2) error = %v", err)
-		}
-		if err := manager.RegisterSource(source3); err != nil {
-			t.Fatalf("RegisterSource(source-3) error = %v", err)
-		}
-
-		sources := manager.ListSources()
-		if len(sources) != 3 {
-			t.Errorf("ListSources() = %d sources, want 3", len(sources))
-		}
-	})
+			sources := manager.ListSources()
+			if len(sources) != tt.wantCount {
+				t.Errorf("ListSources() = %d sources, want %d", len(sources), tt.wantCount)
+			}
+		})
+	}
 }
 
 func TestLocalAlertSourceManager_UnregisterSource(t *testing.T) {
-	t.Run("should unregister existing source", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
-		source := newMockAlertSource("test-source", port.SourceTypeWebhook)
+	tests := []struct {
+		name       string
+		setup      func(m port.AlertSourceManager, s *porttest.MockAlertSource)
+		sourceName string
+		wantErr    bool
+		check      func(t *testing.T, m port.AlertSourceManager, s *porttest.MockAlertSource)
+	}{
+		{
+			name: "should unregister existing source",
+			setup: func(m port.AlertSourceManager, s *porttest.MockAlertSource) {
+				m.RegisterSource(s)
+			},
+			sourceName: "test-source",
+			wantErr:    false,
+			check: func(t *testing.T, m port.AlertSourceManager, s *porttest.MockAlertSource) {
+				if len(m.ListSources()) != 0 {
+					t.Errorf("ListSources() = %d sources, want 0 after unregister", len(m.ListSources()))
+				}
+			},
+		},
+		{
+			name: "should close source on unregister",
+			setup: func(m port.AlertSourceManager, s *porttest.MockAlertSource) {
+				m.RegisterSource(s)
+			},
+			sourceName: "test-source",
+			wantErr:    false,
+			check: func(t *testing.T, m port.AlertSourceManager, s *porttest.MockAlertSource) {
+				if !s.ClosedVal {
+					t.Error("Source should be ClosedVal after unregister")
+				}
+			},
+		},
+		{
+			name:       "should return error for non-existent source",
+			sourceName: "non-existent",
+			wantErr:    true,
+		},
+		{
+			name: "should return error if source close fails",
+			setup: func(m port.AlertSourceManager, s *porttest.MockAlertSource) {
+				s.CloseErr = context.DeadlineExceeded
+				m.RegisterSource(s)
+			},
+			sourceName: "test-source",
+			wantErr:    true,
+		},
+	}
 
-		if err := manager.RegisterSource(source); err != nil {
-			t.Fatalf("RegisterSource() error = %v", err)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manager := NewLocalAlertSourceManager()
+			source := porttest.NewMockAlertSource("test-source", port.SourceTypeWebhook)
+			if tt.setup != nil {
+				tt.setup(manager, source)
+			}
 
-		err := manager.UnregisterSource("test-source")
-		if err != nil {
-			t.Errorf("UnregisterSource() error = %v", err)
-		}
+			err := manager.UnregisterSource(tt.sourceName)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("UnregisterSource() error = %v, wantErr %v", err, tt.wantErr)
+			}
 
-		sources := manager.ListSources()
-		if len(sources) != 0 {
-			t.Errorf("ListSources() = %d sources, want 0 after unregister", len(sources))
-		}
-	})
-
-	t.Run("should close source on unregister", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
-		source := newMockAlertSource("test-source", port.SourceTypeWebhook)
-
-		if err := manager.RegisterSource(source); err != nil {
-			t.Fatalf("RegisterSource() error = %v", err)
-		}
-
-		if err := manager.UnregisterSource("test-source"); err != nil {
-			t.Fatalf("UnregisterSource() error = %v", err)
-		}
-
-		if !source.closed {
-			t.Error("Source should be closed after unregister")
-		}
-	})
-
-	t.Run("should return error for non-existent source", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
-
-		err := manager.UnregisterSource("non-existent")
-
-		if err == nil {
-			t.Error("UnregisterSource() should return error for non-existent source")
-		}
-	})
-
-	t.Run("should return error if source close fails", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
-		source := newMockAlertSource("test-source", port.SourceTypeWebhook)
-		source.closeErr = context.DeadlineExceeded // Simulate close error
-
-		if err := manager.RegisterSource(source); err != nil {
-			t.Fatalf("RegisterSource() error = %v", err)
-		}
-
-		err := manager.UnregisterSource("test-source")
-		if err == nil {
-			t.Error("UnregisterSource() should propagate close error")
-		}
-	})
+			if tt.check != nil {
+				tt.check(t, manager, source)
+			}
+		})
+	}
 }
 
 func TestLocalAlertSourceManager_GetSource(t *testing.T) {
-	t.Run("should return registered source", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
-		source := newMockAlertSource("test-source", port.SourceTypeWebhook)
+	tests := []struct {
+		name       string
+		setup      func(m port.AlertSourceManager)
+		sourceName string
+		wantErr    bool
+		wantName   string
+		wantType   port.SourceType
+	}{
+		{
+			name: "should return registered source",
+			setup: func(m port.AlertSourceManager) {
+				m.RegisterSource(porttest.NewMockAlertSource("test-source", port.SourceTypeWebhook))
+			},
+			sourceName: "test-source",
+			wantErr:    false,
+			wantName:   "test-source",
+		},
+		{
+			name:       "should return error for non-existent source",
+			sourceName: "non-existent",
+			wantErr:    true,
+		},
+		{
+			name: "should return correct source among multiple",
+			setup: func(m port.AlertSourceManager) {
+				m.RegisterSource(porttest.NewMockAlertSource("source-1", port.SourceTypeWebhook))
+				m.RegisterSource(porttest.NewMockAlertSource("source-2", port.SourceTypePoll))
+				m.RegisterSource(porttest.NewMockAlertSource("source-3", port.SourceTypeStream))
+			},
+			sourceName: "source-2",
+			wantErr:    false,
+			wantName:   "source-2",
+			wantType:   port.SourceTypePoll,
+		},
+	}
 
-		if err := manager.RegisterSource(source); err != nil {
-			t.Fatalf("RegisterSource() error = %v", err)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manager := NewLocalAlertSourceManager()
+			if tt.setup != nil {
+				tt.setup(manager)
+			}
 
-		got, err := manager.GetSource("test-source")
-		if err != nil {
-			t.Errorf("GetSource() error = %v", err)
-		}
+			got, err := manager.GetSource(tt.sourceName)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetSource() error = %v, wantErr %v", err, tt.wantErr)
+			}
 
-		if got == nil {
-			t.Fatal("GetSource() returned nil")
-		}
-
-		if got.Name() != "test-source" {
-			t.Errorf("GetSource().Name() = %v, want test-source", got.Name())
-		}
-	})
-
-	t.Run("should return error for non-existent source", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
-
-		_, err := manager.GetSource("non-existent")
-
-		if err == nil {
-			t.Error("GetSource() should return error for non-existent source")
-		}
-	})
-
-	t.Run("should return correct source among multiple", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
-		source1 := newMockAlertSource("source-1", port.SourceTypeWebhook)
-		source2 := newMockAlertSource("source-2", port.SourceTypePoll)
-		source3 := newMockAlertSource("source-3", port.SourceTypeStream)
-
-		manager.RegisterSource(source1)
-		manager.RegisterSource(source2)
-		manager.RegisterSource(source3)
-
-		got, err := manager.GetSource("source-2")
-		if err != nil {
-			t.Fatalf("GetSource() error = %v", err)
-		}
-
-		if got.Name() != "source-2" {
-			t.Errorf("GetSource().Name() = %v, want source-2", got.Name())
-		}
-
-		if got.Type() != port.SourceTypePoll {
-			t.Errorf("GetSource().Type() = %v, want %v", got.Type(), port.SourceTypePoll)
-		}
-	})
+			if !tt.wantErr {
+				if got == nil {
+					t.Fatal("GetSource() returned nil")
+				}
+				if got.Name() != tt.wantName {
+					t.Errorf("GetSource().Name() = %v, want %v", got.Name(), tt.wantName)
+				}
+				if tt.wantType != "" && got.Type() != tt.wantType {
+					t.Errorf("GetSource().Type() = %v, want %v", got.Type(), tt.wantType)
+				}
+			}
+		})
+	}
 }
 
 func TestLocalAlertSourceManager_ListSources(t *testing.T) {
-	t.Run("should return empty list when no sources", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
+	tests := []struct {
+		name      string
+		setup     func(m port.AlertSourceManager)
+		wantCount int
+	}{
+		{
+			name:      "should return empty list when no sources",
+			wantCount: 0,
+		},
+		{
+			name: "should return all registered sources",
+			setup: func(m port.AlertSourceManager) {
+				for i := range 5 {
+					m.RegisterSource(porttest.NewMockAlertSource("source-"+string(rune('a'+i)), port.SourceTypeWebhook))
+				}
+			},
+			wantCount: 5,
+		},
+		{
+			name: "should reflect unregistered sources",
+			setup: func(m port.AlertSourceManager) {
+				m.RegisterSource(porttest.NewMockAlertSource("source-1", port.SourceTypeWebhook))
+				m.RegisterSource(porttest.NewMockAlertSource("source-2", port.SourceTypePoll))
+				m.UnregisterSource("source-1")
+			},
+			wantCount: 1,
+		},
+	}
 
-		sources := manager.ListSources()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manager := NewLocalAlertSourceManager()
+			if tt.setup != nil {
+				tt.setup(manager)
+			}
 
-		if sources == nil {
-			t.Error("ListSources() should return empty slice, not nil")
-		}
-		if len(sources) != 0 {
-			t.Errorf("ListSources() len = %d, want 0", len(sources))
-		}
-	})
+			sources := manager.ListSources()
+			if sources == nil {
+				t.Error("ListSources() should return empty slice, not nil")
+			}
+			if len(sources) != tt.wantCount {
+				t.Errorf("ListSources() len = %d, want %d", len(sources), tt.wantCount)
+			}
+		})
+	}
+}
 
-	t.Run("should return all registered sources", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
+func TestLocalAlertSourceManager_GetWebhookSourceByPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		setup    func(m port.AlertSourceManager)
+		path     string
+		wantName string
+		wantNil  bool
+	}{
+		{
+			name: "should return registered webhook source by path",
+			setup: func(m port.AlertSourceManager) {
+				m.RegisterSource(porttest.NewMockWebhookSource("test-source", "/alerts/test"))
+			},
+			path:     "/alerts/test",
+			wantName: "test-source",
+		},
+		{
+			name: "should return nil for non-existent path",
+			setup: func(m port.AlertSourceManager) {
+				m.RegisterSource(porttest.NewMockWebhookSource("test-source", "/alerts/test"))
+			},
+			path:    "/non-existent",
+			wantNil: true,
+		},
+		{
+			name: "should return nil after source is unregistered",
+			setup: func(m port.AlertSourceManager) {
+				m.RegisterSource(porttest.NewMockWebhookSource("test-source", "/alerts/test"))
+				m.UnregisterSource("test-source")
+			},
+			path:    "/alerts/test",
+			wantNil: true,
+		},
+		{
+			name: "should only return webhook sources",
+			setup: func(m port.AlertSourceManager) {
+				m.RegisterSource(porttest.NewMockAlertSource("poll-source", port.SourceTypePoll))
+			},
+			path:    "/any-path",
+			wantNil: true,
+		},
+	}
 
-		for i := range 5 {
-			source := newMockAlertSource(
-				"source-"+string(rune('a'+i)),
-				port.SourceTypeWebhook,
-			)
-			manager.RegisterSource(source)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manager := NewLocalAlertSourceManager()
+			if tt.setup != nil {
+				tt.setup(manager)
+			}
 
-		sources := manager.ListSources()
-		if len(sources) != 5 {
-			t.Errorf("ListSources() len = %d, want 5", len(sources))
-		}
-	})
+			got := manager.GetWebhookSourceByPath(tt.path)
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("GetWebhookSourceByPath() = %v, want nil", got)
+				}
+				return
+			}
 
-	t.Run("should reflect unregistered sources", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
-		source1 := newMockAlertSource("source-1", port.SourceTypeWebhook)
-		source2 := newMockAlertSource("source-2", port.SourceTypePoll)
-
-		manager.RegisterSource(source1)
-		manager.RegisterSource(source2)
-
-		if len(manager.ListSources()) != 2 {
-			t.Fatal("Expected 2 sources after registration")
-		}
-
-		manager.UnregisterSource("source-1")
-
-		sources := manager.ListSources()
-		if len(sources) != 1 {
-			t.Errorf("ListSources() len = %d, want 1 after unregister", len(sources))
-		}
-	})
+			if got == nil {
+				t.Fatal("GetWebhookSourceByPath() returned nil")
+			}
+			if got.Name() != tt.wantName {
+				t.Errorf("GetWebhookSourceByPath().Name() = %v, want %v", got.Name(), tt.wantName)
+			}
+		})
+	}
 }
 
 func TestLocalAlertSourceManager_SetAlertHandler(t *testing.T) {
@@ -346,8 +376,8 @@ func TestLocalAlertSourceManager_SetAlertHandler(t *testing.T) {
 		})
 
 		// Create and register a webhook source
-		webhookSource := newMockWebhookSource("test-webhook", "/alerts")
-		webhookSource.handleFunc = func(ctx context.Context, payload []byte) ([]*entity.Alert, error) {
+		webhookSource := porttest.NewMockWebhookSource("test-webhook", "/alerts")
+		webhookSource.HandleFunc = func(ctx context.Context, payload []byte) ([]*entity.Alert, error) {
 			alert, _ := entity.NewAlert("test-id", "test-webhook", entity.SeverityWarning, "Test Alert")
 			return []*entity.Alert{alert}, nil
 		}
@@ -403,55 +433,94 @@ func TestLocalAlertSourceManager_SetAlertHandler(t *testing.T) {
 }
 
 func TestLocalAlertSourceManager_StartAndShutdown(t *testing.T) {
-	t.Run("should start and shutdown cleanly", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
+	tests := []struct {
+		name    string
+		setup   func(m port.AlertSourceManager, sources []*porttest.MockAlertSource)
+		wantErr bool
+		check   func(t *testing.T, m port.AlertSourceManager, sources []*porttest.MockAlertSource)
+	}{
+		{
+			name: "should start and shutdown cleanly",
+		},
+		{
+			name: "should close all sources on shutdown",
+			setup: func(m port.AlertSourceManager, sources []*porttest.MockAlertSource) {
+				for _, s := range sources {
+					m.RegisterSource(s)
+				}
+			},
+			check: func(t *testing.T, m port.AlertSourceManager, sources []*porttest.MockAlertSource) {
+				for _, s := range sources {
+					if !s.ClosedVal {
+						t.Errorf("source %s should be ClosedVal after shutdown", s.Name())
+					}
+				}
+			},
+		},
+		{
+			name: "should aggregate errors from multiple source close failures",
+			setup: func(m port.AlertSourceManager, sources []*porttest.MockAlertSource) {
+				sources[0].CloseErr = context.DeadlineExceeded
+				sources[1].CloseErr = context.Canceled
+				for _, s := range sources {
+					m.RegisterSource(s)
+				}
+			},
+			wantErr: true,
+			check: func(t *testing.T, m port.AlertSourceManager, sources []*porttest.MockAlertSource) {
+				// We already check wantErr in the loop below, but let's do a more specific check if needed
+				// This is just to satisfy the check if called
+			},
+		},
+	}
 
-		ctx := context.Background()
-		if err := manager.Start(ctx); err != nil {
-			t.Errorf("Start() error = %v", err)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manager := NewLocalAlertSourceManager()
+			sources := []*porttest.MockAlertSource{
+				porttest.NewMockAlertSource("source-1", port.SourceTypeWebhook),
+				porttest.NewMockAlertSource("source-2", port.SourceTypePoll),
+				porttest.NewMockAlertSource("source-3", port.SourceTypeStream),
+			}
 
-		if err := manager.Shutdown(); err != nil {
-			t.Errorf("Shutdown() error = %v", err)
-		}
-	})
+			if tt.setup != nil {
+				tt.setup(manager, sources)
+			}
 
-	t.Run("should close all sources on shutdown", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
+			ctx := context.Background()
+			if err := manager.Start(ctx); err != nil {
+				t.Fatalf("Start() error = %v", err)
+			}
 
-		source1 := newMockAlertSource("source-1", port.SourceTypeWebhook)
-		source2 := newMockAlertSource("source-2", port.SourceTypePoll)
-		source3 := newMockAlertSource("source-3", port.SourceTypeStream)
+			err := manager.Shutdown()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Shutdown() error = %v, wantErr %v", err, tt.wantErr)
+			}
 
-		manager.RegisterSource(source1)
-		manager.RegisterSource(source2)
-		manager.RegisterSource(source3)
+			if tt.wantErr && err != nil {
+				if tt.name == "should aggregate errors from multiple source close failures" {
+					importErrors := []error{context.DeadlineExceeded, context.Canceled}
+					for _, targetErr := range importErrors {
+						if !errors.Is(err, targetErr) {
+							t.Errorf("Shutdown() error = %v, does not contain expected error %v", err, targetErr)
+						}
+					}
+				}
+			}
 
-		ctx := context.Background()
-		manager.Start(ctx)
-		manager.Shutdown()
-
-		if !source1.closed {
-			t.Error("source-1 should be closed after shutdown")
-		}
-		if !source2.closed {
-			t.Error("source-2 should be closed after shutdown")
-		}
-		if !source3.closed {
-			t.Error("source-3 should be closed after shutdown")
-		}
-	})
+			if tt.check != nil {
+				tt.check(t, manager, sources)
+			}
+		})
+	}
 
 	t.Run("should respect context cancellation on start", func(t *testing.T) {
 		manager := NewLocalAlertSourceManager()
-
 		ctx, cancel := context.WithCancel(context.Background())
-		cancel() // Cancel immediately
+		cancel()
 
-		// Start should either return immediately or handle cancellation
 		_ = manager.Start(ctx)
 
-		// Should be able to call shutdown without hanging
 		done := make(chan struct{})
 		go func() {
 			manager.Shutdown()
@@ -460,30 +529,8 @@ func TestLocalAlertSourceManager_StartAndShutdown(t *testing.T) {
 
 		select {
 		case <-done:
-			// Success
 		case <-time.After(time.Second):
 			t.Error("Shutdown() timed out")
-		}
-	})
-
-	t.Run("should aggregate errors from multiple source close failures", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
-
-		source1 := newMockAlertSource("source-1", port.SourceTypeWebhook)
-		source1.closeErr = context.DeadlineExceeded
-
-		source2 := newMockAlertSource("source-2", port.SourceTypePoll)
-		source2.closeErr = context.Canceled
-
-		manager.RegisterSource(source1)
-		manager.RegisterSource(source2)
-
-		ctx := context.Background()
-		manager.Start(ctx)
-
-		err := manager.Shutdown()
-		if err == nil {
-			t.Error("Shutdown() should return aggregated error when sources fail to close")
 		}
 	})
 }
@@ -499,7 +546,7 @@ func TestLocalAlertSourceManager_Concurrency(t *testing.T) {
 			wg.Add(1)
 			go func(id int) {
 				defer wg.Done()
-				source := newMockAlertSource(
+				source := porttest.NewMockAlertSource(
 					"source-"+string(rune('a'+id)),
 					port.SourceTypeWebhook,
 				)
@@ -520,7 +567,7 @@ func TestLocalAlertSourceManager_Concurrency(t *testing.T) {
 
 		// Pre-register sources
 		for i := range 5 {
-			source := newMockAlertSource(
+			source := porttest.NewMockAlertSource(
 				"source-"+string(rune('a'+i)),
 				port.SourceTypeWebhook,
 			)
@@ -576,7 +623,7 @@ func TestLocalAlertSourceManager_Concurrency(t *testing.T) {
 
 		// Register the target source midway
 		time.Sleep(time.Millisecond)
-		source := newMockAlertSource("target-source", port.SourceTypeWebhook)
+		source := porttest.NewMockAlertSource("target-source", port.SourceTypeWebhook)
 		if err := manager.RegisterSource(source); err != nil {
 			t.Fatalf("RegisterSource() error = %v", err)
 		}
@@ -596,7 +643,7 @@ func TestLocalAlertSourceManager_Concurrency(t *testing.T) {
 
 		// Pre-register some sources
 		for i := range 3 {
-			source := newMockAlertSource(
+			source := porttest.NewMockAlertSource(
 				"source-"+string(rune('a'+i)),
 				port.SourceTypeWebhook,
 			)

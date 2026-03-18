@@ -1,9 +1,10 @@
 package alert
 
 import (
-	"code-editing-agent/internal/domain/port"
 	"sync"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 )
 
 func TestNewSourceRegistry(t *testing.T) {

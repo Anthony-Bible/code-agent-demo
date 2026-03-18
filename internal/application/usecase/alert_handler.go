@@ -3,11 +3,11 @@
 package usecase
 
 import (
-	"code-editing-agent/internal/domain/entity"
 	"context"
 	"errors"
-	"fmt"
-	"os"
+	"log/slog"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 )
 
 // Alert severity constants used internally by the handler for decision making.
@@ -111,27 +111,38 @@ func (h *AlertHandler) Handle(ctx context.Context, alert *AlertForInvestigation)
 	}
 
 	// All checks passed - start the investigation
-	fmt.Fprintf(
-		os.Stderr,
-		"[AlertHandler] Starting investigation for alert: %s (severity=%s)\n",
-		alert.Title(),
-		alert.Severity(),
-	)
+	slog.Info("Starting investigation for alert", //nolint:sloglint // keep global logger for now
+		"alert", alert.Title(),
+		"severity", alert.Severity())
+
 	result, err := h.investigationUseCase.HandleAlert(ctx, alert)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[AlertHandler] Investigation error: %v\n", err)
+		slog.Error("Investigation error", "error", err) //nolint:sloglint // keep global logger for now
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "[AlertHandler] Investigation completed: status=%s, findings=%d, confidence=%.2f\n",
-		result.Status, len(result.Findings), result.Confidence)
+
+	slog.Info("Investigation completed", //nolint:sloglint // keep global logger for now
+		"status", result.Status,
+		"findings", len(result.Findings),
+		"confidence", result.Confidence)
+
 	if len(result.Findings) > 0 {
-		_, _ = fmt.Fprintf(os.Stderr, "[AlertHandler] Findings:\n")
+		slog.Info("Investigation findings", "count", len(result.Findings)) //nolint:sloglint // keep global logger for now
 		for i, finding := range result.Findings {
-			_, _ = fmt.Fprintf(os.Stderr, "  %d. %s\n", i+1, finding)
+			slog.Info("Finding", "index", i+1, "description", finding) //nolint:sloglint // keep global logger for now
 		}
 	}
+
+	// Display RCA findings if available
+	if len(result.RCAFindings) > 0 {
+		reporter := h.investigationUseCase.RCAReporter()
+		if reporter != nil {
+			_ = reporter.DisplayRCAFindings(result.RCAFindings)
+		}
+	}
+
 	if result.Escalated {
-		_, _ = fmt.Fprintf(os.Stderr, "[AlertHandler] ESCALATED: %s\n", result.EscalateReason)
+		slog.Warn("ESCALATED", "reason", result.EscalateReason) //nolint:sloglint // keep global logger for now
 	}
 	return nil
 }
@@ -252,20 +263,32 @@ func (h *AlertHandler) RunEntityAlertInvestigation(
 
 	result, err := h.investigationUseCase.RunInvestigation(ctx, invAlert, invID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[AlertHandler] Investigation error: %v\n", err)
+		slog.Error("Investigation error", "error", err) //nolint:sloglint // keep global logger for now
 		return err
 	}
 
-	fmt.Fprintf(os.Stderr, "[AlertHandler] Investigation completed: status=%s, findings=%d, confidence=%.2f\n",
-		result.Status, len(result.Findings), result.Confidence)
+	slog.Info("Investigation completed", //nolint:sloglint // keep global logger for now
+		"status", result.Status,
+		"findings", len(result.Findings),
+		"confidence", result.Confidence)
+
 	if len(result.Findings) > 0 {
-		_, _ = fmt.Fprintf(os.Stderr, "[AlertHandler] Findings:\n")
+		slog.Info("Investigation findings", "count", len(result.Findings)) //nolint:sloglint // keep global logger for now
 		for i, finding := range result.Findings {
-			_, _ = fmt.Fprintf(os.Stderr, "  %d. %s\n", i+1, finding)
+			slog.Info("Finding", "index", i+1, "description", finding) //nolint:sloglint // keep global logger for now
 		}
 	}
+
+	// Display RCA findings if available
+	if len(result.RCAFindings) > 0 {
+		reporter := h.investigationUseCase.RCAReporter()
+		if reporter != nil {
+			_ = reporter.DisplayRCAFindings(result.RCAFindings)
+		}
+	}
+
 	if result.Escalated {
-		_, _ = fmt.Fprintf(os.Stderr, "[AlertHandler] ESCALATED: %s\n", result.EscalateReason)
+		slog.Warn("ESCALATED", "reason", result.EscalateReason) //nolint:sloglint // keep global logger for now
 	}
 	return nil
 }

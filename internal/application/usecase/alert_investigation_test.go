@@ -1,12 +1,13 @@
 package usecase
 
 import (
-	"code-editing-agent/internal/domain/entity"
-	"code-editing-agent/internal/domain/port"
 	"context"
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 )
 
 // =============================================================================
@@ -669,10 +670,22 @@ func TestInvestigationResult_Fields(t *testing.T) {
 		AlertID:         "alert-001",
 		Status:          "completed",
 		Findings:        []string{"Root cause identified", "High load from process X"},
-		ActionsTaken:    5,
-		Duration:        2 * time.Minute,
-		Confidence:      0.85,
-		Escalated:       false,
+		RCAFindings: []entity.RCAFinding{
+			{
+				Summary: "Test Summary",
+				Causes: []entity.Cause{
+					{ID: "C1", Description: "Cause 1", ConfidenceScore: 0.9, Evidence: []string{"Ev 1"}},
+				},
+				Remedies: []entity.Remedy{
+					{Description: "Remedy 1", ActionableSteps: []string{"Step 1"}, Impact: "High"},
+					{Description: "Remedy 2", ActionableSteps: []string{"Step 2"}, Impact: "Med"},
+				},
+			},
+		},
+		ActionsTaken: 5,
+		Duration:     2 * time.Minute,
+		Confidence:   0.85,
+		Escalated:    false,
 	}
 
 	if result.InvestigationID != "inv-001" {
@@ -686,6 +699,12 @@ func TestInvestigationResult_Fields(t *testing.T) {
 	}
 	if len(result.Findings) != 2 {
 		t.Errorf("Findings len = %v, want 2", len(result.Findings))
+	}
+	if len(result.RCAFindings) != 1 {
+		t.Errorf("RCAFindings len = %v, want 1", len(result.RCAFindings))
+	}
+	if result.RCAFindings[0].Summary != "Test Summary" {
+		t.Errorf("RCAFinding[0].Summary = %v, want Test Summary", result.RCAFindings[0].Summary)
 	}
 	if result.ActionsTaken != 5 {
 		t.Errorf("ActionsTaken = %v, want 5", result.ActionsTaken)

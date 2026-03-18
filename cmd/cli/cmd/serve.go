@@ -1,14 +1,15 @@
 package cmd
 
 import (
-	"code-editing-agent/internal/application/usecase"
-	"code-editing-agent/internal/infrastructure/adapter/alert"
-	"code-editing-agent/internal/infrastructure/adapter/webhook"
-	"code-editing-agent/internal/infrastructure/config"
-	signalhandler "code-editing-agent/internal/infrastructure/signal"
 	"context"
 	"fmt"
 	"os"
+
+	"github.com/anthony-bible/code-agent-demo/internal/application/usecase"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/alert"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/webhook"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/config"
+	signalhandler "github.com/anthony-bible/code-agent-demo/internal/infrastructure/signal"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -28,8 +29,8 @@ The server exposes endpoints for:
 - Webhook receivers: POST /alerts/{source-path}
 
 Example:
-  code-editing-agent serve --addr :8080
-  code-editing-agent serve --config config/alert-sources.yaml
+  code-agent-demo serve --addr :8080
+  code-agent-demo serve --config config/alert-sources.yaml
 
 Alert sources are registered from the config file and receive webhooks
 at their configured paths. For example, a Prometheus Alertmanager source

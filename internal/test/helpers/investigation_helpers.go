@@ -1,8 +1,9 @@
 package helpers
 
 import (
-	"code-editing-agent/internal/application/service"
 	"time"
+
+	"github.com/anthony-bible/code-agent-demo/internal/application/service"
 )
 
 // NewInvestigationRecordForTest creates an InvestigationRecord for testing purposes.

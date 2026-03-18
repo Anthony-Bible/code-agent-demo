@@ -1,9 +1,10 @@
 package port
 
 import (
-	"code-editing-agent/internal/domain/entity"
 	"context"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 )
 
 // TestSkillManagerInterface_Contract validates that SkillManager interface exists with expected methods.

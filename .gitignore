@@ -3,7 +3,8 @@
 .agent/investigations/
 
 # Binary artifacts
-code-editing-agent
+code-agent-demo
+agent
 *.exe
 *.dll
 *.so

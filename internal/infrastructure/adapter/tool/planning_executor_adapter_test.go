@@ -1,13 +1,14 @@
 package tool
 
 import (
-	"code-editing-agent/internal/domain/port"
-	"code-editing-agent/internal/infrastructure/adapter/file"
 	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
 )
 
 func TestPlanningExecutorAdapter_EditFileBlockedInPlanMode(t *testing.T) {
