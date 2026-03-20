@@ -98,38 +98,13 @@ func (a *AnthropicAdapter) SendMessage(
 	tools []port.ToolParam,
 	opts port.AIRequestOptions,
 ) (*entity.Message, []port.ToolCallInfo, error) {
-	// Validate inputs
-	if len(messages) == 0 {
-		return nil, nil, ErrEmptyMessages
-	}
-	if a.model == "" {
-		return nil, nil, ErrModelNotSet
-	}
-
-	// Convert port messages to Anthropic SDK messages
-	anthropicMessages := a.convertMessages(messages)
-
-	// Convert port tools to Anthropic SDK tools
-	anthropicTools := a.convertTools(tools)
-
-	// Get system prompt from explicit options
-	systemPrompt := a.getSystemPrompt(opts)
-
-	// Build thinking config from explicit options
-	thinkingConfig := anthropic.ThinkingConfigParamUnion{OfDisabled: &anthropic.ThinkingConfigDisabledParam{}}
-	if opts.Thinking != nil && opts.Thinking.Enabled {
-		thinkingConfig = anthropic.ThinkingConfigParamOfEnabled(opts.Thinking.BudgetTokens)
+	params, err := a.buildMessageParams(ctx, messages, tools, opts)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	// Call Anthropic API
-	response, err := a.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.Model(a.model),
-		MaxTokens: a.maxTokens,
-		Messages:  anthropicMessages,
-		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
-		Thinking:  thinkingConfig,
-		Tools:     anthropicTools,
-	})
+	response, err := a.client.Messages.New(ctx, params)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to send message: %w", err)
 	}
@@ -165,38 +140,13 @@ func (a *AnthropicAdapter) SendMessageStreaming(
 	textCallback port.StreamCallback,
 	thinkingCallback port.ThinkingCallback,
 ) (*entity.Message, []port.ToolCallInfo, error) {
-	// Validate inputs
-	if len(messages) == 0 {
-		return nil, nil, ErrEmptyMessages
-	}
-	if a.model == "" {
-		return nil, nil, ErrModelNotSet
-	}
-
-	// Convert port messages to Anthropic SDK messages
-	anthropicMessages := a.convertMessages(messages)
-
-	// Convert port tools to Anthropic SDK tools
-	anthropicTools := a.convertTools(tools)
-
-	// Get system prompt from explicit options
-	systemPrompt := a.getSystemPrompt(opts)
-
-	// Build thinking config from explicit options
-	thinkingConfig := anthropic.ThinkingConfigParamUnion{OfDisabled: &anthropic.ThinkingConfigDisabledParam{}}
-	if opts.Thinking != nil && opts.Thinking.Enabled {
-		thinkingConfig = anthropic.ThinkingConfigParamOfEnabled(opts.Thinking.BudgetTokens)
+	params, err := a.buildMessageParams(ctx, messages, tools, opts)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	// Create streaming request
-	stream := a.client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.Model(a.model),
-		MaxTokens: a.maxTokens,
-		Messages:  anthropicMessages,
-		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
-		Thinking:  thinkingConfig,
-		Tools:     anthropicTools,
-	})
+	stream := a.client.Messages.NewStreaming(ctx, params)
 
 	// Accumulate the message as events arrive
 	message := anthropic.Message{}
@@ -241,25 +191,68 @@ func (a *AnthropicAdapter) SendMessageStreaming(
 	return a.convertResponse(&message)
 }
 
+// buildMessageParams encapsulates the setup logic for anthropic.MessageNewParams.
+func (a *AnthropicAdapter) buildMessageParams(
+	ctx context.Context,
+	messages []port.MessageParam,
+	tools []port.ToolParam,
+	opts port.AIRequestOptions,
+) (anthropic.MessageNewParams, error) {
+	// Validate inputs
+	if len(messages) == 0 {
+		return anthropic.MessageNewParams{}, ErrEmptyMessages
+	}
+	if a.model == "" {
+		return anthropic.MessageNewParams{}, ErrModelNotSet
+	}
+
+	// Convert port messages to Anthropic SDK messages
+	anthropicMessages := a.convertMessages(messages)
+
+	// Convert port tools to Anthropic SDK tools
+	anthropicTools := a.convertTools(tools)
+
+	// Get system prompt from explicit options
+	systemPrompt, err := a.getSystemPrompt(ctx, opts)
+	if err != nil {
+		return anthropic.MessageNewParams{}, err
+	}
+
+	// Build thinking config from explicit options
+	thinkingConfig := anthropic.ThinkingConfigParamUnion{OfDisabled: &anthropic.ThinkingConfigDisabledParam{}}
+	if opts.Thinking != nil && opts.Thinking.Enabled {
+		thinkingConfig = anthropic.ThinkingConfigParamOfEnabled(opts.Thinking.BudgetTokens)
+	}
+
+	return anthropic.MessageNewParams{
+		Model:     anthropic.Model(a.model),
+		MaxTokens: a.maxTokens,
+		Messages:  anthropicMessages,
+		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
+		Thinking:  thinkingConfig,
+		Tools:     anthropicTools,
+	}, nil
+}
+
 // getSystemPrompt returns the system prompt for the AI based on options priority.
 //
 // Priority order (highest to lowest):
 //  1. Custom system prompt (from opts.SystemPrompt) - Takes precedence over all other prompts
 //  2. Plan mode prompt (from opts.PlanMode) - Used when plan mode is active and no custom prompt exists
 //  3. Base prompt with optional skill metadata - Default prompt when no special modes are active
-func (a *AnthropicAdapter) getSystemPrompt(opts port.AIRequestOptions) string {
+func (a *AnthropicAdapter) getSystemPrompt(ctx context.Context, opts port.AIRequestOptions) (string, error) {
 	// Priority 1: Check for custom system prompt (highest priority)
 	if opts.SystemPrompt != "" {
-		return opts.SystemPrompt
+		return opts.SystemPrompt, nil
 	}
 
 	// Priority 2: Check for plan mode prompt (second priority)
 	if opts.PlanMode != nil && opts.PlanMode.Enabled {
-		return a.buildPlanModePrompt(*opts.PlanMode)
+		return a.buildPlanModePrompt(*opts.PlanMode), nil
 	}
 
 	// Priority 3: Return base prompt with optional skill metadata (default/fallback)
-	return a.buildBasePromptWithSkills()
+	return a.buildBasePromptWithSkills(ctx)
 }
 
 // buildPlanModePrompt constructs the specialized plan mode system prompt.
@@ -311,8 +304,30 @@ When your plan is complete, tell the user to exit plan mode with :mode normal to
 }
 
 // buildBasePromptWithSkills constructs the base system prompt.
-func (a *AnthropicAdapter) buildBasePromptWithSkills() string {
-	return "You are an AI assistant that helps users with code editing and explanations. Use the available tools when necessary to provide accurate and helpful responses."
+func (a *AnthropicAdapter) buildBasePromptWithSkills(ctx context.Context) (string, error) {
+	basePrompt := "You are an AI assistant that helps users with code editing and explanations. Use the available tools when necessary to provide accurate and helpful responses."
+
+	if a.subagentManager == nil {
+		return basePrompt, nil
+	}
+
+	agents, err := a.subagentManager.ListAgents(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to list agents: %w", err)
+	}
+
+	if len(agents) == 0 {
+		return basePrompt, nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString(basePrompt)
+	sb.WriteString("\n\nYou have access to the following specialized agents:\n")
+	for _, agent := range agents {
+		fmt.Fprintf(&sb, "- %s: %s\n", agent.Name, agent.Description)
+	}
+
+	return sb.String(), nil
 }
 
 // GenerateToolSchema returns an empty tool input schema.

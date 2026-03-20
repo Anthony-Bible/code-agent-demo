@@ -2,6 +2,8 @@ package ai
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
@@ -473,7 +475,10 @@ func TestGetSystemPrompt_CustomPromptTakesPrecedenceOverBasePrompt(t *testing.T)
 	}
 
 	// Execute: get system prompt
-	actualPrompt := adapter.getSystemPrompt(opts)
+	actualPrompt, err := adapter.getSystemPrompt(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("getSystemPrompt failed: %v", err)
+	}
 
 	// Assert: should return custom prompt, not base prompt
 	if actualPrompt != expectedPrompt {
@@ -481,7 +486,10 @@ func TestGetSystemPrompt_CustomPromptTakesPrecedenceOverBasePrompt(t *testing.T)
 	}
 
 	// Assert: should NOT be the base prompt
-	basePrompt := adapter.buildBasePromptWithSkills()
+	basePrompt, err := adapter.buildBasePromptWithSkills(context.Background())
+	if err != nil {
+		t.Fatalf("buildBasePromptWithSkills failed: %v", err)
+	}
 	if actualPrompt == basePrompt {
 		t.Error("Custom prompt should take precedence over base prompt, but got base prompt instead")
 	}
@@ -515,7 +523,10 @@ func TestGetSystemPrompt_CustomPromptTakesPrecedenceOverPlanMode(t *testing.T) {
 	}
 
 	// Execute: get system prompt
-	actualPrompt := adapter.getSystemPrompt(opts)
+	actualPrompt, err := adapter.getSystemPrompt(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("getSystemPrompt failed: %v", err)
+	}
 
 	// Assert: should return custom prompt, not plan mode prompt
 	if actualPrompt != customPrompt {
@@ -555,10 +566,16 @@ func TestGetSystemPrompt_EmptyCustomPromptFallsBackToBasePrompt(t *testing.T) {
 	}
 
 	// Execute: get system prompt
-	actualPrompt := adapter.getSystemPrompt(opts)
+	actualPrompt, err := adapter.getSystemPrompt(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("getSystemPrompt failed: %v", err)
+	}
 
 	// Expected: base prompt
-	expectedPrompt := adapter.buildBasePromptWithSkills()
+	expectedPrompt, err := adapter.buildBasePromptWithSkills(context.Background())
+	if err != nil {
+		t.Fatalf("buildBasePromptWithSkills failed: %v", err)
+	}
 
 	// Assert: should return base prompt when custom prompt is empty
 	if actualPrompt != expectedPrompt {
@@ -591,7 +608,10 @@ func TestGetSystemPrompt_NoCustomPromptWithPlanModeReturnsPlanPrompt(t *testing.
 	}
 
 	// Execute: get system prompt
-	actualPrompt := adapter.getSystemPrompt(opts)
+	actualPrompt, err := adapter.getSystemPrompt(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("getSystemPrompt failed: %v", err)
+	}
 
 	// Assert: should contain plan mode instructions
 	if !containsPlanModeInstructions(actualPrompt) {
@@ -604,7 +624,10 @@ func TestGetSystemPrompt_NoCustomPromptWithPlanModeReturnsPlanPrompt(t *testing.
 	}
 
 	// Assert: should NOT be the base prompt
-	basePrompt := adapter.buildBasePromptWithSkills()
+	basePrompt, err := adapter.buildBasePromptWithSkills(context.Background())
+	if err != nil {
+		t.Fatalf("buildBasePromptWithSkills failed: %v", err)
+	}
 	if actualPrompt == basePrompt {
 		t.Error("Expected plan mode prompt, but got base prompt instead")
 	}
@@ -625,10 +648,16 @@ func TestGetSystemPrompt_NoCustomPromptNoPlanModeReturnsBasePrompt(t *testing.T)
 	opts := port.AIRequestOptions{}
 
 	// Execute: get system prompt
-	actualPrompt := adapter.getSystemPrompt(opts)
+	actualPrompt, err := adapter.getSystemPrompt(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("getSystemPrompt failed: %v", err)
+	}
 
 	// Expected: base prompt
-	expectedPrompt := adapter.buildBasePromptWithSkills()
+	expectedPrompt, err := adapter.buildBasePromptWithSkills(context.Background())
+	if err != nil {
+		t.Fatalf("buildBasePromptWithSkills failed: %v", err)
+	}
 
 	// Assert: should return base prompt
 	if actualPrompt != expectedPrompt {
@@ -666,7 +695,10 @@ func TestGetSystemPrompt_CustomPromptWithWhitespaceIsNotEmpty(t *testing.T) {
 	}
 
 	// Execute: get system prompt
-	actualPrompt := adapter.getSystemPrompt(opts)
+	actualPrompt, err := adapter.getSystemPrompt(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("getSystemPrompt failed: %v", err)
+	}
 
 	// Assert: should return whitespace prompt (even though unusual)
 	// The implementation should check for empty string, not trimmed empty
@@ -715,7 +747,10 @@ func TestGetSystemPrompt_CustomPromptSessionIDNotValidated(t *testing.T) {
 			}
 
 			// Execute: get system prompt
-			actualPrompt := adapter.getSystemPrompt(opts)
+			actualPrompt, err := adapter.getSystemPrompt(context.Background(), opts)
+			if err != nil {
+				t.Fatalf("getSystemPrompt failed: %v", err)
+			}
 
 			// Assert: should return custom prompt regardless of session ID
 			if actualPrompt != customPrompt {
@@ -744,17 +779,26 @@ func TestGetSystemPrompt_MultipleCustomPromptsInSequence(t *testing.T) {
 	opts1 := port.AIRequestOptions{
 		SystemPrompt: prompt1,
 	}
-	actualPrompt1 := adapter.getSystemPrompt(opts1)
+	actualPrompt1, err := adapter.getSystemPrompt(context.Background(), opts1)
+	if err != nil {
+		t.Fatalf("getSystemPrompt failed: %v", err)
+	}
 
 	// Execute: call with second custom prompt
 	opts2 := port.AIRequestOptions{
 		SystemPrompt: prompt2,
 	}
-	actualPrompt2 := adapter.getSystemPrompt(opts2)
+	actualPrompt2, err := adapter.getSystemPrompt(context.Background(), opts2)
+	if err != nil {
+		t.Fatalf("getSystemPrompt failed: %v", err)
+	}
 
 	// Execute: call with no custom prompt
 	opts3 := port.AIRequestOptions{}
-	actualPrompt3 := adapter.getSystemPrompt(opts3)
+	actualPrompt3, err := adapter.getSystemPrompt(context.Background(), opts3)
+	if err != nil {
+		t.Fatalf("getSystemPrompt failed: %v", err)
+	}
 
 	// Assert: each call returns the appropriate prompt
 	if actualPrompt1 != prompt1 {
@@ -764,10 +808,72 @@ func TestGetSystemPrompt_MultipleCustomPromptsInSequence(t *testing.T) {
 		t.Errorf("Second call: expected %q, got %q", prompt2, actualPrompt2)
 	}
 
-	basePrompt := adapter.buildBasePromptWithSkills()
+	basePrompt, err := adapter.buildBasePromptWithSkills(context.Background())
+	if err != nil {
+		t.Fatalf("buildBasePromptWithSkills failed: %v", err)
+	}
 	if actualPrompt3 != basePrompt {
 		t.Errorf("Third call: expected base prompt %q, got %q", basePrompt, actualPrompt3)
 	}
+}
+
+// TestBuildBasePromptWithSkills_IncludesSubagents verifies that when a subagent manager
+// is provided and has registered agents, they are included in the system prompt.
+func TestBuildBasePromptWithSkills_IncludesSubagents(t *testing.T) {
+	// Setup: mock subagent manager
+	mockManager := &mockSubagentManagerForPrompt{
+		agents: []port.SubagentInfo{
+			{
+				Name:        "code-reviewer",
+				Description: "Reviews code for quality and security",
+			},
+			{
+				Name:        "documentation-writer",
+				Description: "Writes comprehensive documentation",
+			},
+		},
+	}
+
+	// Setup: create adapter with mock manager
+	adapter := &AnthropicAdapter{
+		model:           "test-model",
+		subagentManager: mockManager,
+	}
+
+	// Execute: build prompt
+	prompt, err := adapter.buildBasePromptWithSkills(context.Background())
+	if err != nil {
+		t.Fatalf("buildBasePromptWithSkills failed: %v", err)
+	}
+
+	// Assert: base prompt is present
+	if !strings.Contains(prompt, "AI assistant") {
+		t.Error("Base prompt text missing")
+	}
+
+	// Assert: subagents header is present
+	if !strings.Contains(prompt, "access to the following specialized agents:") {
+		t.Error("Subagents header missing from prompt")
+	}
+
+	// Assert: each subagent is present with its description
+	for _, agent := range mockManager.agents {
+		expectedLine := fmt.Sprintf("- %s: %s", agent.Name, agent.Description)
+		if !strings.Contains(prompt, expectedLine) {
+			t.Errorf("Expected agent info missing: %q", expectedLine)
+		}
+	}
+}
+
+// mockSubagentManagerForPrompt is a mock for testing prompt building logic.
+type mockSubagentManagerForPrompt struct {
+	port.SubagentManager
+
+	agents []port.SubagentInfo
+}
+
+func (m *mockSubagentManagerForPrompt) ListAgents(_ context.Context) ([]port.SubagentInfo, error) {
+	return m.agents, nil
 }
 
 // ============================================================================
