@@ -748,6 +748,7 @@ func (m *mockAIProviderForChat) SendMessage(
 	_ context.Context,
 	_ []port.MessageParam,
 	_ []port.ToolParam,
+	_ port.AIRequestOptions,
 ) (*entity.Message, []port.ToolCallInfo, error) {
 	defer func() { m.callCount++ }()
 
@@ -764,6 +765,7 @@ func (m *mockAIProviderForChat) SendMessageStreaming(
 	_ context.Context,
 	_ []port.MessageParam,
 	_ []port.ToolParam,
+	_ port.AIRequestOptions,
 	textCallback port.StreamCallback,
 	_ port.ThinkingCallback,
 ) (*entity.Message, []port.ToolCallInfo, error) {

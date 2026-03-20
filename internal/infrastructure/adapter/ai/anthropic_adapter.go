@@ -96,6 +96,7 @@ func (a *AnthropicAdapter) SendMessage(
 	ctx context.Context,
 	messages []port.MessageParam,
 	tools []port.ToolParam,
+	opts port.AIRequestOptions,
 ) (*entity.Message, []port.ToolCallInfo, error) {
 	// Validate inputs
 	if len(messages) == 0 {
@@ -111,13 +112,13 @@ func (a *AnthropicAdapter) SendMessage(
 	// Convert port tools to Anthropic SDK tools
 	anthropicTools := a.convertTools(tools)
 
-	// Get system prompt (may be modified if plan mode is active, includes skill metadata)
-	systemPrompt := a.getSystemPrompt(ctx)
+	// Get system prompt from explicit options
+	systemPrompt := a.getSystemPrompt(opts)
 
-	// Build thinking config from context
+	// Build thinking config from explicit options
 	thinkingConfig := anthropic.ThinkingConfigParamUnion{OfDisabled: &anthropic.ThinkingConfigDisabledParam{}}
-	if thinkingInfo, ok := port.ThinkingModeFromContext(ctx); ok && thinkingInfo.Enabled {
-		thinkingConfig = anthropic.ThinkingConfigParamOfEnabled(thinkingInfo.BudgetTokens)
+	if opts.Thinking != nil && opts.Thinking.Enabled {
+		thinkingConfig = anthropic.ThinkingConfigParamOfEnabled(opts.Thinking.BudgetTokens)
 	}
 
 	// Call Anthropic API
@@ -159,6 +160,7 @@ func (a *AnthropicAdapter) SendMessageStreaming(
 	ctx context.Context,
 	messages []port.MessageParam,
 	tools []port.ToolParam,
+	opts port.AIRequestOptions,
 	textCallback port.StreamCallback,
 	thinkingCallback port.ThinkingCallback,
 ) (*entity.Message, []port.ToolCallInfo, error) {
@@ -176,13 +178,13 @@ func (a *AnthropicAdapter) SendMessageStreaming(
 	// Convert port tools to Anthropic SDK tools
 	anthropicTools := a.convertTools(tools)
 
-	// Get system prompt (may be modified if plan mode is active, includes skill metadata)
-	systemPrompt := a.getSystemPrompt(ctx)
+	// Get system prompt from explicit options
+	systemPrompt := a.getSystemPrompt(opts)
 
-	// Build thinking config from context
+	// Build thinking config from explicit options
 	thinkingConfig := anthropic.ThinkingConfigParamUnion{OfDisabled: &anthropic.ThinkingConfigDisabledParam{}}
-	if thinkingInfo, ok := port.ThinkingModeFromContext(ctx); ok && thinkingInfo.Enabled {
-		thinkingConfig = anthropic.ThinkingConfigParamOfEnabled(thinkingInfo.BudgetTokens)
+	if opts.Thinking != nil && opts.Thinking.Enabled {
+		thinkingConfig = anthropic.ThinkingConfigParamOfEnabled(opts.Thinking.BudgetTokens)
 	}
 
 	// Create streaming request
@@ -238,25 +240,24 @@ func (a *AnthropicAdapter) SendMessageStreaming(
 	return a.convertResponse(&message)
 }
 
-// getSystemPrompt returns the system prompt for the AI based on context priority.
+// getSystemPrompt returns the system prompt for the AI based on options priority.
 //
 // Priority order (highest to lowest):
-//  1. Custom system prompt (from CustomSystemPromptFromContext) - Takes precedence over all other prompts
-//  2. Plan mode prompt (from PlanModeFromContext) - Used when plan mode is active and no custom prompt exists
+//  1. Custom system prompt (from opts.SystemPrompt) - Takes precedence over all other prompts
+//  2. Plan mode prompt (from opts.PlanMode) - Used when plan mode is active and no custom prompt exists
 //  3. Base prompt with optional skill metadata - Default prompt when no special modes are active
 //
 // The custom prompt feature allows callers to override the system prompt entirely
 // for specialized tasks like code review, refactoring, or investigations.
-func (a *AnthropicAdapter) getSystemPrompt(ctx context.Context) string {
+func (a *AnthropicAdapter) getSystemPrompt(opts port.AIRequestOptions) string {
 	// Priority 1: Check for custom system prompt (highest priority)
-	if customPromptInfo, ok := port.CustomSystemPromptFromContext(ctx); ok && customPromptInfo.Prompt != "" {
-		return customPromptInfo.Prompt
+	if opts.SystemPrompt != "" {
+		return opts.SystemPrompt
 	}
 
 	// Priority 2: Check for plan mode prompt (second priority)
-	planInfo, ok := port.PlanModeFromContext(ctx)
-	if ok && planInfo.Enabled {
-		return a.buildPlanModePrompt(planInfo)
+	if opts.PlanMode != nil && opts.PlanMode.Enabled {
+		return a.buildPlanModePrompt(*opts.PlanMode)
 	}
 
 	// Priority 3: Return base prompt with optional skill metadata (default/fallback)

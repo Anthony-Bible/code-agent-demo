@@ -211,11 +211,8 @@ func (cs *ChatService) SendMessage(
 		Message:   message,
 	}
 
-	// Add thinking mode to context if enabled for this session
+	// Get thinking mode for this session (used for ShowThinking callback setup)
 	thinkingInfo, _ := cs.conversationService.GetThinkingMode(sessionID)
-	if thinkingInfo.Enabled {
-		ctx = port.WithThinkingMode(ctx, thinkingInfo)
-	}
 
 	// Add user message to conversation
 	_, err := cs.conversationService.AddUserMessage(ctx, req.SessionID, req.Message)
@@ -481,11 +478,8 @@ func (cs *ChatService) continueAfterToolExecution(
 	ctx context.Context,
 	sessionID string,
 ) (*dto.SendMessageResponse, error) {
-	// Add thinking mode to context if enabled for this session
+	// Get thinking mode for this session (used for ShowThinking callback setup)
 	thinkingInfo, _ := cs.conversationService.GetThinkingMode(sessionID)
-	if thinkingInfo.Enabled {
-		ctx = port.WithThinkingMode(ctx, thinkingInfo)
-	}
 
 	// Begin streaming response with color setup
 	if err := cs.userInterface.BeginStreamingResponse(); err != nil {

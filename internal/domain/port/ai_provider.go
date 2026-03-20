@@ -59,6 +59,19 @@ type ToolCallInfo struct {
 	ThoughtSignature string                 `json:"thought_signature,omitempty"` // Gemini thought signature via Bifrost
 }
 
+// AIRequestOptions carries explicit configuration for an AI request.
+// These are values that were previously passed via context.WithValue but are
+// better expressed as explicit parameters since they are configuration, not
+// request-scoped metadata.
+type AIRequestOptions struct {
+	// SystemPrompt overrides the default system prompt when non-empty.
+	SystemPrompt string
+	// PlanMode contains plan mode configuration (nil if not in plan mode).
+	PlanMode *PlanModeInfo
+	// Thinking contains thinking mode configuration (nil if not enabled).
+	Thinking *ThinkingModeInfo
+}
+
 // StreamCallback is called when streaming text is received from the AI provider.
 // It receives chunks of text as they arrive and returns an error if processing fails.
 type StreamCallback func(text string) error
@@ -76,6 +89,7 @@ type AIProvider interface {
 		ctx context.Context,
 		messages []MessageParam,
 		tools []ToolParam,
+		opts AIRequestOptions,
 	) (*entity.Message, []ToolCallInfo, error)
 
 	// SendMessageStreaming sends a message to the AI provider with streaming support.
@@ -86,6 +100,7 @@ type AIProvider interface {
 		ctx context.Context,
 		messages []MessageParam,
 		tools []ToolParam,
+		opts AIRequestOptions,
 		textCallback StreamCallback,
 		thinkingCallback ThinkingCallback,
 	) (*entity.Message, []ToolCallInfo, error)

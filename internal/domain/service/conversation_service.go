@@ -185,14 +185,14 @@ func (cs *ConversationService) ProcessAssistantResponse(
 	ctx context.Context,
 	sessionID string,
 ) (*entity.Message, []port.ToolCallInfo, error) {
-	// Prepare context and parameters
-	conversation, messageParams, toolParams, preparedCtx, err := cs.prepareAIRequest(ctx, sessionID)
+	// Prepare parameters and options
+	conversation, messageParams, toolParams, opts, err := cs.prepareAIRequest(ctx, sessionID)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// Send to AI provider
-	response, toolCalls, err := cs.aiProvider.SendMessage(preparedCtx, messageParams, toolParams)
+	response, toolCalls, err := cs.aiProvider.SendMessage(ctx, messageParams, toolParams, opts)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -209,17 +209,18 @@ func (cs *ConversationService) ProcessAssistantResponseStreaming(
 	textCallback port.StreamCallback,
 	thinkingCallback port.ThinkingCallback,
 ) (*entity.Message, []port.ToolCallInfo, error) {
-	// Prepare context and parameters
-	conversation, messageParams, toolParams, preparedCtx, err := cs.prepareAIRequest(ctx, sessionID)
+	// Prepare parameters and options
+	conversation, messageParams, toolParams, opts, err := cs.prepareAIRequest(ctx, sessionID)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// Send to AI provider with streaming
 	response, toolCalls, err := cs.aiProvider.SendMessageStreaming(
-		preparedCtx,
+		ctx,
 		messageParams,
 		toolParams,
+		opts,
 		textCallback,
 		thinkingCallback,
 	)
@@ -231,15 +232,16 @@ func (cs *ConversationService) ProcessAssistantResponseStreaming(
 	return cs.finalizeAIResponse(ctx, sessionID, conversation, response, toolCalls)
 }
 
-// prepareAIRequest prepares the context, message parameters, and tool parameters for an AI request.
+// prepareAIRequest prepares the message parameters, tool parameters, and AI request options.
 // This is shared logic between streaming and non-streaming requests.
 func (cs *ConversationService) prepareAIRequest(
 	ctx context.Context,
 	sessionID string,
-) (*entity.Conversation, []port.MessageParam, []port.ToolParam, context.Context, error) {
+) (*entity.Conversation, []port.MessageParam, []port.ToolParam, port.AIRequestOptions, error) {
+	var zeroOpts port.AIRequestOptions
 	select {
 	case <-ctx.Done():
-		return nil, nil, nil, nil, fmt.Errorf("context cancelled before AI call: %w", ctx.Err())
+		return nil, nil, nil, zeroOpts, fmt.Errorf("context cancelled before AI call: %w", ctx.Err())
 	default:
 	}
 
@@ -247,7 +249,7 @@ func (cs *ConversationService) prepareAIRequest(
 	conversation, exists := cs.conversations[sessionID]
 	cs.conversationsMu.RUnlock()
 	if !exists {
-		return nil, nil, nil, nil, ErrConversationNotFound
+		return nil, nil, nil, zeroOpts, ErrConversationNotFound
 	}
 
 	// Get conversation history for AI provider
@@ -297,13 +299,13 @@ func (cs *ConversationService) prepareAIRequest(
 	// Get available tools
 	tools, err := cs.toolExecutor.ListTools()
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, zeroOpts, err
 	}
 
 	// Filter tools based on active skills' allowed-tools restrictions
 	filteredTools, err := cs.filterToolsByActiveSkills(sessionID, tools)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, zeroOpts, err
 	}
 
 	toolParams := make([]port.ToolParam, len(filteredTools))
@@ -315,31 +317,27 @@ func (cs *ConversationService) prepareAIRequest(
 		}
 	}
 
-	// Add plan mode info to context if enabled
+	// Build AI request options from session state
+	opts := port.AIRequestOptions{}
+
 	isPlanMode, _ := cs.IsPlanMode(sessionID)
 	if isPlanMode {
-		planInfo := port.PlanModeInfo{
+		opts.PlanMode = &port.PlanModeInfo{
 			Enabled:   true,
 			SessionID: sessionID,
 			PlanPath:  fmt.Sprintf(".agent/plans/%s.md", sessionID),
 		}
-		ctx = port.WithPlanMode(ctx, planInfo)
 	}
 
-	// Add custom system prompt to context if set
 	if customPrompt, ok := cs.GetCustomSystemPrompt(sessionID); ok {
-		ctx = port.WithCustomSystemPrompt(ctx, port.CustomSystemPromptInfo{
-			Prompt:    customPrompt,
-			SessionID: sessionID,
-		})
+		opts.SystemPrompt = customPrompt
 	}
 
-	// Add thinking mode info to context if enabled
 	if thinkingInfo, err := cs.GetThinkingMode(sessionID); err == nil && thinkingInfo.Enabled {
-		ctx = port.WithThinkingMode(ctx, thinkingInfo)
+		opts.Thinking = &thinkingInfo
 	}
 
-	return conversation, messageParams, toolParams, ctx, nil
+	return conversation, messageParams, toolParams, opts, nil
 }
 
 // finalizeAIResponse adds the AI response to the conversation and updates processing state.
@@ -1018,7 +1016,7 @@ func (cs *ConversationService) compactConversation(
 
 	summaryMessages := cs.buildSummaryRequest(messages)
 
-	summaryResponse, _, err := cs.aiProvider.SendMessage(ctx, summaryMessages, nil)
+	summaryResponse, _, err := cs.aiProvider.SendMessage(ctx, summaryMessages, nil, port.AIRequestOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to generate conversation summary: %w", err)
 	}

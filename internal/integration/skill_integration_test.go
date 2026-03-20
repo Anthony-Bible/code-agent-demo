@@ -377,6 +377,7 @@ This skill should appear in the system prompt.
 			{Role: "user", Content: "test message"},
 		},
 		nil,
+		port.AIRequestOptions{},
 	)
 	// We expect an error (API/model issue), but the test validates integration wiring
 	if err == nil {

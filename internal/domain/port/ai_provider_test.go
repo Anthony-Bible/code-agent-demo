@@ -21,6 +21,7 @@ func (m *mockAIProvider) SendMessage(
 	_ context.Context,
 	_ []MessageParam,
 	_ []ToolParam,
+	_ AIRequestOptions,
 ) (*entity.Message, []ToolCallInfo, error) {
 	return nil, nil, nil
 }
@@ -29,6 +30,7 @@ func (m *mockAIProvider) SendMessageStreaming(
 	_ context.Context,
 	_ []MessageParam,
 	_ []ToolParam,
+	_ AIRequestOptions,
 	_ StreamCallback,
 	_ ThinkingCallback,
 ) (*entity.Message, []ToolCallInfo, error) {

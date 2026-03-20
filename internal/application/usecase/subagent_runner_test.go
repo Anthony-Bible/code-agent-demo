@@ -284,6 +284,7 @@ func (m *subagentRunnerAIProviderMock) SendMessage(
 	_ context.Context,
 	messages []port.MessageParam,
 	tools []port.ToolParam,
+	_ port.AIRequestOptions,
 ) (*entity.Message, []port.ToolCallInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -300,6 +301,7 @@ func (m *subagentRunnerAIProviderMock) SendMessageStreaming(
 	_ context.Context,
 	messages []port.MessageParam,
 	tools []port.ToolParam,
+	_ port.AIRequestOptions,
 	_ port.StreamCallback,
 	_ port.ThinkingCallback,
 ) (*entity.Message, []port.ToolCallInfo, error) {
