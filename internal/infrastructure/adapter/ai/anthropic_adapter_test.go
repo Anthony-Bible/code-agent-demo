@@ -453,14 +453,14 @@ func TestConvertTools_RequiredPreservesOrder(t *testing.T) {
 // PRIORITY ORDER (highest to lowest):
 // 1. Custom system prompt (from opts.SystemPrompt)
 // 2. Plan mode prompt (from opts.PlanMode)
-// 3. Base prompt with skills (default)
+// 3. Base prompt with agents (default)
 // ============================================================================
 
 // TestGetSystemPrompt_CustomPromptTakesPrecedenceOverBasePrompt verifies that
 // when a custom system prompt is present in opts, it is returned instead
 // of the base prompt.
 func TestGetSystemPrompt_CustomPromptTakesPrecedenceOverBasePrompt(t *testing.T) {
-	// Setup: create adapter with no skill manager for predictable base prompt
+	// Setup: create adapter with no subagent manager for predictable base prompt
 	adapter := &AnthropicAdapter{
 		model: "test-model",
 	}
@@ -486,9 +486,9 @@ func TestGetSystemPrompt_CustomPromptTakesPrecedenceOverBasePrompt(t *testing.T)
 	}
 
 	// Assert: should NOT be the base prompt
-	basePrompt, err := adapter.buildBasePromptWithSkills(context.Background())
+	basePrompt, err := adapter.buildBasePromptWithAgents(context.Background())
 	if err != nil {
-		t.Fatalf("buildBasePromptWithSkills failed: %v", err)
+		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
 	}
 	if actualPrompt == basePrompt {
 		t.Error("Custom prompt should take precedence over base prompt, but got base prompt instead")
@@ -572,9 +572,9 @@ func TestGetSystemPrompt_EmptyCustomPromptFallsBackToBasePrompt(t *testing.T) {
 	}
 
 	// Expected: base prompt
-	expectedPrompt, err := adapter.buildBasePromptWithSkills(context.Background())
+	expectedPrompt, err := adapter.buildBasePromptWithAgents(context.Background())
 	if err != nil {
-		t.Fatalf("buildBasePromptWithSkills failed: %v", err)
+		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
 	}
 
 	// Assert: should return base prompt when custom prompt is empty
@@ -624,9 +624,9 @@ func TestGetSystemPrompt_NoCustomPromptWithPlanModeReturnsPlanPrompt(t *testing.
 	}
 
 	// Assert: should NOT be the base prompt
-	basePrompt, err := adapter.buildBasePromptWithSkills(context.Background())
+	basePrompt, err := adapter.buildBasePromptWithAgents(context.Background())
 	if err != nil {
-		t.Fatalf("buildBasePromptWithSkills failed: %v", err)
+		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
 	}
 	if actualPrompt == basePrompt {
 		t.Error("Expected plan mode prompt, but got base prompt instead")
@@ -654,9 +654,9 @@ func TestGetSystemPrompt_NoCustomPromptNoPlanModeReturnsBasePrompt(t *testing.T)
 	}
 
 	// Expected: base prompt
-	expectedPrompt, err := adapter.buildBasePromptWithSkills(context.Background())
+	expectedPrompt, err := adapter.buildBasePromptWithAgents(context.Background())
 	if err != nil {
-		t.Fatalf("buildBasePromptWithSkills failed: %v", err)
+		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
 	}
 
 	// Assert: should return base prompt
@@ -808,18 +808,18 @@ func TestGetSystemPrompt_MultipleCustomPromptsInSequence(t *testing.T) {
 		t.Errorf("Second call: expected %q, got %q", prompt2, actualPrompt2)
 	}
 
-	basePrompt, err := adapter.buildBasePromptWithSkills(context.Background())
+	basePrompt, err := adapter.buildBasePromptWithAgents(context.Background())
 	if err != nil {
-		t.Fatalf("buildBasePromptWithSkills failed: %v", err)
+		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
 	}
 	if actualPrompt3 != basePrompt {
 		t.Errorf("Third call: expected base prompt %q, got %q", basePrompt, actualPrompt3)
 	}
 }
 
-// TestBuildBasePromptWithSkills_IncludesSubagents verifies that when a subagent manager
+// TestBuildBasePromptWithAgents_IncludesSubagents verifies that when a subagent manager
 // is provided and has registered agents, they are included in the system prompt.
-func TestBuildBasePromptWithSkills_IncludesSubagents(t *testing.T) {
+func TestBuildBasePromptWithAgents_IncludesSubagents(t *testing.T) {
 	// Setup: mock subagent manager
 	mockManager := &mockSubagentManagerForPrompt{
 		agents: []port.SubagentInfo{
@@ -841,9 +841,9 @@ func TestBuildBasePromptWithSkills_IncludesSubagents(t *testing.T) {
 	}
 
 	// Execute: build prompt
-	prompt, err := adapter.buildBasePromptWithSkills(context.Background())
+	prompt, err := adapter.buildBasePromptWithAgents(context.Background())
 	if err != nil {
-		t.Fatalf("buildBasePromptWithSkills failed: %v", err)
+		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
 	}
 
 	// Assert: base prompt is present

@@ -251,8 +251,8 @@ func (a *AnthropicAdapter) getSystemPrompt(ctx context.Context, opts port.AIRequ
 		return a.buildPlanModePrompt(*opts.PlanMode), nil
 	}
 
-	// Priority 3: Return base prompt with optional skill metadata (default/fallback)
-	return a.buildBasePromptWithSkills(ctx)
+	// Priority 3: Return base prompt with optional agent metadata (default/fallback)
+	return a.buildBasePromptWithAgents(ctx)
 }
 
 // buildPlanModePrompt constructs the specialized plan mode system prompt.
@@ -303,8 +303,8 @@ When your plan is complete, tell the user to exit plan mode with :mode normal to
 	)
 }
 
-// buildBasePromptWithSkills constructs the base system prompt.
-func (a *AnthropicAdapter) buildBasePromptWithSkills(ctx context.Context) (string, error) {
+// buildBasePromptWithAgents constructs the base system prompt.
+func (a *AnthropicAdapter) buildBasePromptWithAgents(ctx context.Context) (string, error) {
 	basePrompt := "You are an AI assistant that helps users with code editing and explanations. Use the available tools when necessary to provide accurate and helpful responses."
 
 	if a.subagentManager == nil {
