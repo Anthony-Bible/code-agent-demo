@@ -57,10 +57,12 @@ func createTestConfigForSubagent(t *testing.T) *Config {
 	}
 
 	return &Config{
-		AIModel:           "test-model",
-		WorkingDir:        tmpDir,
-		HistoryFile:       "",
-		HistoryMaxEntries: 100,
+		AIModel:    "test-model",
+		WorkingDir: tmpDir,
+		History: HistoryConfig{
+			File:       "",
+			MaxEntries: 100,
+		},
 	}
 }
 

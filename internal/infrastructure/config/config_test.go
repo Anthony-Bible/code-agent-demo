@@ -10,20 +10,20 @@ import (
 
 // TestConfig_HistoryDefaults verifies that Defaults() includes proper history configuration.
 func TestConfig_HistoryDefaults(t *testing.T) {
-	t.Run("HistoryFile has default value", func(t *testing.T) {
+	t.Run("History.File has default value", func(t *testing.T) {
 		cfg := Defaults()
 
-		// HistoryFile should default to ~/.code-agent-demo-history
-		assert.Equal(t, "~/.code-agent-demo-history", cfg.HistoryFile,
-			"HistoryFile should default to ~/.code-agent-demo-history")
+		// History.File should default to ~/.code-agent-demo-history
+		assert.Equal(t, "~/.code-agent-demo-history", cfg.History.File,
+			"History.File should default to ~/.code-agent-demo-history")
 	})
 
-	t.Run("HistoryMaxEntries has default value of 1000", func(t *testing.T) {
+	t.Run("History.MaxEntries has default value of 1000", func(t *testing.T) {
 		cfg := Defaults()
 
-		// HistoryMaxEntries should default to 1000
-		assert.Equal(t, 1000, cfg.HistoryMaxEntries,
-			"HistoryMaxEntries should default to 1000")
+		// History.MaxEntries should default to 1000
+		assert.Equal(t, 1000, cfg.History.MaxEntries,
+			"History.MaxEntries should default to 1000")
 	})
 }
 
@@ -43,7 +43,7 @@ func TestConfig_HistoryEnvironmentVariables(t *testing.T) {
 
 		cfg := LoadConfig()
 
-		assert.Equal(t, customPath, cfg.HistoryFile,
+		assert.Equal(t, customPath, cfg.History.File,
 			"AGENT_HISTORY_FILE should override the default history file path")
 	})
 
@@ -55,7 +55,7 @@ func TestConfig_HistoryEnvironmentVariables(t *testing.T) {
 
 		cfg := LoadConfig()
 
-		assert.Equal(t, 5000, cfg.HistoryMaxEntries,
+		assert.Equal(t, 5000, cfg.History.MaxEntries,
 			"AGENT_HISTORY_MAX_ENTRIES should override the default max entries")
 	})
 
@@ -69,10 +69,10 @@ func TestConfig_HistoryEnvironmentVariables(t *testing.T) {
 
 		cfg := LoadConfig()
 
-		assert.Equal(t, customPath, cfg.HistoryFile,
-			"HistoryFile should be set from environment variable")
-		assert.Equal(t, 250, cfg.HistoryMaxEntries,
-			"HistoryMaxEntries should be set from environment variable")
+		assert.Equal(t, customPath, cfg.History.File,
+			"History.File should be set from environment variable")
+		assert.Equal(t, 250, cfg.History.MaxEntries,
+			"History.MaxEntries should be set from environment variable")
 	})
 }
 
@@ -90,7 +90,7 @@ func TestConfig_HistoryValidation(t *testing.T) {
 
 		cfg := LoadConfig()
 
-		assert.Equal(t, 1000, cfg.HistoryMaxEntries,
+		assert.Equal(t, 1000, cfg.History.MaxEntries,
 			"zero max entries should fall back to default of 1000")
 	})
 
@@ -102,7 +102,7 @@ func TestConfig_HistoryValidation(t *testing.T) {
 
 		cfg := LoadConfig()
 
-		assert.Equal(t, 1000, cfg.HistoryMaxEntries,
+		assert.Equal(t, 1000, cfg.History.MaxEntries,
 			"negative max entries should fall back to default of 1000")
 	})
 
@@ -114,51 +114,51 @@ func TestConfig_HistoryValidation(t *testing.T) {
 
 		cfg := LoadConfig()
 
-		assert.Empty(t, cfg.HistoryFile,
+		assert.Empty(t, cfg.History.File,
 			"empty history file should be allowed for in-memory only mode")
 	})
 }
 
 // TestConfig_HistoryFieldsExist verifies that Config struct has required history fields.
 func TestConfig_HistoryFieldsExist(t *testing.T) {
-	t.Run("Config has HistoryFile field", func(t *testing.T) {
+	t.Run("Config has History.File field", func(t *testing.T) {
 		cfg := &Config{}
 
-		// This will fail to compile if HistoryFile field doesn't exist
-		cfg.HistoryFile = "/some/path"
+		// This will fail to compile if History.File field doesn't exist
+		cfg.History.File = "/some/path"
 		require.NotNil(t, cfg)
 	})
 
-	t.Run("Config has HistoryMaxEntries field", func(t *testing.T) {
+	t.Run("Config has History.MaxEntries field", func(t *testing.T) {
 		cfg := &Config{}
 
-		// This will fail to compile if HistoryMaxEntries field doesn't exist
-		cfg.HistoryMaxEntries = 500
+		// This will fail to compile if History.MaxEntries field doesn't exist
+		cfg.History.MaxEntries = 500
 		require.NotNil(t, cfg)
 	})
 }
 
 // TestConfig_ExtendedThinkingDefaults verifies that Defaults() includes proper extended thinking configuration.
 func TestConfig_ExtendedThinkingDefaults(t *testing.T) {
-	t.Run("ExtendedThinking defaults to false", func(t *testing.T) {
+	t.Run("Thinking.Enabled defaults to false", func(t *testing.T) {
 		cfg := Defaults()
 
-		assert.False(t, cfg.ExtendedThinking,
-			"ExtendedThinking should default to false")
+		assert.False(t, cfg.Thinking.Enabled,
+			"Thinking.Enabled should default to false")
 	})
 
-	t.Run("ThinkingBudget defaults to 10000", func(t *testing.T) {
+	t.Run("Thinking.Budget defaults to 10000", func(t *testing.T) {
 		cfg := Defaults()
 
-		assert.Equal(t, int64(10000), cfg.ThinkingBudget,
-			"ThinkingBudget should default to 10000")
+		assert.Equal(t, int64(10000), cfg.Thinking.Budget,
+			"Thinking.Budget should default to 10000")
 	})
 
-	t.Run("ShowThinking defaults to false", func(t *testing.T) {
+	t.Run("Thinking.Show defaults to false", func(t *testing.T) {
 		cfg := Defaults()
 
-		assert.False(t, cfg.ShowThinking,
-			"ShowThinking should default to false")
+		assert.False(t, cfg.Thinking.Show,
+			"Thinking.Show should default to false")
 	})
 
 	t.Run("MaxTokens defaults to 20000", func(t *testing.T) {
@@ -183,7 +183,7 @@ func TestConfig_ExtendedThinkingEnvironmentVariables(t *testing.T) {
 
 		cfg := LoadConfig()
 
-		assert.True(t, cfg.ExtendedThinking,
+		assert.True(t, cfg.Thinking.Enabled,
 			"AGENT_THINKING_ENABLED should override the default extended thinking setting")
 	})
 
@@ -195,7 +195,7 @@ func TestConfig_ExtendedThinkingEnvironmentVariables(t *testing.T) {
 
 		cfg := LoadConfig()
 
-		assert.Equal(t, int64(15000), cfg.ThinkingBudget,
+		assert.Equal(t, int64(15000), cfg.Thinking.Budget,
 			"AGENT_THINKING_BUDGET should override the default thinking budget")
 	})
 
@@ -207,8 +207,8 @@ func TestConfig_ExtendedThinkingEnvironmentVariables(t *testing.T) {
 
 		cfg := LoadConfig()
 
-		assert.True(t, cfg.ShowThinking,
-			"AGENT_SHOW_THINKING should override the default show thinking setting")
+		assert.True(t, cfg.Thinking.Show,
+			"AGENT_THINKING_SHOW should override the default show thinking setting")
 	})
 
 	t.Run("AGENT_MAX_TOKENS overrides default", func(t *testing.T) {
@@ -234,12 +234,12 @@ func TestConfig_ExtendedThinkingEnvironmentVariables(t *testing.T) {
 
 		cfg := LoadConfig()
 
-		assert.True(t, cfg.ExtendedThinking,
-			"ExtendedThinking should be set from environment variable")
-		assert.Equal(t, int64(25000), cfg.ThinkingBudget,
-			"ThinkingBudget should be set from environment variable")
-		assert.True(t, cfg.ShowThinking,
-			"ShowThinking should be set from environment variable")
+		assert.True(t, cfg.Thinking.Enabled,
+			"Thinking.Enabled should be set from environment variable")
+		assert.Equal(t, int64(25000), cfg.Thinking.Budget,
+			"Thinking.Budget should be set from environment variable")
+		assert.True(t, cfg.Thinking.Show,
+			"Thinking.Show should be set from environment variable")
 		assert.Equal(t, int64(50000), cfg.MaxTokens,
 			"MaxTokens should be set from environment variable")
 	})
@@ -304,34 +304,34 @@ func TestConfig_ThinkingBudgetValidation(t *testing.T) {
 
 			cfg := LoadConfig()
 
-			assert.Equal(t, tt.expectedBudget, cfg.ThinkingBudget, tt.description)
+			assert.Equal(t, tt.expectedBudget, cfg.Thinking.Budget, tt.description)
 		})
 	}
 }
 
 // TestConfig_ExtendedThinkingFieldsExist verifies that Config struct has required extended thinking fields.
 func TestConfig_ExtendedThinkingFieldsExist(t *testing.T) {
-	t.Run("Config has ExtendedThinking field", func(t *testing.T) {
+	t.Run("Config has Thinking.Enabled field", func(t *testing.T) {
 		cfg := &Config{}
 
-		// This will fail to compile if ExtendedThinking field doesn't exist
-		cfg.ExtendedThinking = true
+		// This will fail to compile if Thinking.Enabled field doesn't exist
+		cfg.Thinking.Enabled = true
 		require.NotNil(t, cfg)
 	})
 
-	t.Run("Config has ThinkingBudget field", func(t *testing.T) {
+	t.Run("Config has Thinking.Budget field", func(t *testing.T) {
 		cfg := &Config{}
 
-		// This will fail to compile if ThinkingBudget field doesn't exist
-		cfg.ThinkingBudget = int64(5000)
+		// This will fail to compile if Thinking.Budget field doesn't exist
+		cfg.Thinking.Budget = int64(5000)
 		require.NotNil(t, cfg)
 	})
 
-	t.Run("Config has ShowThinking field", func(t *testing.T) {
+	t.Run("Config has Thinking.Show field", func(t *testing.T) {
 		cfg := &Config{}
 
-		// This will fail to compile if ShowThinking field doesn't exist
-		cfg.ShowThinking = true
+		// This will fail to compile if Thinking.Show field doesn't exist
+		cfg.Thinking.Show = true
 		require.NotNil(t, cfg)
 	})
 
@@ -352,31 +352,31 @@ func TestConfig_CommandWhitelistOverride(t *testing.T) {
 
 	t.Run("defaults to false", func(t *testing.T) {
 		cfg := Defaults()
-		assert.False(t, cfg.CommandWhitelistOverride,
+		assert.False(t, cfg.Safety.CommandWhitelistOverride,
 			"CommandWhitelistOverride should default to false")
 	})
 
-	t.Run("AGENT_COMMAND_WHITELIST_OVERRIDE=true sets to true", func(t *testing.T) {
+	t.Run("AGENT_SAFETY_COMMAND_WHITELIST_OVERRIDE=true sets to true", func(t *testing.T) {
 		resetViper()
 		defer resetViper()
 
-		t.Setenv("AGENT_COMMAND_WHITELIST_OVERRIDE", "true")
+		t.Setenv("AGENT_SAFETY_COMMAND_WHITELIST_OVERRIDE", "true")
 
 		cfg := LoadConfig()
 
-		assert.True(t, cfg.CommandWhitelistOverride,
-			"AGENT_COMMAND_WHITELIST_OVERRIDE=true should set CommandWhitelistOverride to true")
+		assert.True(t, cfg.Safety.CommandWhitelistOverride,
+			"AGENT_SAFETY_COMMAND_WHITELIST_OVERRIDE=true should set CommandWhitelistOverride to true")
 	})
 
-	t.Run("AGENT_COMMAND_WHITELIST_OVERRIDE=false keeps false", func(t *testing.T) {
+	t.Run("AGENT_SAFETY_COMMAND_WHITELIST_OVERRIDE=false keeps false", func(t *testing.T) {
 		resetViper()
 		defer resetViper()
 
-		t.Setenv("AGENT_COMMAND_WHITELIST_OVERRIDE", "false")
+		t.Setenv("AGENT_SAFETY_COMMAND_WHITELIST_OVERRIDE", "false")
 
 		cfg := LoadConfig()
 
-		assert.False(t, cfg.CommandWhitelistOverride,
-			"AGENT_COMMAND_WHITELIST_OVERRIDE=false should set CommandWhitelistOverride to false")
+		assert.False(t, cfg.Safety.CommandWhitelistOverride,
+			"AGENT_SAFETY_COMMAND_WHITELIST_OVERRIDE=false should set CommandWhitelistOverride to false")
 	})
 }

@@ -10,6 +10,7 @@
 package config
 
 import (
+	"log/slog"
 	"os"
 	"strings"
 
@@ -20,97 +21,130 @@ import (
 type Config struct {
 	// AIModel is the model identifier to use for AI requests.
 	// Defaults to "hf:zai-org/GLM-4.7"
-	AIModel string
+	AIModel string `mapstructure:"model"`
 
 	// MaxTokens is the maximum number of tokens to generate in AI responses.
 	// Defaults to 20000
-	MaxTokens int64
+	MaxTokens int64 `mapstructure:"max_tokens"`
 
 	// WorkingDir is the base directory for file operations.
 	// All file paths are resolved relative to this directory.
 	// Defaults to "." (current directory)
-	WorkingDir string
+	WorkingDir string `mapstructure:"working_dir"`
 
-	// WelcomeMessage is displayed when the chat session starts.
-	// Defaults to "Chat with Claude (use 'ctrl+c' to quit)"
-	WelcomeMessage string
+	// UI contains configuration for the user interface.
+	UI UIConfig `mapstructure:"ui"`
 
-	// GoodbyeMessage is displayed when the chat session ends.
-	// Defaults to "Bye!"
-	GoodbyeMessage string
+	// History contains configuration for command history.
+	History HistoryConfig `mapstructure:"history"`
 
-	// HistoryFile is the path to the command history file.
-	// Defaults to "~/.code-agent-demo-history".
-	// Set to empty string to disable history persistence.
-	HistoryFile string
+	// Thinking contains configuration for extended AI thinking.
+	Thinking ThinkingConfig `mapstructure:"thinking"`
 
-	// HistoryMaxEntries is the maximum number of history entries to keep.
-	// Defaults to 1000.
-	HistoryMaxEntries int
+	// Safety contains configuration for command safety and validation.
+	Safety SafetyConfig `mapstructure:"safety"`
 
-	// ExtendedThinking enables extended thinking mode.
-	// Defaults to false.
-	ExtendedThinking bool
-
-	// ThinkingBudget is the token budget for extended thinking.
-	// Defaults to 10000.
-	ThinkingBudget int64
-
-	// ShowThinking determines whether to show thinking output.
-	// Defaults to false.
-	ShowThinking bool
-
-	// AutoApproveSafeCommands determines whether non-dangerous bash commands
-	// are automatically approved without user confirmation.
-	// Dangerous commands are still blocked.
-	// Defaults to false (all commands require confirmation).
-	AutoApproveSafeCommands bool
-
-	// CommandValidationMode determines how commands are validated.
-	// "blacklist" (default): blocks dangerous commands, allows everything else
-	// "whitelist": only allows explicitly whitelisted commands
-	CommandValidationMode string
-
-	// CommandWhitelistJSON is a JSON array of whitelist patterns with optional excludes.
-	// Format: [{"pattern": "regex", "exclude": "regex", "description": "text"}]
-	// Each entry must have a "pattern" field; "exclude" and "description" are optional.
-	CommandWhitelistJSON string
-
-	// AskLLMOnUnknown determines whether to ask the LLM to evaluate
-	// non-whitelisted commands before blocking them.
-	// Only applies in whitelist mode.
-	// Defaults to true.
-	AskLLMOnUnknown bool
-
-	// CommandWhitelistOverride determines whether custom whitelist patterns
-	// replace the defaults entirely (true) or extend them (false).
-	// Only applies in whitelist mode. Defaults to false.
-	CommandWhitelistOverride bool
+	// Serve contains configuration for the webhook server command.
+	Serve ServeConfig `mapstructure:"serve"`
 
 	// CompactionThreshold is the total token count at which the conversation
 	// is automatically compacted (summarized) to manage context window size.
 	// Defaults to 160000.
-	CompactionThreshold int64
+	CompactionThreshold int64 `mapstructure:"compaction_threshold"`
+}
+
+// UIConfig holds UI-related configuration.
+type UIConfig struct {
+	// WelcomeMessage is displayed when the chat session starts.
+	WelcomeMessage string `mapstructure:"welcome_message"`
+
+	// GoodbyeMessage is displayed when the chat session ends.
+	GoodbyeMessage string `mapstructure:"goodbye_message"`
+}
+
+// HistoryConfig holds history-related configuration.
+type HistoryConfig struct {
+	// File is the path to the command history file.
+	File string `mapstructure:"file"`
+
+	// MaxEntries is the maximum number of history entries to keep.
+	MaxEntries int `mapstructure:"max_entries"`
+}
+
+// ThinkingConfig holds configuration for extended AI thinking.
+type ThinkingConfig struct {
+	// Enabled enables extended thinking mode.
+	Enabled bool `mapstructure:"enabled"`
+
+	// Budget is the token budget for extended thinking.
+	Budget int64 `mapstructure:"budget"`
+
+	// Show determines whether to show thinking output.
+	Show bool `mapstructure:"show"`
+}
+
+// ServeConfig holds configuration for the webhook server command.
+type ServeConfig struct {
+	// Addr is the address to listen on (e.g., ":8080", "0.0.0.0:9090").
+	Addr string `mapstructure:"addr"`
+
+	// ConfigPath is the path to the alert sources config file.
+	ConfigPath string `mapstructure:"config_path"`
+}
+
+// SafetyConfig holds safety and validation configuration.
+type SafetyConfig struct {
+	// AutoApproveSafeCommands determines whether non-dangerous bash commands
+	// are automatically approved without user confirmation.
+	AutoApproveSafeCommands bool `mapstructure:"auto_approve_safe"`
+
+	// CommandValidationMode determines how commands are validated.
+	// "blacklist" (default) or "whitelist".
+	CommandValidationMode string `mapstructure:"command_validation_mode"`
+
+	// CommandWhitelistJSON is a JSON array of whitelist patterns.
+	CommandWhitelistJSON string `mapstructure:"command_whitelist_json"`
+
+	// AskLLMOnUnknown determines whether to ask the LLM to evaluate
+	// non-whitelisted commands before blocking them.
+	AskLLMOnUnknown bool `mapstructure:"ask_llm_on_unknown"`
+
+	// CommandWhitelistOverride determines whether custom whitelist patterns
+	// replace the defaults entirely (true) or extend them (false).
+	CommandWhitelistOverride bool `mapstructure:"command_whitelist_override"`
 }
 
 // Defaults returns a Config struct with all default values set.
 func Defaults() *Config {
 	return &Config{
-		AIModel:                  "hf:zai-org/GLM-4.7",
-		MaxTokens:                20000,
-		WorkingDir:               ".",
-		WelcomeMessage:           "Chat with Claude (use 'ctrl+c' to quit)",
-		GoodbyeMessage:           "Bye!",
-		HistoryFile:              "~/.code-agent-demo-history",
-		HistoryMaxEntries:        1000,
-		ExtendedThinking:         false,
-		ThinkingBudget:           10000,
-		ShowThinking:             false,
-		CommandValidationMode:    "blacklist",
-		CommandWhitelistJSON:     "",
-		AskLLMOnUnknown:          true,
-		CommandWhitelistOverride: false,
-		CompactionThreshold:      160000,
+		AIModel:    "hf:zai-org/GLM-4.7",
+		MaxTokens:  20000,
+		WorkingDir: ".",
+		UI: UIConfig{
+			WelcomeMessage: "Chat with Claude (use 'ctrl+c' to quit)",
+			GoodbyeMessage: "Bye!",
+		},
+		History: HistoryConfig{
+			File:       "~/.code-agent-demo-history",
+			MaxEntries: 1000,
+		},
+		Thinking: ThinkingConfig{
+			Enabled: false,
+			Budget:  10000,
+			Show:    false,
+		},
+		Safety: SafetyConfig{
+			AutoApproveSafeCommands:  false,
+			CommandValidationMode:    "blacklist",
+			CommandWhitelistJSON:     "",
+			AskLLMOnUnknown:          true,
+			CommandWhitelistOverride: false,
+		},
+		Serve: ServeConfig{
+			Addr:       ":8080",
+			ConfigPath: "config/alert-sources.yaml",
+		},
+		CompactionThreshold: 160000,
 	}
 }
 
@@ -123,94 +157,60 @@ func Defaults() *Config {
 // Returns:
 //   - *Config: The loaded configuration
 func LoadConfig() *Config {
+	// Use ExperimentalBindStruct to automatically discover env vars based on struct tags
+	v := viper.NewWithOptions(viper.ExperimentalBindStruct())
+
 	// Set defaults first
 	cfg := Defaults()
 
-	// Load from viper (reads flags and env vars)
-	viper.SetEnvPrefix("AGENT")
-	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	viper.AutomaticEnv()
+	// Configure environment variable loading
+	v.SetEnvPrefix("AGENT")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
 
-	// Override defaults with viper values
-	if viper.IsSet("model") {
-		cfg.AIModel = viper.GetString("model")
+	// Bind from global viper to pick up flags already bound there
+	// This is a bridge between cobra's use of global viper and our local instance
+	for _, key := range viper.AllKeys() {
+		if viper.IsSet(key) {
+			v.Set(key, viper.Get(key))
+		}
 	}
-	if viper.IsSet("max_tokens") {
-		cfg.MaxTokens = viper.GetInt64("max_tokens")
+
+	// Unmarshal into the config struct
+	if err := v.Unmarshal(cfg); err != nil {
+		slog.Error("failed to unmarshal config, using defaults", "error", err) //nolint:sloglint // no injected logger at config load time
 	}
-	if viper.IsSet("workingDir") {
-		cfg.WorkingDir = viper.GetString("workingDir")
-	}
-	if viper.IsSet("welcomeMessage") {
-		cfg.WelcomeMessage = viper.GetString("welcomeMessage")
-	}
-	if viper.IsSet("goodbyeMessage") {
-		cfg.GoodbyeMessage = viper.GetString("goodbyeMessage")
-	}
-	// For history_file, we need to check if the env var is set (including empty string)
+
+	// For history.file, we need to check if the env var is set (including empty string)
 	// because empty string is valid for in-memory only mode
 	if val, ok := os.LookupEnv("AGENT_HISTORY_FILE"); ok {
-		cfg.HistoryFile = val
-	}
-	if viper.IsSet("history_max_entries") {
-		val := viper.GetInt("history_max_entries")
-		if val > 0 {
-			cfg.HistoryMaxEntries = val
-		}
-	}
-	if viper.IsSet("auto_approve_safe") {
-		cfg.AutoApproveSafeCommands = viper.GetBool("auto_approve_safe")
-	}
-	if viper.IsSet("thinking.enabled") {
-		cfg.ExtendedThinking = viper.GetBool("thinking.enabled")
-	}
-	if viper.IsSet("thinking.budget") {
-		budget := viper.GetInt64("thinking.budget")
-		switch {
-		case budget <= 0:
-			cfg.ThinkingBudget = 10000
-		case budget < 1024:
-			cfg.ThinkingBudget = 1024
-		default:
-			cfg.ThinkingBudget = budget
-		}
-	}
-	if viper.IsSet("thinking.show") {
-		cfg.ShowThinking = viper.GetBool("thinking.show")
+		cfg.History.File = val
 	}
 
-	// Command validation mode: "blacklist" (default) or "whitelist"
-	if viper.IsSet("command_validation_mode") {
-		cfg.CommandValidationMode = viper.GetString("command_validation_mode")
+	// Post-processing and validation
+	if cfg.History.MaxEntries <= 0 {
+		cfg.History.MaxEntries = 1000
 	}
 
-	// Command whitelist: JSON array of patterns with optional excludes
-	if val, ok := os.LookupEnv("AGENT_COMMAND_WHITELIST_JSON"); ok && val != "" {
-		cfg.CommandWhitelistJSON = val
+	switch {
+	case cfg.Thinking.Budget <= 0:
+		cfg.Thinking.Budget = 10000
+	case cfg.Thinking.Budget < 1024:
+		cfg.Thinking.Budget = 1024
 	}
 
-	// Ask LLM on unknown: whether to ask LLM before blocking non-whitelisted commands
-	if viper.IsSet("ask_llm_on_unknown") {
-		cfg.AskLLMOnUnknown = viper.GetBool("ask_llm_on_unknown")
-	}
-
-	// Command whitelist override: whether custom patterns replace defaults
-	if viper.IsSet("command_whitelist_override") {
-		cfg.CommandWhitelistOverride = viper.GetBool("command_whitelist_override")
-	}
-
-	cfg.CompactionThreshold = loadCompactionThreshold(cfg.CompactionThreshold)
+	cfg.CompactionThreshold = loadCompactionThreshold(v, cfg.CompactionThreshold)
 
 	return cfg
 }
 
 // loadCompactionThreshold reads the compaction threshold from viper, returning
 // the provided default if not set or invalid.
-func loadCompactionThreshold(defaultVal int64) int64 {
-	if !viper.IsSet("compaction_threshold") {
+func loadCompactionThreshold(v *viper.Viper, defaultVal int64) int64 {
+	if !v.IsSet("compaction_threshold") {
 		return defaultVal
 	}
-	threshold := viper.GetInt64("compaction_threshold")
+	threshold := v.GetInt64("compaction_threshold")
 	if threshold < 10000 {
 		return defaultVal
 	}

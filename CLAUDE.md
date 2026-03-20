@@ -96,10 +96,11 @@ Environment variables with `AGENT_` prefix:
 - `AGENT_MODEL` - AI model (default: `hf:zai-org/GLM-4.7`)
 - `AGENT_MAX_TOKENS` - Response limit
 - `AGENT_WORKING_DIR` - Base directory for file operations
-- `AGENT_COMMAND_VALIDATION_MODE` - Command validation mode: `blacklist` (default) or `whitelist`
-- `AGENT_COMMAND_WHITELIST_JSON` - JSON array of whitelist patterns with optional excludes (whitelist mode only)
-- `AGENT_COMMAND_WHITELIST_OVERRIDE` - Replace default whitelist patterns with custom ones (default: `false`)
-- `AGENT_ASK_LLM_ON_UNKNOWN` - Ask LLM before blocking non-whitelisted commands (default: `true`)
+- `AGENT_SAFETY_COMMAND_VALIDATION_MODE` - Command validation mode: `blacklist` (default) or `whitelist`
+- `AGENT_SAFETY_COMMAND_WHITELIST_JSON` - JSON array of whitelist patterns with optional excludes (whitelist mode only)
+- `AGENT_SAFETY_COMMAND_WHITELIST_OVERRIDE` - Replace default whitelist patterns with custom ones (default: `false`)
+- `AGENT_SAFETY_ASK_LLM_ON_UNKNOWN` - Ask LLM before blocking non-whitelisted commands (default: `true`)
+- `AGENT_SAFETY_AUTO_APPROVE_SAFE` - Auto-approve non-dangerous bash commands without confirmation (default: `false`)
 - `AGENT_COMPACTION_THRESHOLD` - Token threshold for auto-compaction of conversation history (default: `160000`, minimum: `10000`)
 
 ## Logging
@@ -142,7 +143,7 @@ Two modes for bash command safety. See `internal/domain/safety/` for implementat
 
 **Blacklist mode** (default): Blocks known dangerous patterns (`rm -rf /`, `sudo`, `curl | bash`, etc.). Matching commands require user confirmation.
 
-**Whitelist mode** (`AGENT_COMMAND_VALIDATION_MODE=whitelist`): Only allows explicitly whitelisted commands (read-only operations by default). Custom patterns via `AGENT_COMMAND_WHITELIST_JSON`. Piped commands require all segments to be whitelisted.
+**Whitelist mode** (`AGENT_SAFETY_COMMAND_VALIDATION_MODE=whitelist`): Only allows explicitly whitelisted commands (read-only operations by default). Custom patterns via `AGENT_SAFETY_COMMAND_WHITELIST_JSON`. Piped commands require all segments to be whitelisted.
 
 Key files: `command_whitelist.go`, `dangerous_commands.go`, `constants.go`
 

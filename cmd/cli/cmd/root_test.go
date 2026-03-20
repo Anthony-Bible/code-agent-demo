@@ -24,7 +24,7 @@ func TestRootCmd_ExtendedThinkingFlags(t *testing.T) {
 
 		require.NotNil(t, flag, "thinking-budget flag should be registered on root command")
 		assert.Equal(t, "thinking-budget", flag.Name, "flag name should be 'thinking-budget'")
-		assert.Equal(t, "int", flag.Value.Type(), "thinking-budget flag should be an int")
+		assert.Equal(t, "int64", flag.Value.Type(), "thinking-budget flag should be an int64")
 	})
 
 	t.Run("show-thinking flag is registered", func(t *testing.T) {
@@ -40,7 +40,7 @@ func TestRootCmd_ExtendedThinkingFlags(t *testing.T) {
 
 		require.NotNil(t, flag, "max-tokens flag should be registered on root command")
 		assert.Equal(t, "max-tokens", flag.Name, "flag name should be 'max-tokens'")
-		assert.Equal(t, "int", flag.Value.Type(), "max-tokens flag should be an int")
+		assert.Equal(t, "int64", flag.Value.Type(), "max-tokens flag should be an int64")
 	})
 }
 
@@ -101,7 +101,7 @@ func TestRootCmd_ViperBinding(t *testing.T) {
 		flagValue   string
 		viperKey    string
 		expectedVal interface{}
-		checkType   string // "bool", "int", "string"
+		checkType   string // "bool", "int", "int64", "string"
 		description string
 	}{
 		{
@@ -118,8 +118,8 @@ func TestRootCmd_ViperBinding(t *testing.T) {
 			flagName:    "thinking-budget",
 			flagValue:   "15000",
 			viperKey:    "thinking.budget",
-			expectedVal: 15000,
-			checkType:   "int",
+			expectedVal: int64(15000),
+			checkType:   "int64",
 			description: "thinking-budget flag should bind to viper key 'thinking.budget'",
 		},
 		{
@@ -136,8 +136,8 @@ func TestRootCmd_ViperBinding(t *testing.T) {
 			flagName:    "max-tokens",
 			flagValue:   "30000",
 			viperKey:    "max_tokens",
-			expectedVal: 30000,
-			checkType:   "int",
+			expectedVal: int64(30000),
+			checkType:   "int64",
 			description: "max-tokens flag should bind to viper key 'max_tokens'",
 		},
 	}
@@ -159,6 +159,8 @@ func TestRootCmd_ViperBinding(t *testing.T) {
 				cmd.Flags().Bool(tt.flagName, false, "")
 			case "int":
 				cmd.Flags().Int(tt.flagName, 0, "")
+			case "int64":
+				cmd.Flags().Int64(tt.flagName, 0, "")
 			case "string":
 				cmd.Flags().String(tt.flagName, "", "")
 			}
@@ -182,6 +184,9 @@ func TestRootCmd_ViperBinding(t *testing.T) {
 				assert.Equal(t, tt.expectedVal, actualVal, tt.description)
 			case "int":
 				actualVal := viper.GetInt(tt.viperKey)
+				assert.Equal(t, tt.expectedVal, actualVal, tt.description)
+			case "int64":
+				actualVal := viper.GetInt64(tt.viperKey)
 				assert.Equal(t, tt.expectedVal, actualVal, tt.description)
 			case "string":
 				actualVal := viper.GetString(tt.viperKey)
@@ -232,14 +237,14 @@ func TestRootCmd_FlagParsing(t *testing.T) {
 		defer resetViper()
 
 		cmd := &cobra.Command{Use: "test"}
-		cmd.Flags().Int("thinking-budget", 0, "")
+		cmd.Flags().Int64("thinking-budget", 0, "")
 
 		err := cmd.Flags().Set("thinking-budget", "25000")
 		require.NoError(t, err, "thinking-budget flag should accept valid integer")
 
-		val, err := cmd.Flags().GetInt("thinking-budget")
+		val, err := cmd.Flags().GetInt64("thinking-budget")
 		require.NoError(t, err)
-		assert.Equal(t, 25000, val, "thinking-budget should be 25000")
+		assert.Equal(t, int64(25000), val, "thinking-budget should be 25000")
 	})
 
 	t.Run("thinking-budget rejects invalid value", func(t *testing.T) {
@@ -247,7 +252,7 @@ func TestRootCmd_FlagParsing(t *testing.T) {
 		defer resetViper()
 
 		cmd := &cobra.Command{Use: "test"}
-		cmd.Flags().Int("thinking-budget", 0, "")
+		cmd.Flags().Int64("thinking-budget", 0, "")
 
 		err := cmd.Flags().Set("thinking-budget", "not-a-number")
 		assert.Error(t, err, "thinking-budget should reject non-integer value")
@@ -273,14 +278,14 @@ func TestRootCmd_FlagParsing(t *testing.T) {
 		defer resetViper()
 
 		cmd := &cobra.Command{Use: "test"}
-		cmd.Flags().Int("max-tokens", 0, "")
+		cmd.Flags().Int64("max-tokens", 0, "")
 
 		err := cmd.Flags().Set("max-tokens", "50000")
 		require.NoError(t, err, "max-tokens flag should accept valid integer")
 
-		val, err := cmd.Flags().GetInt("max-tokens")
+		val, err := cmd.Flags().GetInt64("max-tokens")
 		require.NoError(t, err)
-		assert.Equal(t, 50000, val, "max-tokens should be 50000")
+		assert.Equal(t, int64(50000), val, "max-tokens should be 50000")
 	})
 
 	t.Run("max-tokens rejects invalid value", func(t *testing.T) {
@@ -288,7 +293,7 @@ func TestRootCmd_FlagParsing(t *testing.T) {
 		defer resetViper()
 
 		cmd := &cobra.Command{Use: "test"}
-		cmd.Flags().Int("max-tokens", 0, "")
+		cmd.Flags().Int64("max-tokens", 0, "")
 
 		err := cmd.Flags().Set("max-tokens", "invalid")
 		assert.Error(t, err, "max-tokens should reject non-integer value")
@@ -307,9 +312,9 @@ func TestRootCmd_FlagCombinations(t *testing.T) {
 
 		cmd := &cobra.Command{Use: "test"}
 		cmd.Flags().Bool("thinking", false, "")
-		cmd.Flags().Int("thinking-budget", 10000, "")
+		cmd.Flags().Int64("thinking-budget", 10000, "")
 		cmd.Flags().Bool("show-thinking", false, "")
-		cmd.Flags().Int("max-tokens", 20000, "")
+		cmd.Flags().Int64("max-tokens", 20000, "")
 
 		// Bind to viper
 		require.NoError(t, viper.BindPFlag("thinking.enabled", cmd.Flags().Lookup("thinking")))
@@ -326,21 +331,24 @@ func TestRootCmd_FlagCombinations(t *testing.T) {
 		// Verify all values via viper
 		assert.True(t, viper.GetBool("thinking.enabled"),
 			"thinking.enabled should be true when flags are combined")
-		assert.Equal(t, 15000, viper.GetInt("thinking.budget"),
+		assert.Equal(t, int64(15000), viper.GetInt64("thinking.budget"),
 			"thinking.budget should be 15000 when flags are combined")
 		assert.True(t, viper.GetBool("thinking.show"),
 			"thinking.show should be true when flags are combined")
-		assert.Equal(t, 30000, viper.GetInt("max_tokens"),
+		assert.Equal(t, int64(30000), viper.GetInt64("max_tokens"),
 			"max_tokens should be 30000 when flags are combined")
 	})
 
 	t.Run("thinking flag can be enabled without other flags", func(t *testing.T) {
+		resetViper := func() {
+			viper.Reset()
+		}
 		resetViper()
 		defer resetViper()
 
 		cmd := &cobra.Command{Use: "test"}
 		cmd.Flags().Bool("thinking", false, "")
-		cmd.Flags().Int("thinking-budget", 10000, "")
+		cmd.Flags().Int64("thinking-budget", 10000, "")
 		cmd.Flags().Bool("show-thinking", false, "")
 
 		require.NoError(t, viper.BindPFlag("thinking.enabled", cmd.Flags().Lookup("thinking")))
@@ -353,7 +361,7 @@ func TestRootCmd_FlagCombinations(t *testing.T) {
 		// Verify thinking is enabled with defaults for other values
 		assert.True(t, viper.GetBool("thinking.enabled"),
 			"thinking.enabled should be true")
-		assert.Equal(t, 10000, viper.GetInt("thinking.budget"),
+		assert.Equal(t, int64(10000), viper.GetInt64("thinking.budget"),
 			"thinking.budget should use default when not specified")
 		assert.False(t, viper.GetBool("thinking.show"),
 			"thinking.show should use default false when not specified")
