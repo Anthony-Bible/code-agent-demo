@@ -102,7 +102,7 @@ func NewContainer(cfg *Config) (*Container, error) {
 	// Step 1: Create infrastructure adapters
 	// Note: order matters - skillManager and subagentManager must be created before aiAdapter
 	fileManager := file.NewLocalFileManager(cfg.WorkingDir)
-	uiAdapter := ui.NewCLIAdapterWithHistory(cfg.HistoryFile)
+	uiAdapter := ui.NewCLIAdapterWithHistory(cfg.History.File)
 	skillManager := skill.NewLocalSkillManager()
 
 	// Create subagentManager early for tool and system prompt integration
@@ -127,8 +127,8 @@ func NewContainer(cfg *Config) (*Container, error) {
 	toolExecutor := tool.NewPlanningExecutorAdapter(baseExecutor, fileManager, cfg.WorkingDir)
 
 	// Set up bash command confirmation callback
-	// Behavior depends on cfg.AutoApproveSafeCommands flag
-	if cfg.AutoApproveSafeCommands {
+	// Behavior depends on cfg.Safety.AutoApproveSafeCommands flag
+	if cfg.Safety.AutoApproveSafeCommands {
 		// Auto-approve safe commands, block dangerous ones (headless mode)
 		toolExecutor.SetCommandConfirmationCallback(
 			func(command string, isDangerous bool, reason string, description string) bool {
@@ -253,9 +253,9 @@ func createInvestigationComponents(
 	// Create use case with operational config only
 	opConfig := usecase.AlertInvestigationUseCaseConfig{
 		MaxConcurrent:    5,
-		ExtendedThinking: cfg.ExtendedThinking,
-		ThinkingBudget:   cfg.ThinkingBudget,
-		ShowThinking:     cfg.ShowThinking,
+		ExtendedThinking: cfg.Thinking.Enabled,
+		ThinkingBudget:   cfg.Thinking.Budget,
+		ShowThinking:     cfg.Thinking.Show,
 	}
 	investigationUseCase := usecase.NewAlertInvestigationUseCaseWithConfig(opConfig)
 
@@ -450,7 +450,7 @@ func getUserHome() string {
 // buildValidationConfig validates the command validation mode and builds the whitelist
 // from defaults + custom JSON patterns. Returns the mode and whitelist (nil for blacklist mode).
 func buildValidationConfig(cfg *Config) (safety.CommandValidationMode, *safety.CommandWhitelist, error) {
-	mode, err := safety.ValidateMode(cfg.CommandValidationMode)
+	mode, err := safety.ValidateMode(cfg.Safety.CommandValidationMode)
 	if err != nil {
 		return "", nil, err
 	}
@@ -472,13 +472,13 @@ func buildValidationConfig(cfg *Config) (safety.CommandValidationMode, *safety.C
 // Otherwise, custom patterns extend the defaults.
 func buildWhitelistPatterns(cfg *Config) ([]safety.WhitelistPattern, error) {
 	// Parse custom patterns if provided
-	customPatterns, err := parseCustomPatterns(cfg.CommandWhitelistJSON)
+	customPatterns, err := parseCustomPatterns(cfg.Safety.CommandWhitelistJSON)
 	if err != nil {
-		return nil, fmt.Errorf("invalid AGENT_COMMAND_WHITELIST_JSON: %w", err)
+		return nil, fmt.Errorf("invalid AGENT_SAFETY_COMMAND_WHITELIST_JSON: %w", err)
 	}
 
 	// Override mode: use ONLY custom patterns (empty = blocks all)
-	if cfg.CommandWhitelistOverride {
+	if cfg.Safety.CommandWhitelistOverride {
 		return customPatterns, nil
 	}
 
@@ -504,7 +504,7 @@ func createCommandValidator(cfg *Config) (safety.CommandValidator, error) {
 	if err != nil {
 		return nil, err
 	}
-	return safety.NewCommandValidator(mode, whitelist, cfg.AskLLMOnUnknown)
+	return safety.NewCommandValidator(mode, whitelist, cfg.Safety.AskLLMOnUnknown)
 }
 
 // configureCommandValidation sets up the command validation mode (whitelist or blacklist)
@@ -514,7 +514,7 @@ func configureCommandValidation(executor *tool.ExecutorAdapter, cfg *Config) err
 	if err != nil {
 		return err
 	}
-	return executor.SetValidationMode(mode, whitelist, cfg.AskLLMOnUnknown)
+	return executor.SetValidationMode(mode, whitelist, cfg.Safety.AskLLMOnUnknown)
 }
 
 // wireSkillActivationCallback sets up the callback for skill activation.

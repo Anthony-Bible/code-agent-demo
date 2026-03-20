@@ -153,13 +153,15 @@ func runChat(cmd *cobra.Command, args []string) error {
 	}
 	sessionID := startResp.SessionID
 
+	_ = uiAdapter.DisplaySystemMessage(cfg.UI.WelcomeMessage)
+
 	// Initialize thinking mode from config if enabled
-	if cfg.ExtendedThinking {
+	if cfg.Thinking.Enabled {
 		convSvc := container.ConversationService()
 		thinkingInfo := port.ThinkingModeInfo{
 			Enabled:      true,
-			BudgetTokens: cfg.ThinkingBudget,
-			ShowThinking: cfg.ShowThinking,
+			BudgetTokens: cfg.Thinking.Budget,
+			ShowThinking: cfg.Thinking.Show,
 		}
 		_ = convSvc.SetThinkingMode(sessionID, thinkingInfo)
 	}
@@ -210,7 +212,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 			select {
 			case <-ctx.Done():
 				// Context cancelled (second Ctrl+C pressed or external cancellation)
-				fmt.Printf("\n%s\n", cfg.GoodbyeMessage)
+				fmt.Printf("\n%s\n", cfg.UI.GoodbyeMessage)
 				return nil
 			case <-firstPressCh:
 				// First Ctrl+C pressed - show message and re-display prompt
@@ -226,13 +228,13 @@ func runChat(cmd *cobra.Command, args []string) error {
 		}
 		if !result.ok {
 			// User closed input stream
-			fmt.Printf("\n%s\n", cfg.GoodbyeMessage)
+			fmt.Printf("\n%s\n", cfg.UI.GoodbyeMessage)
 			return nil
 		}
 
 		// Check if user wants to exit
 		if result.text == "exit" || result.text == "quit" || result.text == ":q" {
-			fmt.Printf("%s\n", cfg.GoodbyeMessage)
+			fmt.Printf("%s\n", cfg.UI.GoodbyeMessage)
 			return nil
 		}
 

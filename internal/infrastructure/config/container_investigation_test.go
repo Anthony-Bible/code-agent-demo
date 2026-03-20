@@ -24,10 +24,12 @@ func createTestConfig(t *testing.T) *Config {
 
 	tmpDir := t.TempDir()
 	return &Config{
-		AIModel:           "test-model",
-		WorkingDir:        tmpDir,
-		HistoryFile:       "",
-		HistoryMaxEntries: 100,
+		AIModel:    "test-model",
+		WorkingDir: tmpDir,
+		History: HistoryConfig{
+			File:       "",
+			MaxEntries: 100,
+		},
 	}
 }
 

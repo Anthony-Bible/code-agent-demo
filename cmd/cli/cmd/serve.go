@@ -47,9 +47,16 @@ func init() {
 	serveCmd.Flags().
 		Bool("auto-approve-safe", false, "Auto-approve non-dangerous bash commands (dangerous commands are blocked)")
 
-	// Bind flag to viper
-	if err := viper.BindPFlag("auto_approve_safe", serveCmd.Flags().Lookup("auto-approve-safe")); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to bind auto-approve-safe flag: %v\n", err)
+	// Bind flags to viper
+	bindings := map[string]string{
+		"addr":              "serve.addr",
+		"config":            "serve.config_path",
+		"auto-approve-safe": "safety.auto_approve_safe",
+	}
+	for flagName, viperKey := range bindings {
+		if err := viper.BindPFlag(viperKey, serveCmd.Flags().Lookup(flagName)); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to bind %s flag: %v\n", flagName, err)
+		}
 	}
 }
 
@@ -119,9 +126,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	cfg := GetConfig(cmd)
 
-	// Get command flags
-	addr, _ := cmd.Flags().GetString("addr")
-	configPath, _ := cmd.Flags().GetString("config")
+	// Get serve config from unified config
+	addr := cfg.Serve.Addr
+	configPath := cfg.Serve.ConfigPath
 
 	// Load alert sources config
 	webhookCfg, err := config.LoadAlertSourcesConfigWithDefaults(configPath)

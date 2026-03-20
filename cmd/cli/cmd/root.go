@@ -127,30 +127,28 @@ func GetConfig(cmd *cobra.Command) *config.Config {
 
 func init() {
 	// Define flags
-	rootCmd.PersistentFlags().String("model", "hf:zai-org/GLM-4.7", "AI model to use for requests")
-	rootCmd.PersistentFlags().StringP("dir", "d", ".", "Working directory for file operations")
-	rootCmd.PersistentFlags().Int("max-tokens", 20000, "Maximum tokens to generate in AI responses")
-	rootCmd.PersistentFlags().Bool("thinking", false, "Enable extended thinking")
-	rootCmd.PersistentFlags().Int("thinking-budget", 10000, "Token budget for thinking (min 1024)")
-	rootCmd.PersistentFlags().Bool("show-thinking", false, "Display thinking content")
+	pflags := rootCmd.PersistentFlags()
+	pflags.String("model", "hf:zai-org/GLM-4.7", "AI model to use for requests")
+	pflags.StringP("dir", "d", ".", "Working directory for file operations")
+	pflags.Int64("max-tokens", 20000, "Maximum tokens to generate in AI responses")
+	pflags.Bool("thinking", false, "Enable extended thinking")
+	pflags.Int64("thinking-budget", 10000, "Token budget for thinking (min 1024)")
+	pflags.Bool("show-thinking", false, "Display thinking content")
 
 	// Bind flags to viper
-	if err := viper.BindPFlag("model", rootCmd.PersistentFlags().Lookup("model")); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to bind model flag: %v\n", err)
+	// Map flag names to the internal config keys used by viper/LoadConfig
+	bindings := map[string]string{
+		"model":           "model",
+		"dir":             "working_dir",
+		"max-tokens":      "max_tokens",
+		"thinking":        "thinking.enabled",
+		"thinking-budget": "thinking.budget",
+		"show-thinking":   "thinking.show",
 	}
-	if err := viper.BindPFlag("workingDir", rootCmd.PersistentFlags().Lookup("dir")); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to bind dir flag: %v\n", err)
-	}
-	if err := viper.BindPFlag("max_tokens", rootCmd.PersistentFlags().Lookup("max-tokens")); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to bind max-tokens flag: %v\n", err)
-	}
-	if err := viper.BindPFlag("thinking.enabled", rootCmd.PersistentFlags().Lookup("thinking")); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to bind thinking flag: %v\n", err)
-	}
-	if err := viper.BindPFlag("thinking.budget", rootCmd.PersistentFlags().Lookup("thinking-budget")); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to bind thinking-budget flag: %v\n", err)
-	}
-	if err := viper.BindPFlag("thinking.show", rootCmd.PersistentFlags().Lookup("show-thinking")); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to bind show-thinking flag: %v\n", err)
+
+	for flagName, viperKey := range bindings {
+		if err := viper.BindPFlag(viperKey, pflags.Lookup(flagName)); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to bind %s flag: %v\n", flagName, err)
+		}
 	}
 }

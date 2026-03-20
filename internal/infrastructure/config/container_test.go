@@ -17,8 +17,8 @@ import (
 func TestContainer_UsesHistoryConfig(t *testing.T) {
 	t.Run("container passes HistoryFile from config to CLIAdapter", func(t *testing.T) {
 		cfg := Defaults()
-		cfg.HistoryFile = "/tmp/test-agent-history"
-		cfg.HistoryMaxEntries = 500
+		cfg.History.File = "/tmp/test-agent-history"
+		cfg.History.MaxEntries = 500
 
 		container, err := NewContainer(cfg)
 		require.NoError(t, err, "NewContainer should not return an error")
@@ -55,7 +55,7 @@ func TestContainer_UsesHistoryConfig(t *testing.T) {
 
 	t.Run("container supports empty history file for in-memory mode", func(t *testing.T) {
 		cfg := Defaults()
-		cfg.HistoryFile = "" // Empty means in-memory only
+		cfg.History.File = "" // Empty means in-memory only
 
 		container, err := NewContainer(cfg)
 		require.NoError(t, err, "NewContainer should not return an error with empty history file")
@@ -74,7 +74,7 @@ func TestContainer_UsesHistoryConfig(t *testing.T) {
 func TestContainer_UIAdapterHasHistory(t *testing.T) {
 	t.Run("UIAdapter is in interactive mode when history is configured", func(t *testing.T) {
 		cfg := Defaults()
-		cfg.HistoryFile = "/tmp/interactive-test-history"
+		cfg.History.File = "/tmp/interactive-test-history"
 
 		container, err := NewContainer(cfg)
 		require.NoError(t, err, "NewContainer should not return an error")
@@ -93,7 +93,7 @@ func TestContainer_UIAdapterHasHistory(t *testing.T) {
 func TestContainer_HistoryFilePath(t *testing.T) {
 	t.Run("container passes absolute path unchanged", func(t *testing.T) {
 		cfg := Defaults()
-		cfg.HistoryFile = "/var/lib/agent/history"
+		cfg.History.File = "/var/lib/agent/history"
 
 		container, err := NewContainer(cfg)
 		require.NoError(t, err, "NewContainer should not return an error")
@@ -108,7 +108,7 @@ func TestContainer_HistoryFilePath(t *testing.T) {
 
 	t.Run("container handles relative path", func(t *testing.T) {
 		cfg := Defaults()
-		cfg.HistoryFile = ".agent-history"
+		cfg.History.File = ".agent-history"
 
 		container, err := NewContainer(cfg)
 		require.NoError(t, err, "NewContainer should not return an error")
@@ -127,8 +127,8 @@ func TestContainer_HistoryFilePath(t *testing.T) {
 func TestContainer_HistoryIntegrationWithChatService(t *testing.T) {
 	t.Run("ChatService uses UI adapter with history", func(t *testing.T) {
 		cfg := Defaults()
-		cfg.HistoryFile = "/tmp/chatservice-history-test"
-		cfg.HistoryMaxEntries = 200
+		cfg.History.File = "/tmp/chatservice-history-test"
+		cfg.History.MaxEntries = 200
 
 		container, err := NewContainer(cfg)
 		require.NoError(t, err, "NewContainer should not return an error")
@@ -152,9 +152,9 @@ func TestContainer_HistoryIntegrationWithChatService(t *testing.T) {
 func TestBuildWhitelistPatterns(t *testing.T) {
 	t.Run("override=false extends defaults with custom patterns", func(t *testing.T) {
 		cfg := Defaults()
-		cfg.CommandValidationMode = "whitelist"
-		cfg.CommandWhitelistOverride = false
-		cfg.CommandWhitelistJSON = `[{"pattern": "^mycustom(\\s|$)", "description": "custom"}]`
+		cfg.Safety.CommandValidationMode = "whitelist"
+		cfg.Safety.CommandWhitelistOverride = false
+		cfg.Safety.CommandWhitelistJSON = `[{"pattern": "^mycustom(\\s|$)", "description": "custom"}]`
 
 		patterns, err := buildWhitelistPatterns(cfg)
 		require.NoError(t, err)
@@ -171,9 +171,9 @@ func TestBuildWhitelistPatterns(t *testing.T) {
 
 	t.Run("override=true uses only custom patterns", func(t *testing.T) {
 		cfg := Defaults()
-		cfg.CommandValidationMode = "whitelist"
-		cfg.CommandWhitelistOverride = true
-		cfg.CommandWhitelistJSON = `[{"pattern": "^mycustom(\\s|$)", "description": "custom"}]`
+		cfg.Safety.CommandValidationMode = "whitelist"
+		cfg.Safety.CommandWhitelistOverride = true
+		cfg.Safety.CommandWhitelistJSON = `[{"pattern": "^mycustom(\\s|$)", "description": "custom"}]`
 
 		patterns, err := buildWhitelistPatterns(cfg)
 		require.NoError(t, err)
@@ -185,9 +185,9 @@ func TestBuildWhitelistPatterns(t *testing.T) {
 
 	t.Run("override=true with no JSON returns empty patterns", func(t *testing.T) {
 		cfg := Defaults()
-		cfg.CommandValidationMode = "whitelist"
-		cfg.CommandWhitelistOverride = true
-		cfg.CommandWhitelistJSON = ""
+		cfg.Safety.CommandValidationMode = "whitelist"
+		cfg.Safety.CommandWhitelistOverride = true
+		cfg.Safety.CommandWhitelistJSON = ""
 
 		patterns, err := buildWhitelistPatterns(cfg)
 		require.NoError(t, err)
@@ -198,9 +198,9 @@ func TestBuildWhitelistPatterns(t *testing.T) {
 
 	t.Run("override=false with no JSON uses defaults", func(t *testing.T) {
 		cfg := Defaults()
-		cfg.CommandValidationMode = "whitelist"
-		cfg.CommandWhitelistOverride = false
-		cfg.CommandWhitelistJSON = ""
+		cfg.Safety.CommandValidationMode = "whitelist"
+		cfg.Safety.CommandWhitelistOverride = false
+		cfg.Safety.CommandWhitelistJSON = ""
 
 		patterns, err := buildWhitelistPatterns(cfg)
 		require.NoError(t, err)
@@ -212,11 +212,11 @@ func TestBuildWhitelistPatterns(t *testing.T) {
 
 	t.Run("invalid JSON returns error", func(t *testing.T) {
 		cfg := Defaults()
-		cfg.CommandValidationMode = "whitelist"
-		cfg.CommandWhitelistJSON = `[{"pattern": "invalid json`
+		cfg.Safety.CommandValidationMode = "whitelist"
+		cfg.Safety.CommandWhitelistJSON = `[{"pattern": "invalid json`
 
 		_, err := buildWhitelistPatterns(cfg)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "AGENT_COMMAND_WHITELIST_JSON")
+		assert.Contains(t, err.Error(), "AGENT_SAFETY_COMMAND_WHITELIST_JSON")
 	})
 }
