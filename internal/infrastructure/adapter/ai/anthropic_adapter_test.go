@@ -840,13 +840,13 @@ func TestSendMessageStreaming_CallbackInvoked(_ *testing.T) {
 }
 
 // ============================================================================
-// Extended Thinking Integration Tests (RED PHASE)
+// Extended Thinking Integration Tests
 // ============================================================================
 // These tests verify the AnthropicAdapter correctly integrates extended thinking
 // into SendMessage() and convertResponse() methods.
 //
 // CRITICAL REQUIREMENTS:
-// 1. Read ThinkingModeFromContext and conditionally set thinking config
+// 1. Read thinking config from port.AIRequestOptions
 // 2. Use configurable MaxTokens instead of hardcoded 4096
 // 3. Extract thinking blocks with signatures from API response
 // 4. Include ThinkingBlocks when building API request (must be FIRST)
@@ -854,15 +854,8 @@ func TestSendMessageStreaming_CallbackInvoked(_ *testing.T) {
 // ============================================================================
 
 // TestSendMessage_ThinkingModeDisabledByDefault verifies that when no thinking
-// mode context is provided, the API request uses disabled thinking configuration.
-//
-// This test will FAIL until SendMessage() is updated to:
-// - Check ThinkingModeFromContext
-// - Default to disabled thinking when not present in context.
+// mode is provided in options, the API request uses disabled thinking configuration.
 func TestSendMessage_ThinkingModeDisabledByDefault(t *testing.T) {
-	// This test requires mocking the Anthropic client to verify the request
-	// For now, we test the thinking config setup indirectly through behavior
-
 	// Setup: create adapter
 	adapter := &AnthropicAdapter{
 		model: "test-model",
@@ -879,37 +872,31 @@ func TestSendMessage_ThinkingModeDisabledByDefault(t *testing.T) {
 		},
 	}
 
-	// Execute: call SendMessage (this will fail because we can't mock the client yet)
-	// The test is designed to verify the thinking config would be set to disabled
-	// when the adapter is properly implemented
+	// Execute: call SendMessage with empty options
 	_, _, err := adapter.SendMessage(ctx, messages, nil, port.AIRequestOptions{})
 
 	// Assert: expect error for now (no real API key/mock)
-	// When implemented, we'll mock the client and verify thinking=disabled
 	if err == nil {
 		t.Error("Expected error without real API client, got nil")
 	}
 }
 
-// TestSendMessage_ThinkingModeEnabledWithContext verifies that when thinking
-// mode is enabled in context, the API request uses extended thinking configuration
-// with the specified budget and show_thinking settings.
-//
-// This test will FAIL until SendMessage() is updated to:
-// - Check ThinkingModeFromContext
-// - Set thinking config to enabled with budget when context indicates enabled.
-func TestSendMessage_ThinkingModeEnabledWithContext(t *testing.T) {
+// TestSendMessage_ThinkingModeEnabledWithOpts verifies that SendMessage
+// includes thinking config when enabled in options.
+func TestSendMessage_ThinkingModeEnabledWithOpts(t *testing.T) {
 	// Setup: create adapter
 	adapter := &AnthropicAdapter{
 		model: "test-model",
 	}
 
-	// Setup: create context with thinking mode enabled
-	ctx := port.WithThinkingMode(context.Background(), port.ThinkingModeInfo{
-		Enabled:      true,
-		BudgetTokens: 5000,
-		ShowThinking: true,
-	})
+	// Setup: create options with thinking mode enabled
+	opts := port.AIRequestOptions{
+		Thinking: &port.ThinkingModeInfo{
+			Enabled:      true,
+			BudgetTokens: 5000,
+			ShowThinking: true,
+		},
+	}
 
 	// Setup: create simple message
 	messages := []port.MessageParam{
@@ -920,7 +907,7 @@ func TestSendMessage_ThinkingModeEnabledWithContext(t *testing.T) {
 	}
 
 	// Execute: call SendMessage
-	_, _, err := adapter.SendMessage(ctx, messages, nil, port.AIRequestOptions{})
+	_, _, err := adapter.SendMessage(context.Background(), messages, nil, opts)
 
 	// Assert: expect error for now (no real API client)
 	// When implemented with mock client, we'll verify:
@@ -933,10 +920,6 @@ func TestSendMessage_ThinkingModeEnabledWithContext(t *testing.T) {
 
 // TestSendMessage_UsesConfigurableMaxTokens verifies that SendMessage uses
 // MaxTokens from config rather than a hardcoded value.
-//
-// This test will FAIL until SendMessage() is updated to:
-// - Accept MaxTokens as a configurable field in AnthropicAdapter
-// - Use adapter.maxTokens instead of hardcoded 4096.
 func TestSendMessage_UsesConfigurableMaxTokens(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -959,10 +942,9 @@ func TestSendMessage_UsesConfigurableMaxTokens(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup: create adapter with custom MaxTokens
-			// This will fail because AnthropicAdapter doesn't have maxTokens field yet
 			adapter := &AnthropicAdapter{
-				model: "test-model",
-				// maxTokens: tt.maxTokens, // This field doesn't exist yet
+				model:     "test-model",
+				maxTokens: tt.maxTokens,
 			}
 
 			// Setup: create simple message
@@ -1231,11 +1213,9 @@ func TestThinkingBlocksInToolLoop(t *testing.T) {
 	// - Tool result is in second message
 }
 
-// TestSendMessage_ThinkingModeWithCustomBudget verifies that different
-// thinking budgets can be configured through context.
-//
-// This test will FAIL until SendMessage() correctly reads budget from context.
-func TestSendMessage_ThinkingModeWithCustomBudget(t *testing.T) {
+// TestSendMessage_ThinkingModeWithCustomBudgetOpts verifies that different
+// thinking budgets can be configured through options.
+func TestSendMessage_ThinkingModeWithCustomBudgetOpts(t *testing.T) {
 	tests := []struct {
 		name   string
 		budget int64
@@ -1265,12 +1245,14 @@ func TestSendMessage_ThinkingModeWithCustomBudget(t *testing.T) {
 				model: "test-model",
 			}
 
-			// Setup: create context with custom thinking budget
-			ctx := port.WithThinkingMode(context.Background(), port.ThinkingModeInfo{
-				Enabled:      true,
-				BudgetTokens: tt.budget,
-				ShowThinking: false,
-			})
+			// Setup: create options with custom thinking budget
+			opts := port.AIRequestOptions{
+				Thinking: &port.ThinkingModeInfo{
+					Enabled:      true,
+					BudgetTokens: tt.budget,
+					ShowThinking: false,
+				},
+			}
 
 			// Setup: create message
 			messages := []port.MessageParam{
@@ -1281,7 +1263,7 @@ func TestSendMessage_ThinkingModeWithCustomBudget(t *testing.T) {
 			}
 
 			// Execute: call SendMessage
-			_, _, err := adapter.SendMessage(ctx, messages, nil, port.AIRequestOptions{})
+			_, _, err := adapter.SendMessage(context.Background(), messages, nil, opts)
 
 			// Assert: expect error for now
 			// When implemented with mock, verify budget is set correctly

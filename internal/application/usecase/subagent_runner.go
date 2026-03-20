@@ -250,14 +250,12 @@ func (r *SubagentRunner) Run(
 	rc.sessionID = sessionID
 	defer r.cleanupConversation(sessionID, agent.Name)
 
-	// Extract thinking mode from context (from parent) or fall back to static config
-	thinkingInfo, hasThinking := port.ThinkingModeFromContext(ctx)
-	if !hasThinking {
-		thinkingInfo = port.ThinkingModeInfo{
-			Enabled:      r.config.ThinkingEnabled,
-			BudgetTokens: r.config.ThinkingBudget,
-			ShowThinking: r.config.ShowThinking,
-		}
+	// Subagents use their own configuration or inherit from static config.
+	// Context-based inheritance is removed in favor of session-based management.
+	thinkingInfo := port.ThinkingModeInfo{
+		Enabled:      r.config.ThinkingEnabled,
+		BudgetTokens: r.config.ThinkingBudget,
+		ShowThinking: r.config.ShowThinking,
 	}
 
 	// Agent-specific override: if agent specifies thinking config in AGENT.md, use it
@@ -380,15 +378,14 @@ func (r *SubagentRunner) setupAgentSession(rc *subagentRunContext) error {
 // runExecutionLoop runs the main tool execution loop until completion or limit.
 func (r *SubagentRunner) runExecutionLoop(rc *subagentRunContext) (*SubagentResult, error) {
 	for rc.actionsTaken < rc.maxActions {
-		// Add thinking mode to context if enabled for this session
+		// Add thinking mode indicator if enabled for this session
 		ctx := rc.ctx
-		thinkingInfo, _ := r.convService.GetThinkingMode(rc.sessionID)
+		thinkingInfo, _ := rc.runner.convService.GetThinkingMode(rc.sessionID)
 		if thinkingInfo.Enabled {
-			ctx = port.WithThinkingMode(ctx, thinkingInfo)
 			// Display thinking status indicator.
 			// Note: Thinking content itself is never displayed for subagents,
 			// only the status indicator to show the AI is processing.
-			r.displayStatus(rc.agent.Name, statusThinking, "")
+			rc.runner.displayStatus(rc.agent.Name, statusThinking, "")
 		}
 
 		// Process assistant response

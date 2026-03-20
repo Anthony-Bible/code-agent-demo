@@ -50,6 +50,20 @@ type ToolParam struct {
 // ToolInputSchemaParam represents a tool input schema parameter.
 type ToolInputSchemaParam map[string]interface{}
 
+// PlanModeInfo contains plan mode configuration for the AI.
+type PlanModeInfo struct {
+	Enabled   bool
+	SessionID string
+	PlanPath  string // e.g., ".agent/plans/{session}.md"
+}
+
+// ThinkingModeInfo contains thinking mode configuration for the AI.
+type ThinkingModeInfo struct {
+	Enabled      bool
+	BudgetTokens int64
+	ShowThinking bool
+}
+
 // ToolCallInfo contains information about a tool that was requested by the AI.
 type ToolCallInfo struct {
 	ToolID           string                 `json:"tool_id"`                     // The tool identifier from the AI response
@@ -60,9 +74,6 @@ type ToolCallInfo struct {
 }
 
 // AIRequestOptions carries explicit configuration for an AI request.
-// These are values that were previously passed via context.WithValue but are
-// better expressed as explicit parameters since they are configuration, not
-// request-scoped metadata.
 type AIRequestOptions struct {
 	// SystemPrompt overrides the default system prompt when non-empty.
 	SystemPrompt string
