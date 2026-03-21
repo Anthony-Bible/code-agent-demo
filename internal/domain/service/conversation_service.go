@@ -2,8 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +14,7 @@ import (
 	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 	"github.com/anthony-bible/code-agent-demo/internal/domain/safety"
+	"github.com/google/uuid"
 )
 
 var (
@@ -745,14 +744,9 @@ func (cs *ConversationService) formatAllowedToolsList(allowedTools map[string]bo
 
 // Helper methods for ConversationService
 
-// generateSessionID generates a unique session ID using crypto/rand.
+// generateSessionID generates a unique time-ordered session ID (UUID v7, RFC 9562).
 func generateSessionID() string {
-	bytes := make([]byte, 16)
-	if _, err := rand.Read(bytes); err != nil {
-		// Use fallback if crypto/rand fails (should be extremely rare)
-		fmt.Fprintf(os.Stderr, "[ConversationService] CRITICAL: crypto/rand failed: %v\n", err)
-	}
-	return hex.EncodeToString(bytes)
+	return uuid.Must(uuid.NewV7()).String()
 }
 
 // ToolRequest represents a parsed tool request from AI response.
