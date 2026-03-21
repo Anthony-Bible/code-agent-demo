@@ -67,7 +67,7 @@ func InterruptHandlerFromContext(ctx context.Context) *signalhandler.InterruptHa
 // rootCmd represents the base command when called without any subcommands.
 var rootCmd = &cobra.Command{
 	Use:   "code-agent-demo",
-	Short: "AI-powered code editing assistant",
+	Short: "AI-powered alert investigation agent",
 	Long: `Code Editing Agent is an AI-powered assistant that helps you
 investigate alerts and run automated AI workflows.
 

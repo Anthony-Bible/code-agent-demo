@@ -118,7 +118,7 @@ func NewContainer(cfg *Config) (*Container, error) {
 	baseExecutor.SetSkillManager(skillManager)
 	baseExecutor.SetSubagentManager(subagentManager)
 
-	// Build validation config once and share between executor and investigation safety enforcer
+	// Build validation config once; both the executor and investigation validator consume it
 	validationMode, validationWhitelist, err := buildValidationConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build validation config: %w", err)
@@ -187,7 +187,7 @@ func NewContainer(cfg *Config) (*Container, error) {
 		return nil, err
 	}
 
-	// Step 5: Create subagent components (pass the already-created subagentManager)
+	// Step 4: Create subagent components (pass the already-created subagentManager)
 	subagentUseCase := createSubagentComponents(
 		cfg, convService, toolExecutor, aiAdapter, baseExecutor, uiAdapter, subagentManager,
 	)
