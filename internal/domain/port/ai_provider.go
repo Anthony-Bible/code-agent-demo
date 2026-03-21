@@ -50,6 +50,20 @@ type ToolParam struct {
 // ToolInputSchemaParam represents a tool input schema parameter.
 type ToolInputSchemaParam map[string]interface{}
 
+// PlanModeInfo contains plan mode configuration for the AI.
+type PlanModeInfo struct {
+	Enabled   bool
+	SessionID string
+	PlanPath  string // e.g., ".agent/plans/{session}.md"
+}
+
+// ThinkingModeInfo contains thinking mode configuration for the AI.
+type ThinkingModeInfo struct {
+	Enabled      bool
+	BudgetTokens int64
+	ShowThinking bool
+}
+
 // ToolCallInfo contains information about a tool that was requested by the AI.
 type ToolCallInfo struct {
 	ToolID           string                 `json:"tool_id"`                     // The tool identifier from the AI response
@@ -57,6 +71,16 @@ type ToolCallInfo struct {
 	Input            map[string]interface{} `json:"input"`                       // The input parameters passed to the tool
 	InputJSON        string                 `json:"input_json"`                  // JSON representation of the input
 	ThoughtSignature string                 `json:"thought_signature,omitempty"` // Gemini thought signature via Bifrost
+}
+
+// AIRequestOptions carries explicit configuration for an AI request.
+type AIRequestOptions struct {
+	// SystemPrompt overrides the default system prompt when non-empty.
+	SystemPrompt string
+	// PlanMode contains plan mode configuration (nil if not in plan mode).
+	PlanMode *PlanModeInfo
+	// Thinking contains thinking mode configuration (nil if not enabled).
+	Thinking *ThinkingModeInfo
 }
 
 // StreamCallback is called when streaming text is received from the AI provider.
@@ -76,6 +100,7 @@ type AIProvider interface {
 		ctx context.Context,
 		messages []MessageParam,
 		tools []ToolParam,
+		opts AIRequestOptions,
 	) (*entity.Message, []ToolCallInfo, error)
 
 	// SendMessageStreaming sends a message to the AI provider with streaming support.
@@ -86,6 +111,7 @@ type AIProvider interface {
 		ctx context.Context,
 		messages []MessageParam,
 		tools []ToolParam,
+		opts AIRequestOptions,
 		textCallback StreamCallback,
 		thinkingCallback ThinkingCallback,
 	) (*entity.Message, []ToolCallInfo, error)

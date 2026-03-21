@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -15,7 +16,10 @@ func TestSystemPromptDoesNotContainSkills(t *testing.T) {
 	}
 
 	// Get system prompt
-	systemPrompt := adapter.buildBasePromptWithSkills()
+	systemPrompt, err := adapter.buildBasePromptWithAgents(context.Background())
+	if err != nil {
+		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
+	}
 
 	t.Logf("System prompt:\n%s", systemPrompt)
 

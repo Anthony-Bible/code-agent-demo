@@ -774,6 +774,7 @@ func (m *mockAIProvider) SendMessage(
 	_ context.Context,
 	_ []port.MessageParam,
 	_ []port.ToolParam,
+	_ port.AIRequestOptions,
 ) (*entity.Message, []port.ToolCallInfo, error) {
 	if m.err != nil {
 		return nil, nil, m.err
@@ -791,6 +792,7 @@ func (m *mockAIProvider) SendMessageStreaming(
 	_ context.Context,
 	_ []port.MessageParam,
 	_ []port.ToolParam,
+	_ port.AIRequestOptions,
 	textCallback port.StreamCallback,
 	_ port.ThinkingCallback,
 ) (*entity.Message, []port.ToolCallInfo, error) {
@@ -1682,37 +1684,28 @@ func (m *contextVerifyingMockAIProvider) SendMessage(
 	ctx context.Context,
 	messages []port.MessageParam,
 	tools []port.ToolParam,
+	opts port.AIRequestOptions,
 ) (*entity.Message, []port.ToolCallInfo, error) {
-	// Verify context contains (or doesn't contain) custom system prompt
-	customPromptInfo, exists := port.CustomSystemPromptFromContext(ctx)
-
 	if m.expectNoCustomPrompt {
-		// Verify NO custom prompt in context
-		if exists {
-			return nil, nil, fmt.Errorf("expected no custom system prompt in context, but found: %+v", customPromptInfo)
+		// Verify NO custom prompt in opts
+		if opts.SystemPrompt != "" {
+			return nil, nil, fmt.Errorf("expected no custom system prompt, but found: %q", opts.SystemPrompt)
 		}
 		m.contextWasVerified = true
-		return m.mockAIProvider.SendMessage(ctx, messages, tools)
+		return m.mockAIProvider.SendMessage(ctx, messages, tools, opts)
 	}
 
 	// Verify custom prompt EXISTS and matches expectations
-	if !exists {
-		return nil, nil, errors.New("expected custom system prompt in context, but not found")
+	if opts.SystemPrompt == "" {
+		return nil, nil, errors.New("expected custom system prompt in opts, but not found")
 	}
-	if customPromptInfo.SessionID != m.expectedSessionID {
-		return nil, nil, fmt.Errorf(
-			"expected session ID '%s', got '%s'",
-			m.expectedSessionID,
-			customPromptInfo.SessionID,
-		)
-	}
-	if customPromptInfo.Prompt != m.expectedPrompt {
-		return nil, nil, fmt.Errorf("expected prompt '%s', got '%s'", m.expectedPrompt, customPromptInfo.Prompt)
+	if opts.SystemPrompt != m.expectedPrompt {
+		return nil, nil, fmt.Errorf("expected prompt '%s', got '%s'", m.expectedPrompt, opts.SystemPrompt)
 	}
 	m.contextWasVerified = true
 
 	// Delegate to base mock
-	return m.mockAIProvider.SendMessage(ctx, messages, tools)
+	return m.mockAIProvider.SendMessage(ctx, messages, tools, opts)
 }
 
 // =============================================================================
@@ -2175,13 +2168,14 @@ func (m *messageCapturingMockAIProvider) SendMessage(
 	ctx context.Context,
 	messages []port.MessageParam,
 	tools []port.ToolParam,
+	opts port.AIRequestOptions,
 ) (*entity.Message, []port.ToolCallInfo, error) {
 	// Capture the messages
 	m.capturedMessages = messages
 	m.messagesCaptured = true
 
 	// Delegate to base mock
-	return m.mockAIProvider.SendMessage(ctx, messages, tools)
+	return m.mockAIProvider.SendMessage(ctx, messages, tools, opts)
 }
 
 // =============================================================================
@@ -2202,6 +2196,7 @@ func (m *compactionMockAIProvider) SendMessage(
 	_ context.Context,
 	_ []port.MessageParam,
 	tools []port.ToolParam,
+	_ port.AIRequestOptions,
 ) (*entity.Message, []port.ToolCallInfo, error) {
 	m.callCount++
 
