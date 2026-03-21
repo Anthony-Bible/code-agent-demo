@@ -107,16 +107,6 @@ func (s *Skill) parseAllowedTools(raw map[string]interface{}) {
 	}
 }
 
-// SkillMetadataEntity represents the complete metadata for a skill.
-type SkillMetadataEntity struct {
-	Name          string
-	Description   string
-	License       string
-	Compatibility string
-	Metadata      map[string]string
-	AllowedTools  []string
-}
-
 // Validate checks if the skill has valid required fields.
 // Returns error if name or description is empty or if name doesn't match the spec.
 // Per agentskills.io spec: name must be 1-64 lowercase alphanumeric characters

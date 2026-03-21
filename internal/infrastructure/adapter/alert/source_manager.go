@@ -15,21 +15,16 @@ var (
 	errSourceNotFound          = errors.New("source not found")
 )
 
-// ErrorCallback is called when a source reports an error during operation.
-// The source parameter contains the name of the source that encountered the error.
-type ErrorCallback func(source string, err error)
-
 // LocalAlertSourceManager implements port.AlertSourceManager for local/in-process alert handling.
 // It maintains a thread-safe registry of alert sources and manages their lifecycle.
 type LocalAlertSourceManager struct {
-	mu            sync.RWMutex
-	sources       map[string]port.AlertSource
-	paths         map[string]port.WebhookAlertSource
-	alertHandler  port.AlertHandler
-	errorCallback ErrorCallback
-	started       bool
-	ctx           context.Context
-	cancel        context.CancelFunc
+	mu           sync.RWMutex
+	sources      map[string]port.AlertSource
+	paths        map[string]port.WebhookAlertSource
+	alertHandler port.AlertHandler
+	started      bool
+	ctx          context.Context
+	cancel       context.CancelFunc
 }
 
 // NewLocalAlertSourceManager creates a new local alert source manager.
@@ -128,14 +123,6 @@ func (m *LocalAlertSourceManager) SetAlertHandler(handler port.AlertHandler) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.alertHandler = handler
-}
-
-// SetErrorCallback sets the callback function for source error notifications.
-// The callback is invoked when any registered source encounters an error.
-func (m *LocalAlertSourceManager) SetErrorCallback(callback ErrorCallback) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.errorCallback = callback
 }
 
 // Start initializes the manager with the given context.

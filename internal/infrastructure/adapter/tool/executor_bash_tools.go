@@ -89,11 +89,10 @@ func (a *ExecutorAdapter) checkCommandConfirmation(command string, description s
 		}
 	})
 
-	// Read validator and callbacks under lock (validator is now immutable, but callbacks may change)
+	// Read validator and callback under lock (validator is now immutable, but callback may change)
 	a.mu.RLock()
 	validator := a.commandValidator
 	confirmCallback := a.commandConfirmationCallback
-	dangerousCallback := a.dangerousCommandCallback
 	a.mu.RUnlock()
 
 	// Validate outside lock (validator is immutable after creation)
@@ -125,28 +124,11 @@ func (a *ExecutorAdapter) checkCommandConfirmation(command string, description s
 		return a.handleWithConfirmCallback(command, description, result, confirmCallback, isWhitelistFallback)
 	}
 
-	// No general callback - check if dangerous command needs confirmation
-	if result.IsDangerous {
-		return a.handleDangerousOnly(command, result, dangerousCallback)
-	}
-
-	// Safe command with no callback - allow execution
-	return nil
-}
-
-// handleDangerousOnly handles confirmation for dangerous commands using the dangerous callback.
-func (a *ExecutorAdapter) handleDangerousOnly(
-	command string,
-	result safety.ValidationResult,
-	callback DangerousCommandCallback,
-) error {
-	if callback != nil {
-		return a.handleWithDangerousCallback(command, result, callback)
-	}
-	// No callback available for dangerous command - block it
+	// No general callback - block dangerous commands, allow safe ones
 	if result.IsDangerous {
 		return fmt.Errorf(safety.ErrFmtDangerousBlocked, result.Reason, command)
 	}
+
 	return nil
 }
 
@@ -161,18 +143,6 @@ func (a *ExecutorAdapter) handleWithConfirmCallback(
 		return nil
 	}
 	return a.buildDeniedError(command, result, isWhitelistFallback)
-}
-
-// handleWithDangerousCallback processes confirmation using the dangerous command callback.
-func (a *ExecutorAdapter) handleWithDangerousCallback(
-	command string,
-	result safety.ValidationResult,
-	callback DangerousCommandCallback,
-) error {
-	if callback(command, result.Reason) {
-		return nil
-	}
-	return fmt.Errorf(safety.ErrFmtDangerousDenied, result.Reason, command)
 }
 
 // buildDeniedError constructs the appropriate denial error based on context.
