@@ -21,7 +21,7 @@ type mockAIProviderForRCA struct {
 	mock.Mock
 }
 
-func (m *mockAIProviderForRCA) SendMessage(ctx context.Context, messages []port.MessageParam, tools []port.ToolParam) (*entity.Message, []port.ToolCallInfo, error) {
+func (m *mockAIProviderForRCA) SendMessage(ctx context.Context, messages []port.MessageParam, tools []port.ToolParam, _ port.AIRequestOptions) (*entity.Message, []port.ToolCallInfo, error) {
 	args := m.Called(ctx, messages, tools)
 	msg := args.Get(0).(*entity.Message)
 	var toolCalls []port.ToolCallInfo
@@ -31,8 +31,8 @@ func (m *mockAIProviderForRCA) SendMessage(ctx context.Context, messages []port.
 	return msg, toolCalls, args.Error(2)
 }
 
-func (m *mockAIProviderForRCA) SendMessageStreaming(ctx context.Context, messages []port.MessageParam, tools []port.ToolParam, textCallback port.StreamCallback, thinkingCallback port.ThinkingCallback) (*entity.Message, []port.ToolCallInfo, error) {
-	return m.SendMessage(ctx, messages, tools)
+func (m *mockAIProviderForRCA) SendMessageStreaming(ctx context.Context, messages []port.MessageParam, tools []port.ToolParam, opts port.AIRequestOptions, _ port.StreamCallback, _ port.ThinkingCallback) (*entity.Message, []port.ToolCallInfo, error) {
+	return m.SendMessage(ctx, messages, tools, opts)
 }
 
 func (m *mockAIProviderForRCA) GenerateToolSchema() port.ToolInputSchemaParam { return nil }

@@ -2,6 +2,8 @@ package ai
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
@@ -449,19 +451,16 @@ func TestConvertTools_RequiredPreservesOrder(t *testing.T) {
 // system prompts from context over plan mode and base prompts.
 //
 // PRIORITY ORDER (highest to lowest):
-// 1. Custom system prompt (from CustomSystemPromptFromContext)
-// 2. Plan mode prompt (from PlanModeFromContext)
-// 3. Base prompt with skills (default)
+// 1. Custom system prompt (from opts.SystemPrompt)
+// 2. Plan mode prompt (from opts.PlanMode)
+// 3. Base prompt with agents (default)
 // ============================================================================
 
 // TestGetSystemPrompt_CustomPromptTakesPrecedenceOverBasePrompt verifies that
-// when a custom system prompt is present in the context, it is returned instead
+// when a custom system prompt is present in opts, it is returned instead
 // of the base prompt.
-//
-// This test will FAIL until getSystemPrompt() is updated to check for custom
-// prompts in the context via CustomSystemPromptFromContext().
 func TestGetSystemPrompt_CustomPromptTakesPrecedenceOverBasePrompt(t *testing.T) {
-	// Setup: create adapter with no skill manager for predictable base prompt
+	// Setup: create adapter with no subagent manager for predictable base prompt
 	adapter := &AnthropicAdapter{
 		model: "test-model",
 	}
@@ -470,17 +469,16 @@ func TestGetSystemPrompt_CustomPromptTakesPrecedenceOverBasePrompt(t *testing.T)
 	customPrompt := "You are a specialized code review assistant. Focus on security vulnerabilities."
 	expectedPrompt := customPrompt
 
-	// Setup: create context with custom system prompt
-	ctx := port.WithCustomSystemPrompt(
-		context.Background(),
-		port.CustomSystemPromptInfo{
-			SessionID: "test-session-123",
-			Prompt:    customPrompt,
-		},
-	)
+	// Setup: build AIRequestOptions with custom system prompt
+	opts := port.AIRequestOptions{
+		SystemPrompt: customPrompt,
+	}
 
 	// Execute: get system prompt
-	actualPrompt := adapter.getSystemPrompt(ctx)
+	actualPrompt, err := adapter.getSystemPrompt(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("getSystemPrompt failed: %v", err)
+	}
 
 	// Assert: should return custom prompt, not base prompt
 	if actualPrompt != expectedPrompt {
@@ -488,7 +486,10 @@ func TestGetSystemPrompt_CustomPromptTakesPrecedenceOverBasePrompt(t *testing.T)
 	}
 
 	// Assert: should NOT be the base prompt
-	basePrompt := adapter.buildBasePromptWithSkills()
+	basePrompt, err := adapter.buildBasePromptWithAgents(context.Background())
+	if err != nil {
+		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
+	}
 	if actualPrompt == basePrompt {
 		t.Error("Custom prompt should take precedence over base prompt, but got base prompt instead")
 	}
@@ -510,20 +511,22 @@ func TestGetSystemPrompt_CustomPromptTakesPrecedenceOverPlanMode(t *testing.T) {
 	customPrompt := "You are a debugging specialist. Analyze stack traces and find root causes."
 	planPath := ".agent/plans/session-456.md"
 
-	// Setup: create context with BOTH custom prompt AND plan mode
-	ctx := context.Background()
-	ctx = port.WithCustomSystemPrompt(ctx, port.CustomSystemPromptInfo{
-		SessionID: "test-session-456",
-		Prompt:    customPrompt,
-	})
-	ctx = port.WithPlanMode(ctx, port.PlanModeInfo{
+	// Setup: build AIRequestOptions with BOTH custom prompt AND plan mode
+	planModeInfo := port.PlanModeInfo{
 		Enabled:   true,
 		SessionID: "test-session-456",
 		PlanPath:  planPath,
-	})
+	}
+	opts := port.AIRequestOptions{
+		SystemPrompt: customPrompt,
+		PlanMode:     &planModeInfo,
+	}
 
 	// Execute: get system prompt
-	actualPrompt := adapter.getSystemPrompt(ctx)
+	actualPrompt, err := adapter.getSystemPrompt(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("getSystemPrompt failed: %v", err)
+	}
 
 	// Assert: should return custom prompt, not plan mode prompt
 	if actualPrompt != customPrompt {
@@ -557,20 +560,22 @@ func TestGetSystemPrompt_EmptyCustomPromptFallsBackToBasePrompt(t *testing.T) {
 		model: "test-model",
 	}
 
-	// Setup: create context with empty custom prompt
-	ctx := port.WithCustomSystemPrompt(
-		context.Background(),
-		port.CustomSystemPromptInfo{
-			SessionID: "test-session-789",
-			Prompt:    "", // Empty prompt should fall back to base
-		},
-	)
+	// Setup: build AIRequestOptions with empty custom prompt
+	opts := port.AIRequestOptions{
+		SystemPrompt: "", // Empty prompt should fall back to base
+	}
 
 	// Execute: get system prompt
-	actualPrompt := adapter.getSystemPrompt(ctx)
+	actualPrompt, err := adapter.getSystemPrompt(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("getSystemPrompt failed: %v", err)
+	}
 
 	// Expected: base prompt
-	expectedPrompt := adapter.buildBasePromptWithSkills()
+	expectedPrompt, err := adapter.buildBasePromptWithAgents(context.Background())
+	if err != nil {
+		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
+	}
 
 	// Assert: should return base prompt when custom prompt is empty
 	if actualPrompt != expectedPrompt {
@@ -592,18 +597,21 @@ func TestGetSystemPrompt_NoCustomPromptWithPlanModeReturnsPlanPrompt(t *testing.
 
 	planPath := ".agent/plans/session-abc.md"
 
-	// Setup: create context with plan mode but NO custom prompt
-	ctx := port.WithPlanMode(
-		context.Background(),
-		port.PlanModeInfo{
-			Enabled:   true,
-			SessionID: "test-session-abc",
-			PlanPath:  planPath,
-		},
-	)
+	// Setup: build AIRequestOptions with plan mode but NO custom prompt
+	planModeInfo := port.PlanModeInfo{
+		Enabled:   true,
+		SessionID: "test-session-abc",
+		PlanPath:  planPath,
+	}
+	opts := port.AIRequestOptions{
+		PlanMode: &planModeInfo,
+	}
 
 	// Execute: get system prompt
-	actualPrompt := adapter.getSystemPrompt(ctx)
+	actualPrompt, err := adapter.getSystemPrompt(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("getSystemPrompt failed: %v", err)
+	}
 
 	// Assert: should contain plan mode instructions
 	if !containsPlanModeInstructions(actualPrompt) {
@@ -616,7 +624,10 @@ func TestGetSystemPrompt_NoCustomPromptWithPlanModeReturnsPlanPrompt(t *testing.
 	}
 
 	// Assert: should NOT be the base prompt
-	basePrompt := adapter.buildBasePromptWithSkills()
+	basePrompt, err := adapter.buildBasePromptWithAgents(context.Background())
+	if err != nil {
+		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
+	}
 	if actualPrompt == basePrompt {
 		t.Error("Expected plan mode prompt, but got base prompt instead")
 	}
@@ -633,14 +644,20 @@ func TestGetSystemPrompt_NoCustomPromptNoPlanModeReturnsBasePrompt(t *testing.T)
 		model: "test-model",
 	}
 
-	// Setup: create plain context with no custom prompt or plan mode
-	ctx := context.Background()
+	// Setup: build AIRequestOptions with no custom prompt or plan mode
+	opts := port.AIRequestOptions{}
 
 	// Execute: get system prompt
-	actualPrompt := adapter.getSystemPrompt(ctx)
+	actualPrompt, err := adapter.getSystemPrompt(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("getSystemPrompt failed: %v", err)
+	}
 
 	// Expected: base prompt
-	expectedPrompt := adapter.buildBasePromptWithSkills()
+	expectedPrompt, err := adapter.buildBasePromptWithAgents(context.Background())
+	if err != nil {
+		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
+	}
 
 	// Assert: should return base prompt
 	if actualPrompt != expectedPrompt {
@@ -672,17 +689,16 @@ func TestGetSystemPrompt_CustomPromptWithWhitespaceIsNotEmpty(t *testing.T) {
 	// Custom prompt with only whitespace
 	whitespacePrompt := "   \n\t  \n   "
 
-	// Setup: create context with whitespace-only custom prompt
-	ctx := port.WithCustomSystemPrompt(
-		context.Background(),
-		port.CustomSystemPromptInfo{
-			SessionID: "test-session-whitespace",
-			Prompt:    whitespacePrompt,
-		},
-	)
+	// Setup: build AIRequestOptions with whitespace-only custom prompt
+	opts := port.AIRequestOptions{
+		SystemPrompt: whitespacePrompt,
+	}
 
 	// Execute: get system prompt
-	actualPrompt := adapter.getSystemPrompt(ctx)
+	actualPrompt, err := adapter.getSystemPrompt(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("getSystemPrompt failed: %v", err)
+	}
 
 	// Assert: should return whitespace prompt (even though unusual)
 	// The implementation should check for empty string, not trimmed empty
@@ -725,17 +741,16 @@ func TestGetSystemPrompt_CustomPromptSessionIDNotValidated(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup: create context with custom prompt and varying session IDs
-			ctx := port.WithCustomSystemPrompt(
-				context.Background(),
-				port.CustomSystemPromptInfo{
-					SessionID: tt.sessionID,
-					Prompt:    customPrompt,
-				},
-			)
+			// Setup: build AIRequestOptions with custom prompt (session ID is not relevant to opts)
+			opts := port.AIRequestOptions{
+				SystemPrompt: customPrompt,
+			}
 
 			// Execute: get system prompt
-			actualPrompt := adapter.getSystemPrompt(ctx)
+			actualPrompt, err := adapter.getSystemPrompt(context.Background(), opts)
+			if err != nil {
+				t.Fatalf("getSystemPrompt failed: %v", err)
+			}
 
 			// Assert: should return custom prompt regardless of session ID
 			if actualPrompt != customPrompt {
@@ -761,28 +776,29 @@ func TestGetSystemPrompt_MultipleCustomPromptsInSequence(t *testing.T) {
 	prompt2 := "Second custom prompt for session 2"
 
 	// Execute: call with first custom prompt
-	ctx1 := port.WithCustomSystemPrompt(
-		context.Background(),
-		port.CustomSystemPromptInfo{
-			SessionID: "session-1",
-			Prompt:    prompt1,
-		},
-	)
-	actualPrompt1 := adapter.getSystemPrompt(ctx1)
+	opts1 := port.AIRequestOptions{
+		SystemPrompt: prompt1,
+	}
+	actualPrompt1, err := adapter.getSystemPrompt(context.Background(), opts1)
+	if err != nil {
+		t.Fatalf("getSystemPrompt failed: %v", err)
+	}
 
 	// Execute: call with second custom prompt
-	ctx2 := port.WithCustomSystemPrompt(
-		context.Background(),
-		port.CustomSystemPromptInfo{
-			SessionID: "session-2",
-			Prompt:    prompt2,
-		},
-	)
-	actualPrompt2 := adapter.getSystemPrompt(ctx2)
+	opts2 := port.AIRequestOptions{
+		SystemPrompt: prompt2,
+	}
+	actualPrompt2, err := adapter.getSystemPrompt(context.Background(), opts2)
+	if err != nil {
+		t.Fatalf("getSystemPrompt failed: %v", err)
+	}
 
 	// Execute: call with no custom prompt
-	ctx3 := context.Background()
-	actualPrompt3 := adapter.getSystemPrompt(ctx3)
+	opts3 := port.AIRequestOptions{}
+	actualPrompt3, err := adapter.getSystemPrompt(context.Background(), opts3)
+	if err != nil {
+		t.Fatalf("getSystemPrompt failed: %v", err)
+	}
 
 	// Assert: each call returns the appropriate prompt
 	if actualPrompt1 != prompt1 {
@@ -792,10 +808,72 @@ func TestGetSystemPrompt_MultipleCustomPromptsInSequence(t *testing.T) {
 		t.Errorf("Second call: expected %q, got %q", prompt2, actualPrompt2)
 	}
 
-	basePrompt := adapter.buildBasePromptWithSkills()
+	basePrompt, err := adapter.buildBasePromptWithAgents(context.Background())
+	if err != nil {
+		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
+	}
 	if actualPrompt3 != basePrompt {
 		t.Errorf("Third call: expected base prompt %q, got %q", basePrompt, actualPrompt3)
 	}
+}
+
+// TestBuildBasePromptWithAgents_IncludesSubagents verifies that when a subagent manager
+// is provided and has registered agents, they are included in the system prompt.
+func TestBuildBasePromptWithAgents_IncludesSubagents(t *testing.T) {
+	// Setup: mock subagent manager
+	mockManager := &mockSubagentManagerForPrompt{
+		agents: []port.SubagentInfo{
+			{
+				Name:        "code-reviewer",
+				Description: "Reviews code for quality and security",
+			},
+			{
+				Name:        "documentation-writer",
+				Description: "Writes comprehensive documentation",
+			},
+		},
+	}
+
+	// Setup: create adapter with mock manager
+	adapter := &AnthropicAdapter{
+		model:           "test-model",
+		subagentManager: mockManager,
+	}
+
+	// Execute: build prompt
+	prompt, err := adapter.buildBasePromptWithAgents(context.Background())
+	if err != nil {
+		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
+	}
+
+	// Assert: base prompt is present
+	if !strings.Contains(prompt, "AI assistant") {
+		t.Error("Base prompt text missing")
+	}
+
+	// Assert: subagents header is present
+	if !strings.Contains(prompt, "access to the following specialized agents:") {
+		t.Error("Subagents header missing from prompt")
+	}
+
+	// Assert: each subagent is present with its description
+	for _, agent := range mockManager.agents {
+		expectedLine := fmt.Sprintf("- %s: %s", agent.Name, agent.Description)
+		if !strings.Contains(prompt, expectedLine) {
+			t.Errorf("Expected agent info missing: %q", expectedLine)
+		}
+	}
+}
+
+// mockSubagentManagerForPrompt is a mock for testing prompt building logic.
+type mockSubagentManagerForPrompt struct {
+	port.SubagentManager
+
+	agents []port.SubagentInfo
+}
+
+func (m *mockSubagentManagerForPrompt) ListAgents(_ context.Context) ([]port.SubagentInfo, error) {
+	return m.agents, nil
 }
 
 // ============================================================================
@@ -868,13 +946,13 @@ func TestSendMessageStreaming_CallbackInvoked(_ *testing.T) {
 }
 
 // ============================================================================
-// Extended Thinking Integration Tests (RED PHASE)
+// Extended Thinking Integration Tests
 // ============================================================================
 // These tests verify the AnthropicAdapter correctly integrates extended thinking
 // into SendMessage() and convertResponse() methods.
 //
 // CRITICAL REQUIREMENTS:
-// 1. Read ThinkingModeFromContext and conditionally set thinking config
+// 1. Read thinking config from port.AIRequestOptions
 // 2. Use configurable MaxTokens instead of hardcoded 4096
 // 3. Extract thinking blocks with signatures from API response
 // 4. Include ThinkingBlocks when building API request (must be FIRST)
@@ -882,15 +960,8 @@ func TestSendMessageStreaming_CallbackInvoked(_ *testing.T) {
 // ============================================================================
 
 // TestSendMessage_ThinkingModeDisabledByDefault verifies that when no thinking
-// mode context is provided, the API request uses disabled thinking configuration.
-//
-// This test will FAIL until SendMessage() is updated to:
-// - Check ThinkingModeFromContext
-// - Default to disabled thinking when not present in context.
+// mode is provided in options, the API request uses disabled thinking configuration.
 func TestSendMessage_ThinkingModeDisabledByDefault(t *testing.T) {
-	// This test requires mocking the Anthropic client to verify the request
-	// For now, we test the thinking config setup indirectly through behavior
-
 	// Setup: create adapter
 	adapter := &AnthropicAdapter{
 		model: "test-model",
@@ -907,37 +978,31 @@ func TestSendMessage_ThinkingModeDisabledByDefault(t *testing.T) {
 		},
 	}
 
-	// Execute: call SendMessage (this will fail because we can't mock the client yet)
-	// The test is designed to verify the thinking config would be set to disabled
-	// when the adapter is properly implemented
-	_, _, err := adapter.SendMessage(ctx, messages, nil)
+	// Execute: call SendMessage with empty options
+	_, _, err := adapter.SendMessage(ctx, messages, nil, port.AIRequestOptions{})
 
 	// Assert: expect error for now (no real API key/mock)
-	// When implemented, we'll mock the client and verify thinking=disabled
 	if err == nil {
 		t.Error("Expected error without real API client, got nil")
 	}
 }
 
-// TestSendMessage_ThinkingModeEnabledWithContext verifies that when thinking
-// mode is enabled in context, the API request uses extended thinking configuration
-// with the specified budget and show_thinking settings.
-//
-// This test will FAIL until SendMessage() is updated to:
-// - Check ThinkingModeFromContext
-// - Set thinking config to enabled with budget when context indicates enabled.
-func TestSendMessage_ThinkingModeEnabledWithContext(t *testing.T) {
+// TestSendMessage_ThinkingModeEnabledWithOpts verifies that SendMessage
+// includes thinking config when enabled in options.
+func TestSendMessage_ThinkingModeEnabledWithOpts(t *testing.T) {
 	// Setup: create adapter
 	adapter := &AnthropicAdapter{
 		model: "test-model",
 	}
 
-	// Setup: create context with thinking mode enabled
-	ctx := port.WithThinkingMode(context.Background(), port.ThinkingModeInfo{
-		Enabled:      true,
-		BudgetTokens: 5000,
-		ShowThinking: true,
-	})
+	// Setup: create options with thinking mode enabled
+	opts := port.AIRequestOptions{
+		Thinking: &port.ThinkingModeInfo{
+			Enabled:      true,
+			BudgetTokens: 5000,
+			ShowThinking: true,
+		},
+	}
 
 	// Setup: create simple message
 	messages := []port.MessageParam{
@@ -948,7 +1013,7 @@ func TestSendMessage_ThinkingModeEnabledWithContext(t *testing.T) {
 	}
 
 	// Execute: call SendMessage
-	_, _, err := adapter.SendMessage(ctx, messages, nil)
+	_, _, err := adapter.SendMessage(context.Background(), messages, nil, opts)
 
 	// Assert: expect error for now (no real API client)
 	// When implemented with mock client, we'll verify:
@@ -961,10 +1026,6 @@ func TestSendMessage_ThinkingModeEnabledWithContext(t *testing.T) {
 
 // TestSendMessage_UsesConfigurableMaxTokens verifies that SendMessage uses
 // MaxTokens from config rather than a hardcoded value.
-//
-// This test will FAIL until SendMessage() is updated to:
-// - Accept MaxTokens as a configurable field in AnthropicAdapter
-// - Use adapter.maxTokens instead of hardcoded 4096.
 func TestSendMessage_UsesConfigurableMaxTokens(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -987,10 +1048,9 @@ func TestSendMessage_UsesConfigurableMaxTokens(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup: create adapter with custom MaxTokens
-			// This will fail because AnthropicAdapter doesn't have maxTokens field yet
 			adapter := &AnthropicAdapter{
-				model: "test-model",
-				// maxTokens: tt.maxTokens, // This field doesn't exist yet
+				model:     "test-model",
+				maxTokens: tt.maxTokens,
 			}
 
 			// Setup: create simple message
@@ -1002,7 +1062,7 @@ func TestSendMessage_UsesConfigurableMaxTokens(t *testing.T) {
 			}
 
 			// Execute: call SendMessage
-			_, _, err := adapter.SendMessage(context.Background(), messages, nil)
+			_, _, err := adapter.SendMessage(context.Background(), messages, nil, port.AIRequestOptions{})
 
 			// Assert: expect error for now
 			// When implemented with mock client, we'll verify MaxTokens is set correctly
@@ -1259,11 +1319,9 @@ func TestThinkingBlocksInToolLoop(t *testing.T) {
 	// - Tool result is in second message
 }
 
-// TestSendMessage_ThinkingModeWithCustomBudget verifies that different
-// thinking budgets can be configured through context.
-//
-// This test will FAIL until SendMessage() correctly reads budget from context.
-func TestSendMessage_ThinkingModeWithCustomBudget(t *testing.T) {
+// TestSendMessage_ThinkingModeWithCustomBudgetOpts verifies that different
+// thinking budgets can be configured through options.
+func TestSendMessage_ThinkingModeWithCustomBudgetOpts(t *testing.T) {
 	tests := []struct {
 		name   string
 		budget int64
@@ -1293,12 +1351,14 @@ func TestSendMessage_ThinkingModeWithCustomBudget(t *testing.T) {
 				model: "test-model",
 			}
 
-			// Setup: create context with custom thinking budget
-			ctx := port.WithThinkingMode(context.Background(), port.ThinkingModeInfo{
-				Enabled:      true,
-				BudgetTokens: tt.budget,
-				ShowThinking: false,
-			})
+			// Setup: create options with custom thinking budget
+			opts := port.AIRequestOptions{
+				Thinking: &port.ThinkingModeInfo{
+					Enabled:      true,
+					BudgetTokens: tt.budget,
+					ShowThinking: false,
+				},
+			}
 
 			// Setup: create message
 			messages := []port.MessageParam{
@@ -1309,7 +1369,7 @@ func TestSendMessage_ThinkingModeWithCustomBudget(t *testing.T) {
 			}
 
 			// Execute: call SendMessage
-			_, _, err := adapter.SendMessage(ctx, messages, nil)
+			_, _, err := adapter.SendMessage(context.Background(), messages, nil, opts)
 
 			// Assert: expect error for now
 			// When implemented with mock, verify budget is set correctly

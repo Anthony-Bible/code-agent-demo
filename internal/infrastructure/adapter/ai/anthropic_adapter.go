@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
@@ -87,6 +86,7 @@ func NewAnthropicAdapter(
 //   - ctx: Context for the request (supports cancellation and timeout)
 //   - messages: Slice of MessageParam representing the conversation history
 //   - tools: Slice of ToolParam representing available tools for the AI
+//   - opts: AIRequestOptions carrying explicit configuration
 //
 // Returns:
 //   - *entity.Message: The AI's response including any tool use blocks
@@ -96,39 +96,15 @@ func (a *AnthropicAdapter) SendMessage(
 	ctx context.Context,
 	messages []port.MessageParam,
 	tools []port.ToolParam,
+	opts port.AIRequestOptions,
 ) (*entity.Message, []port.ToolCallInfo, error) {
-	// Validate inputs
-	if len(messages) == 0 {
-		return nil, nil, ErrEmptyMessages
-	}
-	if a.model == "" {
-		return nil, nil, ErrModelNotSet
-	}
-
-	// Convert port messages to Anthropic SDK messages
-	anthropicMessages := a.convertMessages(messages)
-
-	// Convert port tools to Anthropic SDK tools
-	anthropicTools := a.convertTools(tools)
-
-	// Get system prompt (may be modified if plan mode is active, includes skill metadata)
-	systemPrompt := a.getSystemPrompt(ctx)
-
-	// Build thinking config from context
-	thinkingConfig := anthropic.ThinkingConfigParamUnion{OfDisabled: &anthropic.ThinkingConfigDisabledParam{}}
-	if thinkingInfo, ok := port.ThinkingModeFromContext(ctx); ok && thinkingInfo.Enabled {
-		thinkingConfig = anthropic.ThinkingConfigParamOfEnabled(thinkingInfo.BudgetTokens)
+	params, err := a.buildMessageParams(ctx, messages, tools, opts)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	// Call Anthropic API
-	response, err := a.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.Model(a.model),
-		MaxTokens: a.maxTokens,
-		Messages:  anthropicMessages,
-		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
-		Thinking:  thinkingConfig,
-		Tools:     anthropicTools,
-	})
+	response, err := a.client.Messages.New(ctx, params)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to send message: %w", err)
 	}
@@ -148,6 +124,7 @@ func (a *AnthropicAdapter) SendMessage(
 //   - ctx: Context for the request (supports cancellation and timeout)
 //   - messages: Slice of MessageParam representing the conversation history
 //   - tools: Slice of ToolParam representing available tools for the AI
+//   - opts: AIRequestOptions carrying explicit configuration
 //   - textCallback: Function called for each text chunk as it arrives
 //   - thinkingCallback: Function called for each thinking chunk (can be nil to skip)
 //
@@ -159,41 +136,17 @@ func (a *AnthropicAdapter) SendMessageStreaming(
 	ctx context.Context,
 	messages []port.MessageParam,
 	tools []port.ToolParam,
+	opts port.AIRequestOptions,
 	textCallback port.StreamCallback,
 	thinkingCallback port.ThinkingCallback,
 ) (*entity.Message, []port.ToolCallInfo, error) {
-	// Validate inputs
-	if len(messages) == 0 {
-		return nil, nil, ErrEmptyMessages
-	}
-	if a.model == "" {
-		return nil, nil, ErrModelNotSet
-	}
-
-	// Convert port messages to Anthropic SDK messages
-	anthropicMessages := a.convertMessages(messages)
-
-	// Convert port tools to Anthropic SDK tools
-	anthropicTools := a.convertTools(tools)
-
-	// Get system prompt (may be modified if plan mode is active, includes skill metadata)
-	systemPrompt := a.getSystemPrompt(ctx)
-
-	// Build thinking config from context
-	thinkingConfig := anthropic.ThinkingConfigParamUnion{OfDisabled: &anthropic.ThinkingConfigDisabledParam{}}
-	if thinkingInfo, ok := port.ThinkingModeFromContext(ctx); ok && thinkingInfo.Enabled {
-		thinkingConfig = anthropic.ThinkingConfigParamOfEnabled(thinkingInfo.BudgetTokens)
+	params, err := a.buildMessageParams(ctx, messages, tools, opts)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	// Create streaming request
-	stream := a.client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.Model(a.model),
-		MaxTokens: a.maxTokens,
-		Messages:  anthropicMessages,
-		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
-		Thinking:  thinkingConfig,
-		Tools:     anthropicTools,
-	})
+	stream := a.client.Messages.NewStreaming(ctx, params)
 
 	// Accumulate the message as events arrive
 	message := anthropic.Message{}
@@ -238,34 +191,71 @@ func (a *AnthropicAdapter) SendMessageStreaming(
 	return a.convertResponse(&message)
 }
 
-// getSystemPrompt returns the system prompt for the AI based on context priority.
+// buildMessageParams encapsulates the setup logic for anthropic.MessageNewParams.
+func (a *AnthropicAdapter) buildMessageParams(
+	ctx context.Context,
+	messages []port.MessageParam,
+	tools []port.ToolParam,
+	opts port.AIRequestOptions,
+) (anthropic.MessageNewParams, error) {
+	// Validate inputs
+	if len(messages) == 0 {
+		return anthropic.MessageNewParams{}, ErrEmptyMessages
+	}
+	if a.model == "" {
+		return anthropic.MessageNewParams{}, ErrModelNotSet
+	}
+
+	// Convert port messages to Anthropic SDK messages
+	anthropicMessages := a.convertMessages(messages)
+
+	// Convert port tools to Anthropic SDK tools
+	anthropicTools := a.convertTools(tools)
+
+	// Get system prompt from explicit options
+	systemPrompt, err := a.getSystemPrompt(ctx, opts)
+	if err != nil {
+		return anthropic.MessageNewParams{}, err
+	}
+
+	// Build thinking config from explicit options
+	thinkingConfig := anthropic.ThinkingConfigParamUnion{OfDisabled: &anthropic.ThinkingConfigDisabledParam{}}
+	if opts.Thinking != nil && opts.Thinking.Enabled {
+		thinkingConfig = anthropic.ThinkingConfigParamOfEnabled(opts.Thinking.BudgetTokens)
+	}
+
+	return anthropic.MessageNewParams{
+		Model:     anthropic.Model(a.model),
+		MaxTokens: a.maxTokens,
+		Messages:  anthropicMessages,
+		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
+		Thinking:  thinkingConfig,
+		Tools:     anthropicTools,
+	}, nil
+}
+
+// getSystemPrompt returns the system prompt for the AI based on options priority.
 //
 // Priority order (highest to lowest):
-//  1. Custom system prompt (from CustomSystemPromptFromContext) - Takes precedence over all other prompts
-//  2. Plan mode prompt (from PlanModeFromContext) - Used when plan mode is active and no custom prompt exists
+//  1. Custom system prompt (from opts.SystemPrompt) - Takes precedence over all other prompts
+//  2. Plan mode prompt (from opts.PlanMode) - Used when plan mode is active and no custom prompt exists
 //  3. Base prompt with optional skill metadata - Default prompt when no special modes are active
-//
-// The custom prompt feature allows callers to override the system prompt entirely
-// for specialized tasks like code review, refactoring, or investigations.
-func (a *AnthropicAdapter) getSystemPrompt(ctx context.Context) string {
+func (a *AnthropicAdapter) getSystemPrompt(ctx context.Context, opts port.AIRequestOptions) (string, error) {
 	// Priority 1: Check for custom system prompt (highest priority)
-	if customPromptInfo, ok := port.CustomSystemPromptFromContext(ctx); ok && customPromptInfo.Prompt != "" {
-		return customPromptInfo.Prompt
+	if opts.SystemPrompt != "" {
+		return opts.SystemPrompt, nil
 	}
 
 	// Priority 2: Check for plan mode prompt (second priority)
-	planInfo, ok := port.PlanModeFromContext(ctx)
-	if ok && planInfo.Enabled {
-		return a.buildPlanModePrompt(planInfo)
+	if opts.PlanMode != nil && opts.PlanMode.Enabled {
+		return a.buildPlanModePrompt(*opts.PlanMode), nil
 	}
 
-	// Priority 3: Return base prompt with optional skill metadata (default/fallback)
-	return a.buildBasePromptWithSkills()
+	// Priority 3: Return base prompt with optional agent metadata (default/fallback)
+	return a.buildBasePromptWithAgents(ctx)
 }
 
 // buildPlanModePrompt constructs the specialized plan mode system prompt.
-// This prompt instructs the agent to explore the codebase and write an implementation
-// plan rather than making direct changes.
 func (a *AnthropicAdapter) buildPlanModePrompt(planInfo port.PlanModeInfo) string {
 	return fmt.Sprintf(
 		`You are an AI assistant in PLAN MODE. Your job is to explore the codebase and write an implementation plan before making changes.
@@ -313,35 +303,40 @@ When your plan is complete, tell the user to exit plan mode with :mode normal to
 	)
 }
 
-// buildBasePromptWithSkills constructs the base system prompt.
-// Skills are now included in the activate_skill tool description instead of the system prompt.
-func (a *AnthropicAdapter) buildBasePromptWithSkills() string {
-	return "You are an AI assistant that helps users with code editing and explanations. Use the available tools when necessary to provide accurate and helpful responses."
+// buildBasePromptWithAgents constructs the base system prompt.
+func (a *AnthropicAdapter) buildBasePromptWithAgents(ctx context.Context) (string, error) {
+	basePrompt := "You are an AI assistant that helps users with code editing and explanations. Use the available tools when necessary to provide accurate and helpful responses."
+
+	if a.subagentManager == nil {
+		return basePrompt, nil
+	}
+
+	agents, err := a.subagentManager.ListAgents(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to list agents: %w", err)
+	}
+
+	if len(agents) == 0 {
+		return basePrompt, nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString(basePrompt)
+	sb.WriteString("\n\nYou have access to the following specialized agents:\n")
+	for _, agent := range agents {
+		fmt.Fprintf(&sb, "- %s: %s\n", agent.Name, agent.Description)
+	}
+
+	return sb.String(), nil
 }
 
 // GenerateToolSchema returns an empty tool input schema.
-// In a more complex implementation, this could generate schemas based on
-// registered tool definitions or configuration.
-//
-// For the Anthropic adapter, tool schemas are typically defined per-tool
-// and passed directly in the SendMessage call.
-//
-// Returns:
-//   - port.ToolInputSchemaParam: An empty schema map
 func (a *AnthropicAdapter) GenerateToolSchema() port.ToolInputSchemaParam {
 	return port.ToolInputSchemaParam{}
 }
 
 // HealthCheck performs a basic health check on the Anthropic adapter.
-// It validates that the client is properly initialized and ready to accept requests.
-//
-// Parameters:
-//   - ctx: Context for the health check (supports cancellation)
-//
-// Returns:
-//   - error: nil if the health check passes, otherwise an error
 func (a *AnthropicAdapter) HealthCheck(_ context.Context) error {
-	// Basic health check - verify model is configured
 	if a.model == "" {
 		return fmt.Errorf("%w: model not configured", ErrClientHealthCheck)
 	}
@@ -349,12 +344,6 @@ func (a *AnthropicAdapter) HealthCheck(_ context.Context) error {
 }
 
 // SetModel sets the AI model to use for subsequent requests.
-//
-// Parameters:
-//   - model: The model identifier to use (e.g., "claude-3-5-sonnet-20241022")
-//
-// Returns:
-//   - error: nil if the model was set successfully
 func (a *AnthropicAdapter) SetModel(model string) error {
 	if model == "" {
 		return errors.New("model cannot be empty")
@@ -364,15 +353,11 @@ func (a *AnthropicAdapter) SetModel(model string) error {
 }
 
 // GetModel returns the currently configured AI model.
-//
-// Returns:
-//   - string: The current model identifier
 func (a *AnthropicAdapter) GetModel() string {
 	return a.model
 }
 
 // convertMessages converts port MessageParam slice to Anthropic SDK MessageParam slice.
-// It handles tool use blocks for assistant messages and tool result blocks for user messages.
 func (a *AnthropicAdapter) convertMessages(messages []port.MessageParam) []anthropic.MessageParam {
 	result := make([]anthropic.MessageParam, len(messages))
 	for i, msg := range messages {
@@ -397,36 +382,11 @@ func (a *AnthropicAdapter) convertUserToolResultMessage(msg port.MessageParam) a
 	resultBlocks := make([]anthropic.ContentBlockParamUnion, len(msg.ToolResults))
 	for j, tr := range msg.ToolResults {
 		resultBlocks[j] = anthropic.NewToolResultBlock(tr.ToolID, tr.Result, tr.IsError)
-
-		// Handle thought_signature from Gemini via Bifrost
-		if tr.ThoughtSignature != "" {
-			// SECURITY NOTE: The thought_signature is a cryptographic signature from Gemini AI
-			// that validates the authenticity of tool execution results. It should be:
-			// 1. Validated to ensure it hasn't been tampered with
-			// 2. Preserved across tool calls to maintain chain of custody
-			// 3. Injected at the HTTP level (not via SDK due to limitations)
-			//
-			// The signature format is currently opaque to this adapter and is passed through
-			// as-is. Future implementation should include:
-			// - Signature validation logic
-			// - HTTP interceptor for proper injection
-			// - Error handling for invalid signatures
-			fmt.Fprintf(
-				os.Stderr,
-				"[AnthropicAdapter] Tool result has thought_signature (need HTTP-level injection): ToolID=%s, Sig=%s\n",
-				tr.ToolID,
-				tr.ThoughtSignature,
-			)
-			// TODO: The SDK doesn't support adding signature to tool_result blocks
-			// We need to implement an HTTP interceptor to inject the signature field
-			// into the JSON payload before sending to Bifrost and validate signature format
-		}
 	}
 	return anthropic.NewUserMessage(resultBlocks...)
 }
 
 // convertAssistantToolMessage converts an assistant message with thinking blocks, text, and tool calls.
-// CRITICAL: Thinking blocks MUST come first in the content array.
 func (a *AnthropicAdapter) convertAssistantToolMessage(msg port.MessageParam) anthropic.MessageParam {
 	blocks := []anthropic.ContentBlockParamUnion{}
 
@@ -440,23 +400,7 @@ func (a *AnthropicAdapter) convertAssistantToolMessage(msg port.MessageParam) an
 	}
 
 	for _, tc := range msg.ToolCalls {
-		// If thought_signature is present (Gemini via Bifrost), include it
-		// The SDK doesn't expose Signature field, so we use the standard method
-		// and rely on Bifrost to handle signature preservation at the HTTP level
 		blocks = append(blocks, anthropic.NewToolUseBlock(tc.ToolID, tc.Input, tc.ToolName))
-
-		// Log if we have a thought_signature (for debugging Bifrost integration)
-		if tc.ThoughtSignature != "" {
-			fmt.Fprintf(
-				os.Stderr,
-				"[AnthropicAdapter] Tool call has thought_signature (need HTTP-level injection): ID=%s, Sig=%s\n",
-				tc.ToolID,
-				tc.ThoughtSignature,
-			)
-			// TODO: Implement HTTP interceptor to inject signature field into JSON payload
-			// The SDK doesn't support adding custom fields to tool_use blocks
-			// For now, we'll need to intercept the HTTP request and inject the signature
-		}
 	}
 
 	return anthropic.NewAssistantMessage(blocks...)
@@ -504,7 +448,7 @@ func (a *AnthropicAdapter) convertInputSchema(schema port.ToolInputSchemaParam) 
 	}
 }
 
-// extractStringField extracts a string value from a schema map, returning empty string if not found.
+// extractStringField extracts a string value from a schema map.
 func extractStringField(schema port.ToolInputSchemaParam, key string) string {
 	if value, ok := schema[key].(string); ok {
 		return value
@@ -512,7 +456,7 @@ func extractStringField(schema port.ToolInputSchemaParam, key string) string {
 	return ""
 }
 
-// extractMapField extracts a map value from a schema map, returning nil if not found.
+// extractMapField extracts a map value from a schema map.
 func extractMapField(schema port.ToolInputSchemaParam, key string) map[string]interface{} {
 	if value, ok := schema[key].(map[string]interface{}); ok {
 		return value
@@ -520,7 +464,7 @@ func extractMapField(schema port.ToolInputSchemaParam, key string) map[string]in
 	return nil
 }
 
-// extractStringSliceField extracts a string slice from a schema map, returning nil if not found.
+// extractStringSliceField extracts a string slice from a schema map.
 func extractStringSliceField(schema port.ToolInputSchemaParam, key string) []string {
 	if value, ok := schema[key].([]string); ok {
 		return value
@@ -529,10 +473,7 @@ func extractStringSliceField(schema port.ToolInputSchemaParam, key string) []str
 }
 
 // convertResponse converts an Anthropic API response to a domain Message entity.
-// It extracts text content and tool use blocks from the response and constructs
-// a simplified content string for the domain Message.
 func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity.Message, []port.ToolCallInfo, error) {
-	// Build the content string from all content blocks
 	var contentBuilder strings.Builder
 	toolCalls := []port.ToolCallInfo{}
 	entityToolCalls := []entity.ToolCall{}
@@ -543,12 +484,10 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 		case "text":
 			contentBuilder.WriteString(content.Text)
 		case "tool_use":
-			// Extract tool ID, name, and input
 			toolID := content.ID
 			toolName := content.Name
 			inputMap := make(map[string]interface{})
 
-			// Extract thought_signature from Signature field (Gemini via Bifrost)
 			var thoughtSignature string
 			if content.JSON.Signature.Valid() {
 				sigRaw := content.JSON.Signature.Raw()
@@ -564,7 +503,6 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 				}
 			}
 
-			// Convert Input JSON to map
 			if len(content.Input) > 0 {
 				if err := json.Unmarshal(content.Input, &inputMap); err == nil {
 					inputJSON := string(content.Input)
@@ -584,12 +522,7 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 				}
 			}
 		case "thinking", "redacted_thinking":
-			// Extract thinking blocks with signatures (preserve signature exactly)
-			// Note: Gemini sends "redacted_thinking" with encrypted content in the "data" field
-			// that cannot be decrypted client-side. We show a placeholder instead.
 			thinkingContent := content.Thinking
-
-			// If thinking is empty but this is a redacted_thinking block, use a placeholder
 			if thinkingContent == "" && content.Type == "redacted_thinking" {
 				thinkingContent = "[Thinking content is encrypted and cannot be displayed - Gemini extended thinking mode]"
 			}
@@ -606,25 +539,19 @@ func (a *AnthropicAdapter) convertResponse(response *anthropic.Message) (*entity
 		content = string(response.StopReason)
 	}
 
-	// If we still have no content but have thinking blocks, use a placeholder
-	// This allows messages with only thinking content to pass validation
 	if content == "" && len(thinkingBlocks) > 0 {
 		content = "[AI internal reasoning completed]"
 	}
 
-	// Final safety net - if we still have no content, use a generic placeholder
 	if content == "" {
 		content = "[No content received from AI]"
 	}
 
-	// Create the message with thinking blocks (if any)
-	// This properly handles the case where content is empty but thinking blocks are present
 	msg, err := entity.NewMessageWithThinkingBlocks(entity.RoleAssistant, content, thinkingBlocks)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create message: %w", err)
 	}
 
-	// Store tool calls in the message entity so they persist in conversation history
 	if len(entityToolCalls) > 0 {
 		msg.ToolCalls = entityToolCalls
 	}

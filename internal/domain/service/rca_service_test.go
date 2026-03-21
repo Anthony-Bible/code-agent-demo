@@ -18,7 +18,7 @@ type MockAIProvider struct {
 	mock.Mock
 }
 
-func (m *MockAIProvider) SendMessage(ctx context.Context, messages []port.MessageParam, tools []port.ToolParam) (*entity.Message, []port.ToolCallInfo, error) {
+func (m *MockAIProvider) SendMessage(ctx context.Context, messages []port.MessageParam, tools []port.ToolParam, _ port.AIRequestOptions) (*entity.Message, []port.ToolCallInfo, error) {
 	args := m.Called(ctx, messages, tools)
 	if args.Get(0) == nil {
 		return nil, nil, args.Error(2)
@@ -26,7 +26,7 @@ func (m *MockAIProvider) SendMessage(ctx context.Context, messages []port.Messag
 	return args.Get(0).(*entity.Message), args.Get(1).([]port.ToolCallInfo), args.Error(2)
 }
 
-func (m *MockAIProvider) SendMessageStreaming(ctx context.Context, messages []port.MessageParam, tools []port.ToolParam, textCallback port.StreamCallback, thinkingCallback port.ThinkingCallback) (*entity.Message, []port.ToolCallInfo, error) {
+func (m *MockAIProvider) SendMessageStreaming(ctx context.Context, messages []port.MessageParam, tools []port.ToolParam, _ port.AIRequestOptions, textCallback port.StreamCallback, thinkingCallback port.ThinkingCallback) (*entity.Message, []port.ToolCallInfo, error) {
 	args := m.Called(ctx, messages, tools, textCallback, thinkingCallback)
 	return args.Get(0).(*entity.Message), args.Get(1).([]port.ToolCallInfo), args.Error(2)
 }

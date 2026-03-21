@@ -82,7 +82,7 @@ func (s *RCAService) Correlate(ctx context.Context, findings []entity.Investigat
 		},
 	}
 
-	resp, _, err := s.aiProvider.SendMessage(ctx, messages, nil)
+	resp, _, err := s.aiProvider.SendMessage(ctx, messages, nil, port.AIRequestOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get RCA correlation from AI: %w", err)
 	}
