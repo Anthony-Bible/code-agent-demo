@@ -4,18 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A Go-based AI coding agent using hexagonal (clean) architecture. Provides an interactive CLI chat with file manipulation tools, a webhook server for automated alert investigation with root cause analysis, and interfaces with the Anthropic API.
+A Go-based AI coding agent using hexagonal (clean) architecture. Provides a webhook server for automated alert investigation with root cause analysis, subagent orchestration, and interfaces with the Anthropic API.
 
 ## Development Commands
 
 ```bash
 # Build and run
 go build -o code-agent-demo ./cmd/cli
-./code-agent-demo chat                           # Interactive chat
 ./code-agent-demo serve                          # Webhook server for alerts
 
 # Run directly
-go run ./cmd/cli/main.go chat
 go run ./cmd/cli/main.go serve
 
 # Testing
@@ -43,11 +41,10 @@ Presentation (cmd/cli/) → Application (internal/application/) → Domain (inte
 - `safety/` - Command validation: whitelist/blacklist patterns, dangerous command detection
 
 **Application Layer** (`internal/application/`)
-- `service/ChatService` - High-level chat orchestration
 - `service/InvestigationStore` - File-based investigation persistence
 - `service/SafetyEnforcer` - Command safety validation
 - `service/SkillService` - Skill discovery and management
-- `usecase/` - `MessageProcessUseCase`, `ToolExecutionUseCase`, `AlertHandler`, `AlertInvestigation`, `InvestigationRunner`, `EscalationHandler`, `SubagentRunner`, `SubagentUseCase`
+- `usecase/` - `ToolExecutionUseCase`, `AlertHandler`, `AlertInvestigation`, `InvestigationRunner`, `EscalationHandler`, `SubagentRunner`, `SubagentUseCase`
 - `dto/` - Data transfer objects between layers
 - `config/` - Application-level config (e.g., `InvestigationConfig`)
 
@@ -61,11 +58,9 @@ Presentation (cmd/cli/) → Application (internal/application/) → Domain (inte
 - `adapter/investigation/` - File-based investigation storage
 - `adapter/subagent/` - `LocalSubagentManager` for file-based agent discovery
 - `config/container.go` - Dependency injection wiring
-- `signal/` - Double Ctrl+C exit handling
+- `signal/` - Signal handling (Ctrl+C exit, SIGHUP reload)
 
 ### Key Data Flows
-
-**Chat Flow**: User Input → `ChatService.SendMessage()` → `ConversationService.ProcessAssistantResponse()` → `AIProvider.SendMessage()` → Tool execution if needed → Response
 
 **Tool Execution**: AI requests tool → `ToolExecutionUseCase.ExecuteToolsInSession()` → `PlanningExecutorAdapter` (if plan mode) → `ExecutorAdapter.ExecuteTool()` → Results fed back to AI
 

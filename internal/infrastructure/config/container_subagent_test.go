@@ -523,7 +523,6 @@ func TestContainer_SubagentComponents_CoexistWithOtherServices(t *testing.T) {
 	}
 
 	// Act: Access all major services
-	chatService := container.ChatService()
 	convService := container.ConversationService()
 	skillManager := container.SkillManager()
 	alertSourceManager := container.AlertSourceManager()
@@ -532,9 +531,6 @@ func TestContainer_SubagentComponents_CoexistWithOtherServices(t *testing.T) {
 	subagentUseCase := container.SubagentUseCase()
 
 	// Assert: All should coexist without conflict
-	if chatService == nil {
-		t.Error("ChatService() should not return nil")
-	}
 	if convService == nil {
 		t.Error("ConversationService() should not return nil")
 	}

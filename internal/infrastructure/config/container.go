@@ -67,7 +67,6 @@ func (a *investigationStoreAdapter) Update(ctx context.Context, inv usecase.Inve
 // - Providing accessors for all dependencies.
 type Container struct {
 	config               *Config
-	chatService          *appsvc.ChatService
 	convService          *service.ConversationService
 	fileManager          port.FileManager
 	uiAdapter            port.UserInterface
@@ -119,8 +118,12 @@ func NewContainer(cfg *Config) (*Container, error) {
 	baseExecutor.SetSkillManager(skillManager)
 	baseExecutor.SetSubagentManager(subagentManager)
 
-	// Configure command validation mode (whitelist vs blacklist)
-	if err := configureCommandValidation(baseExecutor, cfg); err != nil {
+	// Build validation config once; both the executor and investigation validator consume it
+	validationMode, validationWhitelist, err := buildValidationConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build validation config: %w", err)
+	}
+	if err := baseExecutor.SetValidationMode(validationMode, validationWhitelist, cfg.Safety.AskLLMOnUnknown); err != nil {
 		return nil, fmt.Errorf("failed to configure command validation: %w", err)
 	}
 
@@ -175,35 +178,22 @@ func NewContainer(cfg *Config) (*Container, error) {
 	wireSkillActivationCallback(baseExecutor, convService)
 	wireSkillDeactivationCallback(baseExecutor, convService)
 
-	// Step 3: Create application service (ChatService)
-	// NewChatServiceFromDomain directly accepts concrete adapter types
-	chatService, err := appsvc.NewChatServiceFromDomain(
-		convService,
-		uiAdapter,
-		aiAdapter,
-		toolExecutor,
-		fileManager,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	// Step 4: Create investigation and alert handling components
+	// Step 3: Create investigation and alert handling components
 	investigationUseCase, alertSourceManager, webhookAdapter, err := createInvestigationComponents(
 		cfg, convService, toolExecutor, skillManager, uiAdapter, aiAdapter,
+		validationMode, validationWhitelist,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	// Step 5: Create subagent components (pass the already-created subagentManager)
+	// Step 4: Create subagent components (pass the already-created subagentManager)
 	subagentUseCase := createSubagentComponents(
 		cfg, convService, toolExecutor, aiAdapter, baseExecutor, uiAdapter, subagentManager,
 	)
 
 	return &Container{
 		config:               cfg,
-		chatService:          chatService,
 		convService:          convService,
 		fileManager:          fileManager,
 		uiAdapter:            uiAdapter,
@@ -227,6 +217,8 @@ func createInvestigationComponents(
 	skillManager port.SkillManager,
 	uiAdapter port.UserInterface,
 	aiAdapter port.AIProvider,
+	validationMode safety.CommandValidationMode,
+	validationWhitelist *safety.CommandWhitelist,
 ) (*usecase.AlertInvestigationUseCase, port.AlertSourceManager, *webhook.HTTPAdapter, error) {
 	// Create safety config (single source of truth for safety settings)
 	safetyConfig := appconfig.DefaultInvestigationConfig()
@@ -238,8 +230,8 @@ func createInvestigationComponents(
 		"report_investigation", "task", "delegate",
 	})
 
-	// Create command validator for whitelist/blacklist validation
-	commandValidator, err := createCommandValidator(cfg)
+	// Create command validator using the pre-built validation config
+	commandValidator, err := safety.NewCommandValidator(validationMode, validationWhitelist, cfg.Safety.AskLLMOnUnknown)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to create command validator: %w", err)
 	}
@@ -353,12 +345,6 @@ func createSubagentComponents(
 	baseExecutor.SetSubagentUseCase(subagentUseCase)
 
 	return subagentUseCase
-}
-
-// ChatService returns the application chat service.
-// This is the main entry point for chat operations.
-func (c *Container) ChatService() *appsvc.ChatService {
-	return c.chatService
 }
 
 // Config returns the application configuration.
@@ -494,27 +480,6 @@ func parseCustomPatterns(json string) ([]safety.WhitelistPattern, error) {
 		return nil, nil
 	}
 	return safety.ParseWhitelistPatternsJSON(json)
-}
-
-// createCommandValidator creates a CommandValidator based on the configuration.
-// This validator is shared between chat mode (via ExecutorAdapter) and investigation mode
-// (via SafetyEnforcer).
-func createCommandValidator(cfg *Config) (safety.CommandValidator, error) {
-	mode, whitelist, err := buildValidationConfig(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return safety.NewCommandValidator(mode, whitelist, cfg.Safety.AskLLMOnUnknown)
-}
-
-// configureCommandValidation sets up the command validation mode (whitelist or blacklist)
-// on the executor adapter based on the configuration.
-func configureCommandValidation(executor *tool.ExecutorAdapter, cfg *Config) error {
-	mode, whitelist, err := buildValidationConfig(cfg)
-	if err != nil {
-		return err
-	}
-	return executor.SetValidationMode(mode, whitelist, cfg.Safety.AskLLMOnUnknown)
 }
 
 // wireSkillActivationCallback sets up the callback for skill activation.

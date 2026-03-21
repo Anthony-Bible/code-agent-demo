@@ -27,8 +27,8 @@ var (
 // It orchestrates the tool execution flow through the domain ToolExecutor port,
 // handling validation, execution, and result collection.
 //
-// This use case works in conjunction with MessageProcessUseCase to provide
-// a complete chat experience with tool capabilities.
+// This use case works in conjunction with ConversationService to provide
+// tool capabilities for investigations and subagent workflows.
 type ToolExecutionUseCase struct {
 	toolExecutor port.ToolExecutor
 }
