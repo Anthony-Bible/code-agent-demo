@@ -17,12 +17,6 @@ const (
 	// SourceTypeWebhook indicates a source that receives alerts via HTTP webhooks.
 	// Examples: Prometheus Alertmanager, Grafana webhooks.
 	SourceTypeWebhook SourceType = "webhook"
-	// SourceTypePoll indicates a source that polls an external system for alerts.
-	// Examples: Polling a REST API, checking a database.
-	SourceTypePoll SourceType = "poll"
-	// SourceTypeStream indicates a source that receives alerts via a persistent stream.
-	// Examples: Kafka consumer, WebSocket connection.
-	SourceTypeStream SourceType = "stream"
 )
 
 // AlertSource is the base interface that all alert sources must implement.

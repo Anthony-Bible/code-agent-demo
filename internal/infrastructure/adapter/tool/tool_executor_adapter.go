@@ -40,10 +40,6 @@ type SubagentUseCaseInterface interface {
 	) (*usecase.SubagentResult, error)
 }
 
-// DangerousCommandCallback is called when a dangerous command is detected.
-// It receives the command and reason, and returns true if execution should proceed.
-type DangerousCommandCallback func(command, reason string) bool
-
 // CommandConfirmationCallback is called before executing any bash command.
 // It receives the command, whether it's dangerous, the reason if dangerous, and a description.
 // Returns true if execution should proceed, false to block.
@@ -65,7 +61,6 @@ type ExecutorAdapter struct {
 	subagentUseCase             SubagentUseCaseInterface
 	tools                       map[string]entity.Tool
 	mu                          sync.RWMutex
-	dangerousCommandCallback    DangerousCommandCallback
 	commandConfirmationCallback CommandConfirmationCallback
 	skillActivationCallback     SkillActivationCallback
 	skillDeactivationCallback   SkillDeactivationCallback
@@ -193,13 +188,6 @@ func (a *ExecutorAdapter) SetSubagentUseCase(uc SubagentUseCaseInterface) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.subagentUseCase = uc
-}
-
-// SetDangerousCommandCallback sets the callback for dangerous command confirmation.
-func (a *ExecutorAdapter) SetDangerousCommandCallback(cb DangerousCommandCallback) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.dangerousCommandCallback = cb
 }
 
 // SetCommandConfirmationCallback sets the callback for all command confirmation.

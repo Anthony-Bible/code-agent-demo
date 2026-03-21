@@ -76,7 +76,7 @@ func TestLocalAlertSourceManager_RegisterSource(t *testing.T) {
 			setup: func(m port.AlertSourceManager) {
 				m.RegisterSource(porttest.NewMockAlertSource("test-source", port.SourceTypeWebhook))
 			},
-			source:    porttest.NewMockAlertSource("test-source", port.SourceTypePoll),
+			source:    porttest.NewMockAlertSource("test-source", port.SourceTypeWebhook),
 			wantErr:   true,
 			wantCount: 1,
 		},
@@ -84,9 +84,9 @@ func TestLocalAlertSourceManager_RegisterSource(t *testing.T) {
 			name: "should register multiple unique sources",
 			setup: func(m port.AlertSourceManager) {
 				m.RegisterSource(porttest.NewMockAlertSource("source-1", port.SourceTypeWebhook))
-				m.RegisterSource(porttest.NewMockAlertSource("source-2", port.SourceTypePoll))
+				m.RegisterSource(porttest.NewMockAlertSource("source-2", port.SourceTypeWebhook))
 			},
-			source:    porttest.NewMockAlertSource("source-3", port.SourceTypeStream),
+			source:    porttest.NewMockAlertSource("source-3", port.SourceTypeWebhook),
 			wantErr:   false,
 			wantCount: 3,
 		},
@@ -209,13 +209,13 @@ func TestLocalAlertSourceManager_GetSource(t *testing.T) {
 			name: "should return correct source among multiple",
 			setup: func(m port.AlertSourceManager) {
 				m.RegisterSource(porttest.NewMockAlertSource("source-1", port.SourceTypeWebhook))
-				m.RegisterSource(porttest.NewMockAlertSource("source-2", port.SourceTypePoll))
-				m.RegisterSource(porttest.NewMockAlertSource("source-3", port.SourceTypeStream))
+				m.RegisterSource(porttest.NewMockAlertSource("source-2", port.SourceTypeWebhook))
+				m.RegisterSource(porttest.NewMockAlertSource("source-3", port.SourceTypeWebhook))
 			},
 			sourceName: "source-2",
 			wantErr:    false,
 			wantName:   "source-2",
-			wantType:   port.SourceTypePoll,
+			wantType:   port.SourceTypeWebhook,
 		},
 	}
 
@@ -269,7 +269,7 @@ func TestLocalAlertSourceManager_ListSources(t *testing.T) {
 			name: "should reflect unregistered sources",
 			setup: func(m port.AlertSourceManager) {
 				m.RegisterSource(porttest.NewMockAlertSource("source-1", port.SourceTypeWebhook))
-				m.RegisterSource(porttest.NewMockAlertSource("source-2", port.SourceTypePoll))
+				m.RegisterSource(porttest.NewMockAlertSource("source-2", port.SourceTypeWebhook))
 				m.UnregisterSource("source-1")
 			},
 			wantCount: 1,
@@ -330,7 +330,7 @@ func TestLocalAlertSourceManager_GetWebhookSourceByPath(t *testing.T) {
 		{
 			name: "should only return webhook sources",
 			setup: func(m port.AlertSourceManager) {
-				m.RegisterSource(porttest.NewMockAlertSource("poll-source", port.SourceTypePoll))
+				m.RegisterSource(porttest.NewMockAlertSource("poll-source", port.SourceTypeWebhook))
 			},
 			path:    "/any-path",
 			wantNil: true,
@@ -479,8 +479,8 @@ func TestLocalAlertSourceManager_StartAndShutdown(t *testing.T) {
 			manager := NewLocalAlertSourceManager()
 			sources := []*porttest.MockAlertSource{
 				porttest.NewMockAlertSource("source-1", port.SourceTypeWebhook),
-				porttest.NewMockAlertSource("source-2", port.SourceTypePoll),
-				porttest.NewMockAlertSource("source-3", port.SourceTypeStream),
+				porttest.NewMockAlertSource("source-2", port.SourceTypeWebhook),
+				porttest.NewMockAlertSource("source-3", port.SourceTypeWebhook),
 			}
 
 			if tt.setup != nil {
@@ -665,35 +665,6 @@ func TestLocalAlertSourceManager_Concurrency(t *testing.T) {
 		}
 
 		wg.Wait()
-	})
-}
-
-func TestLocalAlertSourceManager_ErrorCallback(t *testing.T) {
-	t.Run("should set error callback", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
-
-		var callbackInvoked bool
-		var receivedSource string
-		var receivedErr error
-
-		manager.SetErrorCallback(func(source string, err error) {
-			callbackInvoked = true
-			receivedSource = source
-			receivedErr = err
-		})
-
-		// Error callback is typically invoked when sources report errors
-		// This documents the expected interface
-		_ = callbackInvoked
-		_ = receivedSource
-		_ = receivedErr
-	})
-
-	t.Run("should handle nil error callback gracefully", func(t *testing.T) {
-		manager := NewLocalAlertSourceManager()
-
-		// Should not panic
-		manager.SetErrorCallback(nil)
 	})
 }
 

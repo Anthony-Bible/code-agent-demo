@@ -143,7 +143,7 @@ func TestBashTool_DangerousCommandDenied(t *testing.T) {
 	adapter := NewExecutorAdapter(fileManager)
 
 	// Set callback that returns false
-	adapter.SetDangerousCommandCallback(func(_, _ string) bool {
+	adapter.SetCommandConfirmationCallback(func(_ string, _ bool, _, _ string) bool {
 		return false
 	})
 
@@ -163,7 +163,7 @@ func TestBashTool_DangerousCommandAllowed(t *testing.T) {
 	adapter := NewExecutorAdapter(fileManager)
 
 	// Set callback that returns true (user confirmed)
-	adapter.SetDangerousCommandCallback(func(_, _ string) bool {
+	adapter.SetCommandConfirmationCallback(func(_ string, _ bool, _, _ string) bool {
 		return true
 	})
 
@@ -462,66 +462,6 @@ func TestBashTool_AllCommandsConfirmation_NoCallbackNonDangerousProceeds(t *test
 	}
 	if output.ExitCode != 0 {
 		t.Errorf("Expected exit code 0, got %d", output.ExitCode)
-	}
-}
-
-func TestBashTool_BackwardCompat_DangerousCallbackStillWorks(t *testing.T) {
-	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
-
-	var dangerousInvocations []struct {
-		command string
-		reason  string
-	}
-
-	// Use the OLD SetDangerousCommandCallback API - should still work
-	adapter.SetDangerousCommandCallback(func(command, reason string) bool {
-		dangerousInvocations = append(dangerousInvocations, struct {
-			command string
-			reason  string
-		}{command, reason})
-		return true // Allow dangerous commands
-	})
-
-	// First, execute a non-dangerous command - old callback should NOT be triggered
-	nonDangerousInput := `{"command": "echo safe", "dangerous": false}`
-	_, err := adapter.ExecuteTool(context.Background(), "bash", nonDangerousInput)
-	if err != nil {
-		t.Fatalf("Non-dangerous command failed: %v", err)
-	}
-
-	// Verify old callback was NOT called for non-dangerous command
-	if len(dangerousInvocations) != 0 {
-		t.Errorf(
-			"Old DangerousCommandCallback should not be called for non-dangerous command, got %d invocations",
-			len(dangerousInvocations),
-		)
-	}
-
-	// Now execute a dangerous command - old callback SHOULD be triggered
-	dangerousInput := `{"command": "sudo echo test", "dangerous": true}`
-	_, err = adapter.ExecuteTool(context.Background(), "bash", dangerousInput)
-	// Command may fail due to sudo, but should not be blocked
-	if err != nil {
-		if strings.Contains(err.Error(), "dangerous") && strings.Contains(err.Error(), "blocked") {
-			t.Errorf("Dangerous command should not be blocked when old callback returns true, got: %v", err)
-		}
-	}
-
-	// Verify old callback WAS called for dangerous command with 2-argument signature
-	if len(dangerousInvocations) != 1 {
-		t.Fatalf(
-			"Expected old DangerousCommandCallback to be called 1 time for dangerous command, got %d",
-			len(dangerousInvocations),
-		)
-	}
-
-	inv := dangerousInvocations[0]
-	if inv.command != "sudo echo test" {
-		t.Errorf("Expected command 'sudo echo test', got %q", inv.command)
-	}
-	if !strings.Contains(inv.reason, "sudo") {
-		t.Errorf("Expected reason to contain 'sudo', got %q", inv.reason)
 	}
 }
 

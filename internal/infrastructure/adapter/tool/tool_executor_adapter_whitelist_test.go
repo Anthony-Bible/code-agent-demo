@@ -327,15 +327,14 @@ func TestCallbackSetters_ConcurrentAccess(t *testing.T) {
 	const numIterations = 20
 	const numPerGroup = 4
 
-	done := make(chan struct{}, numPerGroup*3)
+	done := make(chan struct{}, numPerGroup*2)
 
 	// Launch goroutines that toggle callbacks and execute commands
 	launchConfirmCallbackTogglers(adapter, numPerGroup, numIterations, done)
-	launchDangerousCallbackTogglers(adapter, numPerGroup, numIterations, done)
 	launchCommandExecutors(adapter, numPerGroup, numIterations, done)
 
 	// Wait for all goroutines
-	for range numPerGroup * 3 {
+	for range numPerGroup * 2 {
 		<-done
 	}
 }
@@ -349,21 +348,6 @@ func launchConfirmCallbackTogglers(adapter *ExecutorAdapter, count, iterations i
 					adapter.SetCommandConfirmationCallback(func(_ string, _ bool, _, _ string) bool { return true })
 				} else {
 					adapter.SetCommandConfirmationCallback(nil)
-				}
-			}
-		}()
-	}
-}
-
-func launchDangerousCallbackTogglers(adapter *ExecutorAdapter, count, iterations int, done chan struct{}) {
-	for range count {
-		go func() {
-			defer func() { done <- struct{}{} }()
-			for j := range iterations {
-				if j%2 == 0 {
-					adapter.SetDangerousCommandCallback(func(_, _ string) bool { return true })
-				} else {
-					adapter.SetDangerousCommandCallback(nil)
 				}
 			}
 		}()
