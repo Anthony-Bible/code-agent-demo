@@ -2127,6 +2127,9 @@ func TestReportInvestigationTool_ValidInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Register the investigation so the existence check passes
+			h.adapter.RegisterInvestigation(tt.input["investigation_id"].(string))
+
 			inputJSON, err := json.Marshal(tt.input)
 			if err != nil {
 				t.Fatalf("Failed to marshal input: %v", err)

@@ -357,7 +357,7 @@ func (fm *LocalFileManager) ListFiles(path string, recursive bool, includeGit bo
 func (fm *LocalFileManager) listFilesRecursive(path string, includeGit bool) ([]string, error) {
 	var files []string
 
-	err := filepath.Walk(path, func(walkPath string, _ fs.FileInfo, walkErr error) error {
+	err := filepath.WalkDir(path, func(walkPath string, _ fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

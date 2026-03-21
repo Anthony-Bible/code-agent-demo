@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/pprof"
@@ -65,21 +64,18 @@ func InterruptHandlerFromContext(ctx context.Context) *signalhandler.InterruptHa
 	return nil
 }
 
-// executeChat is the function that runs the chat loop
-// This is set by chat.go during initialization.
-var executeChat func(cmd *cobra.Command, args []string) error
-
 // rootCmd represents the base command when called without any subcommands.
 var rootCmd = &cobra.Command{
 	Use:   "code-agent-demo",
-	Short: "AI-powered code editing assistant",
+	Short: "AI-powered alert investigation agent",
 	Long: `Code Editing Agent is an AI-powered assistant that helps you
-write, edit, and understand code through an interactive chat interface.
+investigate alerts and run automated AI workflows.
 
-It uses the Claude AI to provide intelligent code suggestions,
-refactoring options, and explanations.`,
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		_ = args // args unused but required by cobra
+It uses AI to provide intelligent code analysis,
+alert investigation, and root cause analysis.
+
+Use "code-agent-demo serve" to start the webhook server.`,
+	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 		// Load configuration
 		cfg = config.LoadConfig()
 
@@ -87,13 +83,6 @@ refactoring options, and explanations.`,
 		cmd.SetContext(contextWithConfig(cmd.Context(), cfg))
 
 		return nil
-	},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// Execute the chat command by default
-		if executeChat != nil {
-			return executeChat(cmd, args)
-		}
-		return errors.New("chat functionality not initialized")
 	},
 }
 

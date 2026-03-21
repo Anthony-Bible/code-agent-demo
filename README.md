@@ -80,13 +80,10 @@ This project follows hexagonal architecture (also known as ports and adapters), 
 ```mermaid
 flowchart TB
     subgraph CLI["Presentation Layer"]
-        CHAT_CMD["chat command<br/>cmd/cli"]
         SERVE_CMD["serve command<br/>cmd/cli"]
     end
 
     subgraph APP["Application Layer"]
-        SVC["ChatService"]
-        UC1["MessageProcess"]
         UC2["ToolExecution"]
         UC3["AlertHandler"]
         UC4["InvestigationRunner"]
@@ -126,13 +123,6 @@ flowchart TB
         E4["Alert Sources<br/>(Prometheus, GCP)"]
     end
 
-    %% Chat path
-    CHAT_CMD --> SVC
-    SVC --> UC1
-    SVC --> UC2
-    UC1 --> SRV
-    SRV --> ENT
-
     %% Serve/webhook path
     SERVE_CMD --> A8
     A8 --> UC3
@@ -145,8 +135,6 @@ flowchart TB
     %% Port usage
     SRV --> P1
     SRV --> P2
-    SVC --> P3
-    SVC --> P4
     UC4 --> P2
     UC4 --> P5
     UC5 --> P1
@@ -957,7 +945,6 @@ The domain layer is the heart of the application and contains no external depend
 This layer orchestrates use cases using domain services:
 
 - **Use Cases** (`internal/application/usecase/`)
-  - `MessageProcessUseCase` - Handles message processing flow
   - `ToolExecutionUseCase` - Handles tool execution and safety
   - `AlertHandler` - Receives and processes incoming alerts
   - `AlertInvestigation` - Runs investigation workflows
@@ -966,7 +953,6 @@ This layer orchestrates use cases using domain services:
   - `SubagentRunner` - Manages subagent spawning and communication
 
 - **Services** (`internal/application/service/`)
-  - `ChatService` - High-level orchestration service
   - `InvestigationStore` - Persistence for investigations
   - `SkillService` - Skill discovery and management
   - `SafetyEnforcer` - Command safety validation

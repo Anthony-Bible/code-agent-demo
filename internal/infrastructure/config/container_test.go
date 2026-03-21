@@ -122,28 +122,24 @@ func TestContainer_HistoryFilePath(t *testing.T) {
 	})
 }
 
-// TestContainer_HistoryIntegrationWithChatService verifies that the ChatService
-// receives a properly configured UI adapter with history support.
-func TestContainer_HistoryIntegrationWithChatService(t *testing.T) {
-	t.Run("ChatService uses UI adapter with history", func(t *testing.T) {
+// TestContainer_HistoryIntegrationWithUIAdapter verifies that the UI adapter
+// is properly configured with history support.
+func TestContainer_HistoryIntegrationWithUIAdapter(t *testing.T) {
+	t.Run("UIAdapter has history configured", func(t *testing.T) {
 		cfg := Defaults()
-		cfg.History.File = "/tmp/chatservice-history-test"
+		cfg.History.File = "/tmp/uiadapter-history-test"
 		cfg.History.MaxEntries = 200
 
 		container, err := NewContainer(cfg)
 		require.NoError(t, err, "NewContainer should not return an error")
-
-		// The ChatService should be wired with the same UI adapter
-		chatService := container.ChatService()
-		require.NotNil(t, chatService, "ChatService should not be nil")
 
 		// Get the UI adapter from container and verify it's configured
 		cliAdapter, ok := container.UIAdapter().(*ui.CLIAdapter)
 		require.True(t, ok, "UIAdapter should be a *ui.CLIAdapter")
 
 		// Verify history file is configured
-		assert.Equal(t, "/tmp/chatservice-history-test", cliAdapter.GetHistoryFile(),
-			"UIAdapter used by ChatService should have history file configured")
+		assert.Equal(t, "/tmp/uiadapter-history-test", cliAdapter.GetHistoryFile(),
+			"UIAdapter should have history file configured")
 	})
 }
 

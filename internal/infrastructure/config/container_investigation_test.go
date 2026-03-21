@@ -227,7 +227,7 @@ func TestContainer_InvestigationComponents_Integration(t *testing.T) {
 	}
 }
 
-func TestContainer_InvestigationComponents_IndependentOfChatService(t *testing.T) {
+func TestContainer_InvestigationComponents_IndependentOfOtherServices(t *testing.T) {
 	// Arrange
 	cfg := createTestConfig(t)
 	container, err := NewContainer(cfg)
@@ -238,9 +238,7 @@ func TestContainer_InvestigationComponents_IndependentOfChatService(t *testing.T
 	// Act: access investigation components
 	manager := container.AlertSourceManager()
 	useCase := container.InvestigationUseCase()
-
-	// Also access chat service to ensure they coexist
-	chatService := container.ChatService()
+	convService := container.ConversationService()
 
 	// Assert: all should be non-nil and independent
 	if manager == nil {
@@ -249,8 +247,8 @@ func TestContainer_InvestigationComponents_IndependentOfChatService(t *testing.T
 	if useCase == nil {
 		t.Error("InvestigationUseCase() should not return nil")
 	}
-	if chatService == nil {
-		t.Error("ChatService() should not return nil")
+	if convService == nil {
+		t.Error("ConversationService() should not return nil")
 	}
 }
 
