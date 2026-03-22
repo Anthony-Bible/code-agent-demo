@@ -127,6 +127,11 @@ type AIProvider interface {
 
 	// GetModel returns the currently configured AI model.
 	GetModel() string
+
+	// Clone returns a copy of this AIProvider with independent mutable state
+	// (e.g., model selection). The clone may share immutable resources like
+	// HTTP clients. Each concurrent subagent execution should use its own clone.
+	Clone() AIProvider
 }
 
 // ConvertEntityThinkingBlockToParam converts an entity.ThinkingBlock to ThinkingBlockParam.

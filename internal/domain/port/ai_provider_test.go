@@ -53,6 +53,10 @@ func (m *mockAIProvider) GetModel() string {
 	return ""
 }
 
+func (m *mockAIProvider) Clone() AIProvider {
+	return m
+}
+
 // TestAIProviderSendMessage_Exists validates SendMessage method exists.
 func TestAIProviderSendMessage_Exists(_ *testing.T) {
 	var provider AIProvider = (*mockAIProvider)(nil)

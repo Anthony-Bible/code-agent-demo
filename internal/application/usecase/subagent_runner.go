@@ -102,13 +102,20 @@ func (r *SubagentResult) GetError() error {
 	return r.Error
 }
 
+// ConversationServiceFactory creates a ConversationService with the given AIProvider.
+// Used by SubagentRunner to create isolated conversation services per concurrent execution.
+type ConversationServiceFactory func(aiProvider port.AIProvider) (ConversationServiceInterface, error)
+
 // SubagentRunner orchestrates isolated subagent execution for task delegation.
+// Run is not safe for concurrent use on the same instance when subagents use different
+// models; create one SubagentRunner per concurrent execution via the convFactory.
 type SubagentRunner struct {
 	BaseRunner
 
 	aiProvider    port.AIProvider
 	userInterface port.UserInterface
 	config        SubagentConfig
+	convFactory   ConversationServiceFactory
 }
 
 // subagentRunContext holds state for a subagent execution run.
@@ -130,6 +137,7 @@ func NewSubagentRunner(
 	aiProvider port.AIProvider,
 	userInterface port.UserInterface,
 	config SubagentConfig,
+	convFactory ConversationServiceFactory,
 ) *SubagentRunner {
 	if convService == nil {
 		panic("convService cannot be nil")
@@ -140,6 +148,9 @@ func NewSubagentRunner(
 	if aiProvider == nil {
 		panic("aiProvider cannot be nil")
 	}
+	if convFactory == nil {
+		panic("convFactory cannot be nil")
+	}
 	// userInterface is optional (can be nil for tests)
 
 	return &SubagentRunner{
@@ -147,31 +158,25 @@ func NewSubagentRunner(
 		aiProvider:    aiProvider,
 		userInterface: userInterface,
 		config:        config,
+		convFactory:   convFactory,
 	}
 }
 
 // Run executes a subagent task with the given agent configuration.
+// Each call clones the AIProvider and creates an isolated ConversationService,
+// making Run safe for concurrent use across multiple goroutines.
 //
 // The subagent execution follows this flow:
 //  1. Validate inputs (agent, taskPrompt, subagentID)
-//  2. Start a new isolated conversation session
-//  3. Set agent's custom system prompt
-//  4. Send the task prompt as user message
-//  5. Process AI responses in a loop:
+//  2. Clone AIProvider and create isolated ConversationService
+//  3. Start a new isolated conversation session
+//  4. Set agent's custom system prompt
+//  5. Send the task prompt as user message
+//  6. Process AI responses in a loop:
 //     - If AI requests tools: execute tools, feed results back
 //     - If AI completes: extract output and return result
 //     - If action limit exceeded: stop and return
-//  6. Clean up conversation session
-//
-// Parameters:
-//   - ctx: Context for cancellation and timeout
-//   - agent: The agent configuration to use
-//   - taskPrompt: The task to execute
-//   - subagentID: Unique identifier for this subagent execution
-//
-// Returns:
-//   - *SubagentResult: Result of the subagent execution
-//   - error: Any error that occurred during execution
+//  7. Clean up conversation session
 func (r *SubagentRunner) Run(
 	ctx context.Context,
 	agent *entity.Subagent,
@@ -182,24 +187,31 @@ func (r *SubagentRunner) Run(
 		return r.validationFailedResult(subagentID, agent, err), err
 	}
 
-	// Store original model before any switching
-	originalModel := r.aiProvider.GetModel()
+	// Clone AIProvider for concurrency safety — each subagent gets independent model state.
+	localProvider := r.aiProvider.Clone()
+	originalModel := localProvider.GetModel()
 
-	// Model switching: Resolve shorthand and set agent model if specified
+	// Model switching: Resolve shorthand and set agent model on the clone
 	resolvedModel := resolveModelShorthand(agent.Model)
 	if resolvedModel != "" {
-		if err := r.aiProvider.SetModel(resolvedModel); err != nil {
+		if err := localProvider.SetModel(resolvedModel); err != nil {
 			return r.validationFailedResult(subagentID, agent, err), err
 		}
-		defer func() {
-			if err := r.aiProvider.SetModel(originalModel); err != nil {
-				slog.Error("failed to restore model after subagent execution",
-					"original_model", originalModel,
-					"agent", agent.Name,
-					"error", err,
-				)
-			}
-		}()
+	}
+
+	// Create isolated ConversationService wired to the cloned provider
+	localConvService, err := r.convFactory(localProvider)
+	if err != nil {
+		return r.validationFailedResult(subagentID, agent, err), err
+	}
+
+	// Build a local runner so all BaseRunner methods use the isolated conv service
+	localRunner := &SubagentRunner{
+		BaseRunner:    newBaseRunner(localConvService, r.ToolExecutor, r.PermissionChecker),
+		aiProvider:    localProvider,
+		userInterface: r.userInterface,
+		config:        r.config,
+		convFactory:   r.convFactory,
 	}
 
 	// Wrap context with subagent info for recursion prevention
@@ -219,22 +231,21 @@ func (r *SubagentRunner) Run(
 		agent:         agent,
 		taskPrompt:    taskPrompt,
 		subagentID:    subagentID,
-		runner:        r,
+		runner:        localRunner,
 		originalModel: originalModel,
 	}
 	if rc.MaxActions == 0 {
 		rc.MaxActions = 20
 	}
 
-	sessionID, err := r.ConvService.StartConversation(ctx)
+	sessionID, err := localConvService.StartConversation(ctx)
 	if err != nil {
 		return rc.failedResult(err), err
 	}
 	rc.SessionID = sessionID
-	defer r.CleanupConversation(sessionID, agent.Name, "agent")
+	defer localRunner.CleanupConversation(sessionID, agent.Name, "agent")
 
 	// Subagents use their own configuration or inherit from static config.
-	// Context-based inheritance is removed in favor of session-based management.
 	thinkingInfo := port.ThinkingModeInfo{
 		Enabled:      r.config.ThinkingEnabled,
 		BudgetTokens: r.config.ThinkingBudget,
@@ -250,7 +261,7 @@ func (r *SubagentRunner) Run(
 	}
 
 	if thinkingInfo.Enabled {
-		if err := r.ConvService.SetThinkingMode(sessionID, thinkingInfo); err != nil {
+		if err := localConvService.SetThinkingMode(sessionID, thinkingInfo); err != nil {
 			// Log warning but don't fail - thinking mode is optional
 			slog.Warn("failed to set thinking mode", //nolint:sloglint // no injected logger on this struct
 				"error", err,
@@ -262,14 +273,14 @@ func (r *SubagentRunner) Run(
 		}
 	}
 
-	if err := r.setupAgentSession(rc); err != nil {
+	if err := localRunner.setupAgentSession(rc); err != nil {
 		return rc.failedResult(err), err
 	}
 
 	// Display subagent starting
-	r.displayStatus(agent.Name, statusStarting, "")
+	localRunner.displayStatus(agent.Name, statusStarting, "")
 
-	return r.runExecutionLoop(rc)
+	return localRunner.runExecutionLoop(rc)
 }
 
 // validateInputs validates the input parameters for subagent execution.

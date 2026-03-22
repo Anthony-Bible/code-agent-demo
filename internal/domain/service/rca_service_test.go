@@ -47,6 +47,10 @@ func (m *MockAIProvider) GetModel() string {
 	return "test-model"
 }
 
+func (m *MockAIProvider) Clone() port.AIProvider {
+	return m
+}
+
 func TestRCAService_Correlate(t *testing.T) {
 	tests := []struct {
 		name         string

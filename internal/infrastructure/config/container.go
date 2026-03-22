@@ -305,7 +305,7 @@ func createInvestigationComponents(
 // Subagents are specialized AI agents that can be spawned to handle delegated tasks
 // in isolated conversation sessions.
 func createSubagentComponents(
-	_ *Config,
+	cfg *Config,
 	convService *service.ConversationService,
 	toolExecutor port.ToolExecutor,
 	aiAdapter port.AIProvider,
@@ -313,6 +313,12 @@ func createSubagentComponents(
 	uiAdapter port.UserInterface,
 	subagentManager port.SubagentManager,
 ) *usecase.SubagentUseCase {
+	// Factory creates an isolated ConversationService per concurrent subagent execution.
+	// Each subagent clone gets its own AIProvider, so model switching doesn't race.
+	convFactory := func(provider port.AIProvider) (usecase.ConversationServiceInterface, error) {
+		return service.NewConversationService(provider, toolExecutor, cfg.CompactionThreshold)
+	}
+
 	// Create SubagentRunner with dependencies and safety configuration
 	// SubagentRunner executes subagent tasks with resource limits to prevent runaway execution.
 	// Config values:
@@ -331,6 +337,7 @@ func createSubagentComponents(
 			MaxConcurrent: 5,
 			AllowedTools:  nil, // nil means allow all tools (can be overridden per agent)
 		},
+		convFactory,
 	)
 
 	// Create SubagentUseCase to orchestrate subagent spawning and execution
