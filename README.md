@@ -1,34 +1,32 @@
-# Code Editing Agent
+# AI Alert Investigation Agent
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-blue.svg)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Build Status](https://github.com/Anthony-Bible/code-agent-demo/actions/workflows/ci.yml/badge.svg)](https://github.com/Anthony-Bible/code-agent-demo/actions)
 
-A sophisticated AI-powered command-line coding assistant built with Go using hexagonal (clean) architecture principles. The agent provides an interactive chat interface for code exploration, editing, and analysis with integrated tool capabilities and advanced AI features.
+A Go-based AI-powered alert investigation agent built with hexagonal (clean) architecture. The agent receives alerts via webhooks from monitoring systems (Prometheus, GCP Monitoring), automatically investigates them using AI-driven root cause analysis, and provides structured findings with confidence levels and escalation support.
 
 ![Demo](demo.gif)
 
 ## 🌟 Key Features
 
-- **🤖 Interactive CLI Chat** - Terminal-based conversation with AI assistant
+- **🚨 Alert & Webhook Server** - HTTP server for receiving alerts from monitoring systems (Prometheus, GCP Monitoring)
+- **📊 Automatic Alert Investigation** - AI-driven investigation of alerts with findings, actions, and escalation
+- **🔍 Root Cause Analysis** - Structured RCA with confidence scoring and remediation steps
 - **🧠 Extended Thinking** - Claude's internal reasoning process with configurable token budgets
-- **📁 File System Tools** - Read, list, and edit files directly from chat
-- **🔄 Subagent System** - Spawn specialized AI assistants for delegated tasks (pre-defined or dynamic)
+- **📁 File System Tools** - Read, list, and edit files during investigations
+- **🔄 Subagent System** - Spawn specialized AI assistants for delegated tasks (pre-defined or dynamic, concurrency-safe)
 - **📋 Plan Mode** - Propose changes for review before applying them
 - **🔄 Auto-Compaction** - Automatic conversation summarization to manage context window limits
 - **🏗️ Hexagonal Architecture** - Clean separation of concerns with ports and adapters
 - **🔧 Modular Tool System** - Extensible architecture for adding custom tools with JSON schema validation
 - **🎯 Skill System** - Project-specific and global AI capabilities following agentskills.io
-- **🔍 Investigation System** - Structured problem analysis with confidence tracking and escalation
-- **🚨 Alert & Webhook Server** - HTTP server for receiving alerts from monitoring systems (Prometheus, GCP Monitoring)
-- **📊 Alert Investigation** - Automatic investigation of alerts with findings, actions, and escalation
 
 ## 📋 Table of Contents
 
 - [Quick Start](#quick-start)
 - [Installation](#installation)
 - [Usage](#usage)
-  - [Chat Mode](#chat-mode)
   - [Webhook Server Mode](#webhook-server-mode)
   - [Extended Thinking](#extended-thinking-mode-)
   - [Plan Mode](#plan-mode)
@@ -44,22 +42,6 @@ A sophisticated AI-powered command-line coding assistant built with Go using hex
 
 ## 🚀 Quick Start
 
-### Chat Mode
-
-```bash
-# Set your Anthropic API key
-export ANTHROPIC_API_KEY=your-api-key-here
-
-# Build and run the agent
-go build -o code-agent-demo ./cmd/cli
-./code-agent-demo chat
-
-# Or run directly with Go
-go run ./cmd/cli/main.go chat
-```
-
-### Webhook Server Mode
-
 ```bash
 # Set your Anthropic API key
 export ANTHROPIC_API_KEY=your-api-key-here
@@ -67,6 +49,9 @@ export ANTHROPIC_API_KEY=your-api-key-here
 # Build and run the webhook server
 go build -o code-agent-demo ./cmd/cli
 ./code-agent-demo serve --config config/alert-sources.yaml
+
+# Or run directly with Go
+go run ./cmd/cli/main.go serve
 
 # The server will start listening on http://localhost:8080 by default
 ```
@@ -88,6 +73,7 @@ flowchart TB
         UC3["AlertHandler"]
         UC4["InvestigationRunner"]
         UC5["SubagentRunner"]
+        UC6["BaseRunner"]
     end
 
     subgraph DOMAIN["Domain Layer"]
@@ -179,8 +165,8 @@ flowchart TB
 
 | Layer | Responsibility | Located In |
 |-------|---------------|------------|
-| **Presentation** | CLI commands, user input/output handling | `cmd/cli/` |
-| **Application** | Use cases, orchestration, DTOs (Chat, Tool, Alert, Investigation, Subagent) | `internal/application/` |
+| **Presentation** | CLI commands (serve), HTTP webhook handling | `cmd/cli/` |
+| **Application** | Use cases, orchestration (Tool, Alert, Investigation, Subagent) | `internal/application/` |
 | **Domain** | Business entities, services, port interfaces | `internal/domain/` |
 | **Infrastructure** | Port implementations, external integrations | `internal/infrastructure/` |
 
@@ -188,7 +174,7 @@ flowchart TB
 
 | Entity | Description |
 |--------|-------------|
-| `Conversation` | Manages chat state and message collection |
+| `Conversation` | Manages conversation state and message collection |
 | `Message` | Represents individual messages with role, content, and validation |
 | `Tool` | Represents executable tools with schema validation |
 | `Alert` | Represents alerts from monitoring systems with severity and labels |
@@ -205,14 +191,13 @@ github.com/anthony-bible/code-agent-demo/
 │       ├── main.go              # CLI entry point
 │       └── cmd/
 │           ├── root.go          # Root command setup
-│           ├── chat.go          # Chat command implementation
 │           └── serve.go         # Webhook server command
 ├── internal/
 │   ├── application/
 │   │   ├── config/              # Configuration types (investigation config, etc.)
 │   │   ├── dto/                 # Data transfer objects
-│   │   ├── service/             # Application services (Chat, Investigation, Skill, Safety)
-│   │   └── usecase/             # Use case implementations (Message, Tool, Alert, Investigation, Subagent)
+│   │   ├── service/             # Application services (Investigation, Safety)
+│   │   └── usecase/             # Use case implementations (Tool, Alert, Investigation, Subagent, BaseRunner)
 │   ├── domain/
 │   │   ├── entity/              # Domain entities (Conversation, Message, Tool, Alert, Investigation, Skill, Subagent)
 │   │   ├── port/                # Port interfaces (AI, File, Tool, UI, Skill, Subagent, Alert, Context)
@@ -277,51 +262,11 @@ go install github.com/anthony-bible/code-agent-demo/cmd/cli@latest
 # List available commands
 ./code-agent-demo --help
 
-# Test chat command
-./code-agent-demo chat --help
-
 # Test serve command
 ./code-agent-demo serve --help
 ```
 
 ## 🎯 Usage
-
-### Commands
-
-The agent supports two main modes of operation:
-
-#### Chat Mode
-
-```bash
-./code-agent-demo chat [flags]
-```
-
-Start an interactive CLI session for code exploration, editing, and analysis.
-
-#### Webhook Server Mode
-
-```bash
-./code-agent-demo serve [flags]
-```
-
-Start an HTTP server to receive webhook alerts from monitoring systems.
-
-### Chat Mode
-
-```bash
-./code-agent-demo chat
-```
-
-Once started, you can interact naturally:
-
-```
-Chat with Claude (use 'ctrl+c' to quit)
-New session started: 3a1b2c3d4e5f6789...
-> List all Go files in the current directory
-[Assistant: Reading files...]
-[Tool: list_files executed]
-[Assistant: Found 5 Go files...]
-```
 
 ### Webhook Server Mode
 
@@ -393,55 +338,27 @@ For more details on the investigation system, see [Alerts & Investigations](#ale
 
 ### Extended Thinking Mode 🧠
 
-Extended thinking allows Claude to show its internal reasoning process before generating responses. This feature helps you understand how the AI approaches problems and can improve response quality for complex tasks.
+Extended thinking allows Claude to show its internal reasoning process before generating responses. This feature improves investigation quality for complex alert root cause analysis.
 
-#### Enabling Extended Thinking
-
-**Via CLI flags:**
-```bash
-# Enable with defaults (10,000 token budget, thinking hidden)
-./code-agent-demo chat --thinking
-
-# Enable with custom budget and show thinking
-./code-agent-demo chat --thinking --thinking-budget 15000 --show-thinking
-```
+#### Configuration
 
 **Via environment variables:**
 ```bash
 export AGENT_THINKING_ENABLED=true
 export AGENT_THINKING_BUDGET=10000
 export AGENT_SHOW_THINKING=true
-./code-agent-demo chat
 ```
-
-**Via runtime commands:**
-```
-> :thinking on         # Enable thinking mode
-Extended thinking enabled (budget: 10000 tokens)
-
-> :thinking off        # Disable thinking mode
-Extended thinking disabled
-
-> :thinking budget 15000  # Set custom budget
-Thinking budget set to 15000 tokens
-
-> :thinking toggle    # Toggle current state
-```
-
-#### Extended Thinking Configuration
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--thinking` | `false` | Enable extended thinking mode |
-| `--thinking-budget` | `10000` | Token budget for thinking (min 1024) |
-| `--show-thinking` | `false` | Display AI's reasoning process |
-| `--max-tokens` | `20000` | Maximum tokens for responses |
+| `AGENT_THINKING_ENABLED` | `false` | Enable extended thinking mode |
+| `AGENT_THINKING_BUDGET` | `10000` | Token budget for thinking (min 1024) |
+| `AGENT_SHOW_THINKING` | `false` | Display AI's reasoning process |
+| `AGENT_MAX_TOKENS` | `20000` | Maximum tokens for responses |
 
 **Notes:**
-- Extended thinking requires Claude 3.5 Sonnet or newer models
-- The thinking budget is separate from but counted within `max-tokens`
-- By default, thinking is processed but not displayed (hidden from output)
-- Use `--show-thinking` to see the AI's reasoning in the terminal
+- The thinking budget is separate from but counted within max tokens
+- Extended thinking is also configurable per-subagent via AGENT.md frontmatter
 
 ### Available Tools
 
@@ -475,7 +392,7 @@ The agent supports two modes for validating bash commands:
 
 **Whitelist Mode:** Only allows explicitly whitelisted read-only commands. Enable with:
 ```bash
-export AGENT_COMMAND_VALIDATION_MODE=whitelist
+export AGENT_SAFETY_COMMAND_VALIDATION_MODE=whitelist
 ```
 
 Default whitelisted commands include:
@@ -489,29 +406,29 @@ Write operations (`mkdir`, `rm`, `git push`, `npm install`) are NOT whitelisted 
 
 **Adding Custom Whitelist Patterns:**
 
-Use the `AGENT_COMMAND_WHITELIST_JSON` environment variable with a JSON array of pattern objects:
+Use the `AGENT_SAFETY_COMMAND_WHITELIST_JSON` environment variable with a JSON array of pattern objects:
 
 ```bash
 # Allow a single custom command
-export AGENT_COMMAND_WHITELIST_JSON='[
+export AGENT_SAFETY_COMMAND_WHITELIST_JSON='[
   {"pattern": "^my-safe-tool(\\s|$)", "description": "my safe tool"}
 ]'
 
 # Allow multiple custom commands
-export AGENT_COMMAND_WHITELIST_JSON='[
+export AGENT_SAFETY_COMMAND_WHITELIST_JSON='[
   {"pattern": "^my-tool(\\s|$)", "description": "my tool"},
   {"pattern": "^another-tool\\s", "description": "another tool"},
   {"pattern": "^make\\s+test", "description": "make test target"}
 ]'
 
 # Allow go build and go run (not in default whitelist)
-export AGENT_COMMAND_WHITELIST_JSON='[
+export AGENT_SAFETY_COMMAND_WHITELIST_JSON='[
   {"pattern": "^go\\s+build(\\s|$)", "description": "go build"},
   {"pattern": "^go\\s+run\\s", "description": "go run"}
 ]'
 
 # Allow npm install for a specific project
-export AGENT_COMMAND_WHITELIST_JSON='[
+export AGENT_SAFETY_COMMAND_WHITELIST_JSON='[
   {"pattern": "^npm\\s+install(\\s|$)", "description": "npm install"}
 ]'
 ```
@@ -527,7 +444,7 @@ Use `exclude_pattern` to allow a command while blocking dangerous flags:
 
 ```bash
 # Allow find but block -exec, -delete, and similar dangerous flags
-export AGENT_COMMAND_WHITELIST_JSON='[
+export AGENT_SAFETY_COMMAND_WHITELIST_JSON='[
   {
     "pattern": "^find(\\s|$)",
     "exclude_pattern": "(?i)(-exec\\s|-execdir\\s|-delete(\\s|$)|-ok\\s|-okdir\\s)",
@@ -546,9 +463,9 @@ This allows `find . -name "*.go"` but blocks `find . -exec rm {} \;`. The `(?i)`
 
 **Piped Commands:** In whitelist mode, piped commands (e.g., `ls | grep foo`) are validated by checking each segment independently. All segments must be whitelisted for the command to execute.
 
-**LLM Fallback:** When `AGENT_ASK_LLM_ON_UNKNOWN=true` (default), non-whitelisted commands prompt for user confirmation instead of being immediately blocked. Set to `false` for strict whitelist-only mode.
+**LLM Fallback:** When `AGENT_SAFETY_ASK_LLM_ON_UNKNOWN=true` (default), non-whitelisted commands prompt for user confirmation instead of being immediately blocked. Set to `false` for strict whitelist-only mode.
 
-**Investigation Mode:** Command validation applies consistently in both interactive chat and investigation/daemon mode. The same whitelist/blacklist configuration governs both modes, so security policies are enforced regardless of how the agent is running.
+**Investigation Mode:** Command validation applies consistently across all execution contexts (webhook investigations, subagent tasks). The same whitelist/blacklist configuration governs all modes, so security policies are enforced regardless of how the agent is running.
 
 **Security Note:** Environment variables (`$VAR`, `${VAR}`) are NOT expanded during validation. The whitelist checks literal command text, but shell expands variables at runtime. Be cautious with commands that may output sensitive environment data. Note that command substitutions (`$()` and backticks) ARE recursively validated.
 
@@ -661,19 +578,7 @@ To prevent infinite loops, subagents cannot spawn other subagents. The `task` to
 
 ### Plan Mode
 
-Plan mode allows you to review and approve proposed changes before they are applied. When in plan mode, tools like `edit_file` or `bash` (if mutating) will write their intended actions to a plan file instead of executing them.
-
-#### Activating Plan Mode
-
-**Via runtime command:**
-```
-> :mode plan      # Enable plan mode
-> :mode normal    # Return to normal mode
-> :mode toggle    # Toggle between modes
-```
-
-**Via tool:**
-The AI can proactively enter plan mode using the `enter_plan_mode` tool when it detects a complex task.
+Plan mode allows proposed changes to be reviewed before they are applied. When in plan mode, tools like `edit_file` or `bash` (if mutating) will write their intended actions to a plan file (`.agent/plans/`) instead of executing them. The AI can enter plan mode using the `enter_plan_mode` tool when it detects a complex or risky task.
 
 ### Auto-Compaction
 
@@ -699,11 +604,11 @@ The minimum allowed threshold is `10,000` tokens. Values below this floor are au
 
 ```bash
 # Use default (160,000 tokens)
-./code-agent-demo chat
+./code-agent-demo serve
 
 # Set a custom threshold
 export AGENT_COMPACTION_THRESHOLD=100000
-./code-agent-demo chat
+./code-agent-demo serve
 ```
 
 #### What the Summary Preserves
@@ -803,47 +708,35 @@ Investigation escalated to human review:
 
 ### Configuration
 
-The application supports configuration via:
+The application supports configuration via environment variables (`AGENT_*` prefix) and command-line flags.
 
-**Command-line flags:**
-```bash
-./code-agent-demo chat --model "hf:zai-org/GLM-4.7" --max-tokens 20000 --thinking
-```
-
-**Environment variables (AGENT_* prefix):**
+**Environment variables:**
 ```bash
 export AGENT_MODEL=hf:zai-org/GLM-4.7
 export AGENT_MAX_TOKENS=20000
 export AGENT_WORKING_DIR=/path/to/project
-export AGENT_WELCOME_MESSAGE="Hello! How can I help?"
-export AGENT_GOODBYE_MESSAGE="Goodbye!"
-export AGENT_HISTORY_FILE=""  # Disable history
-export AGENT_HISTORY_MAX_ENTRIES=500
 export AGENT_THINKING_ENABLED=true
 export AGENT_THINKING_BUDGET=10000
 export AGENT_SHOW_THINKING=false
 
 # Command validation (security)
-export AGENT_COMMAND_VALIDATION_MODE=whitelist  # or "blacklist" (default)
-export AGENT_COMMAND_WHITELIST_JSON='[{"pattern": "^custom-cmd\\s", "description": "custom command"}]'
-export AGENT_ASK_LLM_ON_UNKNOWN=true            # Ask before blocking non-whitelisted
+export AGENT_SAFETY_COMMAND_VALIDATION_MODE=whitelist  # or "blacklist" (default)
+export AGENT_SAFETY_COMMAND_WHITELIST_JSON='[{"pattern": "^custom-cmd\\s", "description": "custom command"}]'
+export AGENT_SAFETY_ASK_LLM_ON_UNKNOWN=true            # Ask before blocking non-whitelisted
+export AGENT_SAFETY_AUTO_APPROVE_SAFE=false             # Auto-approve non-dangerous bash commands
 ```
 
 **Configuration options:**
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--model` | `hf:zai-org/GLM-4.7` | AI model to use |
-| `--max-tokens` | `20000` | Maximum tokens in responses |
-| `--thinking` | `false` | Enable extended thinking mode |
-| `--thinking-budget` | `10000` | Token budget for thinking (min 1024) |
-| `--show-thinking` | `false` | Display AI's reasoning process |
-| `--workingDir` | `.` | Base directory for file operations |
-| `--welcomeMessage` | `Chat with Claude...` | Displayed on session start |
-| `--goodbyeMessage` | `Bye!` | Displayed on session end |
-| `--historyFile` | `~/.agent-history` | Command history file location |
-| `--historyMaxEntries` | `1000` | Maximum history entries to keep |
-| `--auto-approve-safe` | `false` | Auto-approve non-dangerous bash commands (serve mode only) |
+| `AGENT_MODEL` | `hf:zai-org/GLM-4.7` | AI model to use |
+| `AGENT_MAX_TOKENS` | `20000` | Maximum tokens in responses |
+| `AGENT_THINKING_ENABLED` | `false` | Enable extended thinking mode |
+| `AGENT_THINKING_BUDGET` | `10000` | Token budget for thinking (min 1024) |
+| `AGENT_SHOW_THINKING` | `false` | Display AI's reasoning process |
+| `AGENT_WORKING_DIR` | `.` | Base directory for file operations |
+| `--auto-approve-safe` | `false` | Auto-approve non-dangerous bash commands |
 | `AGENT_COMPACTION_THRESHOLD` | `160000` | Token threshold for auto-compaction (min 10,000) |
 
 ### Serve Command Configuration
@@ -861,9 +754,11 @@ export AGENT_ASK_LLM_ON_UNKNOWN=true            # Ask before blocking non-whitel
 **Security configuration (environment variables only):**
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AGENT_COMMAND_VALIDATION_MODE` | `blacklist` | `blacklist` or `whitelist` |
-| `AGENT_COMMAND_WHITELIST_JSON` | (none) | JSON array of additional regex patterns |
-| `AGENT_ASK_LLM_ON_UNKNOWN` | `true` | Ask LLM before blocking non-whitelisted commands |
+| `AGENT_SAFETY_COMMAND_VALIDATION_MODE` | `blacklist` | `blacklist` or `whitelist` |
+| `AGENT_SAFETY_COMMAND_WHITELIST_JSON` | (none) | JSON array of additional regex patterns |
+| `AGENT_SAFETY_COMMAND_WHITELIST_OVERRIDE` | `false` | Replace default whitelist patterns with custom ones |
+| `AGENT_SAFETY_ASK_LLM_ON_UNKNOWN` | `true` | Ask LLM before blocking non-whitelisted commands |
+| `AGENT_SAFETY_AUTO_APPROVE_SAFE` | `false` | Auto-approve non-dangerous bash commands |
 
 ## Development
 
@@ -945,16 +840,17 @@ The domain layer is the heart of the application and contains no external depend
 This layer orchestrates use cases using domain services:
 
 - **Use Cases** (`internal/application/usecase/`)
+  - `BaseRunner` - Shared run context, tool execution, permissions & cleanup (extracted base for runners)
   - `ToolExecutionUseCase` - Handles tool execution and safety
   - `AlertHandler` - Receives and processes incoming alerts
   - `AlertInvestigation` - Runs investigation workflows
   - `InvestigationRunner` - Executes investigations with AI
   - `EscalationHandler` - Handles escalation logic
-  - `SubagentRunner` - Manages subagent spawning and communication
+  - `SubagentRunner` - Manages subagent spawning and communication (concurrency-safe)
+  - `SubagentUseCase` - Orchestrates async/parallel subagent execution
 
 - **Services** (`internal/application/service/`)
   - `InvestigationStore` - Persistence for investigations
-  - `SkillService` - Skill discovery and management
   - `SafetyEnforcer` - Command safety validation
 
 - **Configuration** (`internal/application/config/`)
@@ -966,7 +862,7 @@ Implementations of the ports defined in the domain:
 - **Adapters** (`internal/infrastructure/adapter/`)
   - `ai/anthropic_adapter.go` - Anthropic API implementation
   - `file/local_file_adapter.go` - Local file system operations
-  - `tool/tool_executor_adapter.go` - Built-in tools (read, list, edit, bash, fetch, etc.)
+  - `tool/tool_executor_adapter.go` - Tool registry & routing (split into per-domain files: bash, file, fetch, investigation, skill, subagent, plan/batch)
   - `ui/cli_adapter.go` - Terminal interface
   - `skill/local_skill_adapter.go` - Skill discovery from filesystem
   - `subagent/local_subagent_adapter.go` - Subagent discovery from filesystem
@@ -988,7 +884,6 @@ Implementations of the ports defined in the domain:
 - `cmd/cli/main.go` - Application entry point
 - `cmd/cli/cmd/` - CLI command definitions using cobra
   - `root.go` - Root command and global flags
-  - `chat.go` - Interactive chat command
   - `serve.go` - Webhook server command
 
 ### Adding an Alert Source
@@ -1122,8 +1017,9 @@ The project uses table-driven tests throughout. Look at existing tests for patte
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `github.com/anthropics/anthropic-sdk-go` | v1.19.0 | Anthropic API client |
+| `github.com/anthropics/anthropic-sdk-go` | v1.26.0 | Anthropic API client |
 | `github.com/chzyer/readline` | v1.5.1 | Interactive input with history |
+| `github.com/google/uuid` | v1.6.0 | UUID v7 session IDs |
 | `github.com/spf13/cobra` | v1.10.2 | CLI framework |
 | `github.com/spf13/viper` | v1.21.0 | Configuration management |
 | `github.com/stretchr/testify` | v1.11.1 | Testing utilities |

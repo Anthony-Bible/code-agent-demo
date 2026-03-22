@@ -43,15 +43,14 @@ Presentation (cmd/cli/) → Application (internal/application/) → Domain (inte
 **Application Layer** (`internal/application/`)
 - `service/InvestigationStore` - File-based investigation persistence
 - `service/SafetyEnforcer` - Command safety validation
-- `service/SkillService` - Skill discovery and management
-- `usecase/` - `ToolExecutionUseCase`, `AlertHandler`, `AlertInvestigation`, `InvestigationRunner`, `EscalationHandler`, `SubagentRunner`, `SubagentUseCase`
+- `usecase/` - `BaseRunner`, `ToolExecutionUseCase`, `AlertHandler`, `AlertInvestigation`, `InvestigationRunner`, `EscalationHandler`, `SubagentRunner`, `SubagentUseCase`
 - `dto/` - Data transfer objects between layers
 - `config/` - Application-level config (e.g., `InvestigationConfig`)
 
 **Infrastructure Layer** (`internal/infrastructure/`)
 - `adapter/ai/` - `AnthropicAdapter` implements `AIProvider`
 - `adapter/file/` - `LocalFileManager` implements `FileManager` (with path traversal protection)
-- `adapter/tool/` - `ExecutorAdapter` implements `ToolExecutor` (bash, read_file, list_files, edit_file); `PlanningExecutorAdapter` decorator for plan mode
+- `adapter/tool/` - `ExecutorAdapter` implements `ToolExecutor` (split into per-domain files: bash, file, fetch, investigation, skill, subagent, plan/batch); `PlanningExecutorAdapter` decorator for plan mode
 - `adapter/ui/` - `CLIAdapter` implements `UserInterface`
 - `adapter/alert/` - Alert source adapters: `PrometheusSource`, `GCPMonitoringSource`, `SourceManager`, `SourceRegistry`
 - `adapter/webhook/` - HTTP server for receiving alert webhooks
@@ -152,7 +151,7 @@ Subagents are isolated AI agents for delegated tasks. Discovered from `./agents`
 
 ## Plan Mode
 
-Toggle with `:mode` command in CLI. In plan mode, tool executions are written as JSON to `.agent/plans/` instead of being executed. `PlanningExecutorAdapter` decorates the base executor using the decorator pattern.
+In plan mode, tool executions are written as JSON to `.agent/plans/` instead of being executed. `PlanningExecutorAdapter` decorates the base executor using the decorator pattern. Activated via the `enter_plan_mode` tool.
 
 ## CI/CD
 
