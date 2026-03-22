@@ -181,9 +181,11 @@ func TestBaseRunner_ProcessToolCalls(t *testing.T) {
 		name             string
 		toolCalls        []port.ToolCallInfo
 		permChecker      ToolPermissionChecker
+		addToolResultErr error
 		wantActionsTaken int
 		wantResultCount  int
 		wantBlockedCount int
+		wantErr          bool
 	}{
 		{
 			name: "all allowed",
@@ -221,11 +223,20 @@ func TestBaseRunner_ProcessToolCalls(t *testing.T) {
 			wantActionsTaken: 0,
 			wantResultCount:  0,
 		},
+		{
+			name:             "AddToolResultMessage error propagated",
+			toolCalls:        []port.ToolCallInfo{{ToolID: "1", ToolName: "bash"}},
+			permChecker:      &AllowAllPermissionChecker{},
+			addToolResultErr: errors.New("storage failure"),
+			wantActionsTaken: 1,
+			wantResultCount:  1,
+			wantErr:          true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			convMock := &baseRunnerConvServiceMock{}
+			convMock := &baseRunnerConvServiceMock{addToolResultError: tt.addToolResultErr}
 			execMock := &baseRunnerToolExecutorMock{executeResult: "ok"}
 			b := &BaseRunner{
 				ConvService:       convMock,
@@ -245,6 +256,12 @@ func TestBaseRunner_ProcessToolCalls(t *testing.T) {
 			}
 
 			err := b.ProcessToolCalls(rc, tt.toolCalls, "is not allowed", executor)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error but got nil")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -253,17 +270,23 @@ func TestBaseRunner_ProcessToolCalls(t *testing.T) {
 				t.Errorf("ActionsTaken = %d, want %d", rc.ActionsTaken, tt.wantActionsTaken)
 			}
 
-			if tt.wantResultCount > 0 {
-				if convMock.addToolResultCalls != 1 {
-					t.Errorf("AddToolResultMessage calls = %d, want 1", convMock.addToolResultCalls)
-				}
-				if len(convMock.addToolResultResults[0]) != tt.wantResultCount {
-					t.Errorf("result count = %d, want %d", len(convMock.addToolResultResults[0]), tt.wantResultCount)
-				}
-			} else if convMock.addToolResultCalls != 0 {
-				t.Errorf("AddToolResultMessage calls = %d, want 0", convMock.addToolResultCalls)
-			}
+			assertToolResultCounts(t, convMock, tt.wantResultCount)
 		})
+	}
+}
+
+// assertToolResultCounts validates AddToolResultMessage call counts and result slice lengths.
+func assertToolResultCounts(t *testing.T, mock *baseRunnerConvServiceMock, wantResultCount int) {
+	t.Helper()
+	if wantResultCount > 0 {
+		if mock.addToolResultCalls != 1 {
+			t.Errorf("AddToolResultMessage calls = %d, want 1", mock.addToolResultCalls)
+		}
+		if len(mock.addToolResultResults[0]) != wantResultCount {
+			t.Errorf("result count = %d, want %d", len(mock.addToolResultResults[0]), wantResultCount)
+		}
+	} else if mock.addToolResultCalls != 0 {
+		t.Errorf("AddToolResultMessage calls = %d, want 0", mock.addToolResultCalls)
 	}
 }
 
@@ -348,7 +371,6 @@ func TestSafetyEnforcerPermissionChecker(t *testing.T) {
 		toolName string
 		want     bool
 	}{
-		{name: "nil enforcer allows all", enforcer: nil, toolName: "bash", want: true},
 		{
 			name:     "allowed tool",
 			enforcer: &mockSafetyEnforcer{allowedTools: map[string]bool{"bash": true}},

@@ -162,24 +162,21 @@ func (rc *runContext) failedResult(err error) *InvestigationResult {
 
 // executeToolCallWithSafety wraps BaseRunner.ExecuteToolCall with command-level safety checks.
 func (r *InvestigationRunner) executeToolCallWithSafety(ctx context.Context, tc port.ToolCallInfo) entity.ToolResult {
-	if err := r.checkToolSafety(tc); err != nil {
+	if err := r.checkCommandSafety(tc); err != nil {
 		return entity.ToolResult{ToolID: tc.ToolID, Result: err.Error(), IsError: true}
 	}
 	return r.ExecuteToolCall(ctx, tc)
 }
 
-// checkToolSafety validates tool and command safety using the safety enforcer.
+// checkCommandSafety validates command-level safety for bash tools.
+// Tool-level permission checking is handled by ProcessToolCalls via PermissionChecker.
 // Returns nil if safe, or an error describing the block reason.
-func (r *InvestigationRunner) checkToolSafety(tc port.ToolCallInfo) error {
+func (r *InvestigationRunner) checkCommandSafety(tc port.ToolCallInfo) error {
 	if r.safetyEnforcer == nil {
 		return nil
 	}
 
-	if err := r.safetyEnforcer.CheckToolAllowed(tc.ToolName); err != nil {
-		return fmt.Errorf("tool blocked: %w", err)
-	}
-
-	// For bash tools, also check command safety
+	// For bash tools, check command safety
 	if tc.ToolName == toolBash {
 		if cmd := extractCommandFromInput(tc.Input); cmd != "" {
 			if err := r.safetyEnforcer.CheckCommandAllowed(cmd); err != nil {

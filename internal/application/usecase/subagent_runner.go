@@ -252,7 +252,7 @@ func (r *SubagentRunner) Run(
 	if thinkingInfo.Enabled {
 		if err := r.ConvService.SetThinkingMode(sessionID, thinkingInfo); err != nil {
 			// Log warning but don't fail - thinking mode is optional
-			slog.Error("failed to set thinking mode", //nolint:sloglint // no injected logger on this struct
+			slog.Warn("failed to set thinking mode", //nolint:sloglint // no injected logger on this struct
 				"error", err,
 				"agent", rc.agent.Name,
 				"session_id", sessionID,
@@ -382,6 +382,12 @@ func (r *SubagentRunner) runExecutionLoop(rc *subagentRunContext) (*SubagentResu
 			break
 		}
 
+		// Cap tool calls to remaining action budget so MaxActions is a strict upper bound
+		toolCalls = r.LimitToolCalls(&rc.BaseRunContext, toolCalls)
+		if len(toolCalls) == 0 {
+			break
+		}
+
 		// Execute tools and feed results back
 		executor := func(ctx context.Context, tc port.ToolCallInfo) entity.ToolResult {
 			r.displayToolExecution(rc.agent.Name, tc.ToolName)
@@ -395,11 +401,6 @@ func (r *SubagentRunner) runExecutionLoop(rc *subagentRunContext) (*SubagentResu
 
 		// Inject turn warning if approaching limit
 		r.InjectTurnWarningIfNeeded(&rc.BaseRunContext, DefaultTurnWarningConfig())
-
-		// Stop at MaxActions
-		if rc.ActionsTaken >= rc.MaxActions {
-			break
-		}
 	}
 
 	return rc.completedResult(), nil

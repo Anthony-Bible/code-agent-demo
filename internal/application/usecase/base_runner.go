@@ -143,10 +143,8 @@ type SafetyEnforcerPermissionChecker struct {
 }
 
 // IsToolCallAllowed checks if the tool is allowed by the safety enforcer.
+// The Enforcer is guaranteed non-nil by newSafetyPermissionChecker.
 func (s *SafetyEnforcerPermissionChecker) IsToolCallAllowed(tc port.ToolCallInfo) bool {
-	if s.Enforcer == nil {
-		return true
-	}
 	return s.Enforcer.CheckToolAllowed(tc.ToolName) == nil
 }
 
