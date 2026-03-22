@@ -31,6 +31,11 @@ func generateLines(count int) string {
 	return strings.Join(lines, "\n")
 }
 
+// defaultTestConfig returns the standard test truncation config (20 head, 10 tail, enabled).
+func defaultTestConfig() ui.TruncationConfig {
+	return ui.TruncationConfig{HeadLines: 20, TailLines: 10, Enabled: true}
+}
+
 // =============================================================================
 // Test: DefaultTruncationConfig
 // =============================================================================
@@ -76,11 +81,7 @@ func TestDefaultTruncationConfig(t *testing.T) {
 
 func TestTruncateOutput_EmptyOutput(t *testing.T) {
 	t.Run("should return empty string and zero lines removed for empty input", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 
 		result, linesRemoved := ui.TruncateOutput("", config)
 
@@ -112,11 +113,7 @@ func TestTruncateOutput_EmptyOutput(t *testing.T) {
 
 func TestTruncateOutput_SingleLine(t *testing.T) {
 	t.Run("should return single line unchanged", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		input := "This is a single line of output"
 
 		result, linesRemoved := ui.TruncateOutput(input, config)
@@ -128,11 +125,7 @@ func TestTruncateOutput_SingleLine(t *testing.T) {
 	})
 
 	t.Run("should handle single line with trailing newline", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		input := "Single line with newline\n"
 
 		result, linesRemoved := ui.TruncateOutput(input, config)
@@ -144,11 +137,7 @@ func TestTruncateOutput_SingleLine(t *testing.T) {
 	})
 
 	t.Run("should handle single empty line (just newline)", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		input := "\n"
 
 		result, linesRemoved := ui.TruncateOutput(input, config)
@@ -166,11 +155,7 @@ func TestTruncateOutput_SingleLine(t *testing.T) {
 
 func TestTruncateOutput_WithinThreshold(t *testing.T) {
 	t.Run("should return 30 lines unchanged when exactly at threshold", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		input := generateLines(30) // Exactly HeadLines + TailLines
 
 		result, linesRemoved := ui.TruncateOutput(input, config)
@@ -182,11 +167,7 @@ func TestTruncateOutput_WithinThreshold(t *testing.T) {
 	})
 
 	t.Run("should return 29 lines unchanged when below threshold", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		input := generateLines(29) // Below threshold
 
 		result, linesRemoved := ui.TruncateOutput(input, config)
@@ -198,11 +179,7 @@ func TestTruncateOutput_WithinThreshold(t *testing.T) {
 	})
 
 	t.Run("should return 15 lines unchanged when well below threshold", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		input := generateLines(15)
 
 		result, linesRemoved := ui.TruncateOutput(input, config)
@@ -236,11 +213,7 @@ func TestTruncateOutput_WithinThreshold(t *testing.T) {
 
 func TestTruncateOutput_ExceedsThreshold(t *testing.T) {
 	t.Run("should truncate 50 lines showing head and tail with indicator", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		input := generateLines(50) // 50 lines total, should truncate 20
 
 		result, linesRemoved := ui.TruncateOutput(input, config)
@@ -273,11 +246,7 @@ func TestTruncateOutput_ExceedsThreshold(t *testing.T) {
 	})
 
 	t.Run("should truncate 31 lines removing exactly 1 line", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		input := generateLines(31) // Just over threshold
 
 		result, linesRemoved := ui.TruncateOutput(input, config)
@@ -289,11 +258,7 @@ func TestTruncateOutput_ExceedsThreshold(t *testing.T) {
 	})
 
 	t.Run("should truncate 100 lines correctly", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		input := generateLines(100)
 
 		result, linesRemoved := ui.TruncateOutput(input, config)
@@ -567,11 +532,7 @@ func TestTruncateOutput_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("should handle trailing newline in input", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		input := generateLines(50) + "\n" // Add trailing newline
 
 		result, linesRemoved := ui.TruncateOutput(input, config)
@@ -805,11 +766,7 @@ func TestTruncateOutput_OutputFormat(t *testing.T) {
 
 func TestTruncateOutput_BoundaryConditions(t *testing.T) {
 	t.Run("threshold minus one - no truncation", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		input := generateLines(29) // threshold - 1
 
 		result, linesRemoved := ui.TruncateOutput(input, config)
@@ -821,11 +778,7 @@ func TestTruncateOutput_BoundaryConditions(t *testing.T) {
 	})
 
 	t.Run("threshold exactly - no truncation", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		input := generateLines(30) // exactly threshold
 
 		result, linesRemoved := ui.TruncateOutput(input, config)
@@ -837,11 +790,7 @@ func TestTruncateOutput_BoundaryConditions(t *testing.T) {
 	})
 
 	t.Run("threshold plus one - truncate 1", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		input := generateLines(31) // threshold + 1
 
 		result, linesRemoved := ui.TruncateOutput(input, config)
@@ -892,11 +841,7 @@ func parseBashJSON(input string) (bashOutput, error) {
 
 func TestTruncateBashOutput_TruncatesStdout(t *testing.T) {
 	t.Run("should truncate large stdout field in JSON", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		largeStdout := generateLines(50) // 50 lines, should truncate 20
 		input := makeBashJSON(largeStdout, "", 0)
 
@@ -931,11 +876,7 @@ func TestTruncateBashOutput_TruncatesStdout(t *testing.T) {
 	})
 
 	t.Run("should truncate 100 line stdout correctly", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		largeStdout := generateLines(100)
 		input := makeBashJSON(largeStdout, "", 0)
 
@@ -958,11 +899,7 @@ func TestTruncateBashOutput_TruncatesStdout(t *testing.T) {
 
 func TestTruncateBashOutput_TruncatesStderr(t *testing.T) {
 	t.Run("should truncate large stderr field in JSON", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		largeStderr := generateLines(50) // 50 lines, should truncate 20
 		input := makeBashJSON("", largeStderr, 1)
 
@@ -997,11 +934,7 @@ func TestTruncateBashOutput_TruncatesStderr(t *testing.T) {
 	})
 
 	t.Run("should truncate 100 line stderr correctly", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		largeStderr := generateLines(100)
 		input := makeBashJSON("", largeStderr, 1)
 
@@ -1024,11 +957,7 @@ func TestTruncateBashOutput_TruncatesStderr(t *testing.T) {
 
 func TestTruncateBashOutput_TruncatesBothFields(t *testing.T) {
 	t.Run("should truncate both stdout and stderr when both are large", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		largeStdout := generateLines(50) // 20 lines truncated
 		largeStderr := generateLines(60) // 30 lines truncated
 		input := makeBashJSON(largeStdout, largeStderr, 0)
@@ -1075,11 +1004,7 @@ func TestTruncateBashOutput_TruncatesBothFields(t *testing.T) {
 	})
 
 	t.Run("should handle one field truncated and one not", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		largeStdout := generateLines(50) // 20 lines truncated
 		smallStderr := generateLines(10) // no truncation needed
 		input := makeBashJSON(largeStdout, smallStderr, 0)
@@ -1107,11 +1032,7 @@ func TestTruncateBashOutput_TruncatesBothFields(t *testing.T) {
 
 func TestTruncateBashOutput_PreservesSmallOutput(t *testing.T) {
 	t.Run("should not truncate when stdout and stderr are small", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		smallStdout := generateLines(15)
 		smallStderr := generateLines(10)
 		input := makeBashJSON(smallStdout, smallStderr, 0)
@@ -1132,11 +1053,7 @@ func TestTruncateBashOutput_PreservesSmallOutput(t *testing.T) {
 	})
 
 	t.Run("should not truncate exactly at threshold", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		exactStdout := generateLines(30) // Exactly HeadLines + TailLines
 		exactStderr := generateLines(30)
 		input := makeBashJSON(exactStdout, exactStderr, 0)
@@ -1156,11 +1073,7 @@ func TestTruncateBashOutput_PreservesSmallOutput(t *testing.T) {
 	})
 
 	t.Run("should handle empty stdout and stderr", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		input := makeBashJSON("", "", 0)
 
 		result, linesRemoved := ui.TruncateBashOutput(input, config)
@@ -1176,11 +1089,7 @@ func TestTruncateBashOutput_PreservesSmallOutput(t *testing.T) {
 	})
 
 	t.Run("should handle single line output", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		input := makeBashJSON("single line stdout", "single line stderr", 0)
 
 		result, linesRemoved := ui.TruncateBashOutput(input, config)
@@ -1204,11 +1113,7 @@ func TestTruncateBashOutput_PreservesSmallOutput(t *testing.T) {
 
 func TestTruncateBashOutput_PreservesExitCode(t *testing.T) {
 	t.Run("should preserve exit_code 0 after truncation", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		largeStdout := generateLines(50)
 		input := makeBashJSON(largeStdout, "", 0)
 
@@ -1222,11 +1127,7 @@ func TestTruncateBashOutput_PreservesExitCode(t *testing.T) {
 	})
 
 	t.Run("should preserve exit_code 1 after truncation", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		largeStderr := generateLines(50)
 		input := makeBashJSON("", largeStderr, 1)
 
@@ -1264,11 +1165,7 @@ func TestTruncateBashOutput_PreservesExitCode(t *testing.T) {
 	})
 
 	t.Run("should preserve exit_code when no truncation occurs", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		smallStdout := generateLines(10)
 		input := makeBashJSON(smallStdout, "", 42)
 
@@ -1291,11 +1188,7 @@ func TestTruncateBashOutput_PreservesExitCode(t *testing.T) {
 
 func TestTruncateBashOutput_FallbackForNonJSON(t *testing.T) {
 	t.Run("should fall back to TruncateOutput for plain text", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		plainText := generateLines(50) // Not JSON, just plain text
 
 		result, linesRemoved := ui.TruncateBashOutput(plainText, config)
@@ -1310,11 +1203,7 @@ func TestTruncateBashOutput_FallbackForNonJSON(t *testing.T) {
 	})
 
 	t.Run("should fall back for invalid JSON", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		invalidJSON := `{"stdout": "missing closing brace"`
 
 		result, linesRemoved := ui.TruncateBashOutput(invalidJSON, config)
@@ -1328,11 +1217,7 @@ func TestTruncateBashOutput_FallbackForNonJSON(t *testing.T) {
 	})
 
 	t.Run("should fall back for JSON without required fields", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		// Valid JSON but missing stdout/stderr/exit_code structure
 		wrongStructure := `{"message": "hello", "code": 200}`
 
@@ -1347,11 +1232,7 @@ func TestTruncateBashOutput_FallbackForNonJSON(t *testing.T) {
 	})
 
 	t.Run("should fall back for JSON array", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		jsonArray := `[1, 2, 3, 4, 5]`
 
 		result, linesRemoved := ui.TruncateBashOutput(jsonArray, config)
@@ -1365,11 +1246,7 @@ func TestTruncateBashOutput_FallbackForNonJSON(t *testing.T) {
 	})
 
 	t.Run("should fall back for empty string", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 
 		result, linesRemoved := ui.TruncateBashOutput("", config)
 
@@ -1382,11 +1259,7 @@ func TestTruncateBashOutput_FallbackForNonJSON(t *testing.T) {
 	})
 
 	t.Run("should fall back for JSON with only stdout field", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		partialJSON := `{"stdout": "some output"}`
 
 		result, linesRemoved := ui.TruncateBashOutput(partialJSON, config)
@@ -1618,11 +1491,7 @@ func TestTruncateBashOutput_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("should handle very large stdout and stderr", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		largeStdout := generateLines(5000)
 		largeStderr := generateLines(5000)
 		input := makeBashJSON(largeStdout, largeStderr, 0)
@@ -1667,11 +1536,7 @@ func TestTruncateBashOutput_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("should handle null-like values in JSON", func(t *testing.T) {
-		config := ui.TruncationConfig{
-			HeadLines: 20,
-			TailLines: 10,
-			Enabled:   true,
-		}
+		config := defaultTestConfig()
 		// Manually create JSON with empty strings (null-like)
 		input := `{"stdout":"","stderr":"","exit_code":0}`
 
