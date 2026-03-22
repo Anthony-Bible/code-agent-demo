@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
 
@@ -105,8 +104,8 @@ func (r *SubagentResult) GetError() error {
 
 // SubagentRunner orchestrates isolated subagent execution for task delegation.
 type SubagentRunner struct {
-	convService   ConversationServiceInterface
-	toolExecutor  port.ToolExecutor
+	BaseRunner
+
 	aiProvider    port.AIProvider
 	userInterface port.UserInterface
 	config        SubagentConfig
@@ -114,14 +113,11 @@ type SubagentRunner struct {
 
 // subagentRunContext holds state for a subagent execution run.
 type subagentRunContext struct {
-	ctx           context.Context
+	BaseRunContext
+
 	agent         *entity.Subagent
 	taskPrompt    string
 	subagentID    string
-	sessionID     string
-	startTime     time.Time
-	actionsTaken  int
-	maxActions    int
 	lastMessage   *entity.Message
 	runner        *SubagentRunner // Reference to runner for UI display
 	originalModel string          // Original model before any switching
@@ -147,25 +143,10 @@ func NewSubagentRunner(
 	// userInterface is optional (can be nil for tests)
 
 	return &SubagentRunner{
-		convService:   convService,
-		toolExecutor:  toolExecutor,
+		BaseRunner:    newBaseRunner(convService, toolExecutor, &AllowedListPermissionChecker{AllowedTools: config.AllowedTools}),
 		aiProvider:    aiProvider,
 		userInterface: userInterface,
 		config:        config,
-	}
-}
-
-// cleanupConversation ends a subagent conversation using a background context
-// so cleanup succeeds even if the parent context was cancelled.
-func (r *SubagentRunner) cleanupConversation(sessionID, agentName string) {
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), conversationCleanupTimeout)
-	defer cancel()
-	if err := r.convService.EndConversation(cleanupCtx, sessionID); err != nil {
-		slog.Error("failed to end subagent conversation", //nolint:sloglint // no injected logger on this struct
-			"session_id", sessionID,
-			"agent", agentName,
-			"error", err,
-		)
 	}
 }
 
@@ -230,25 +211,27 @@ func (r *SubagentRunner) Run(
 	})
 
 	rc := &subagentRunContext{
-		ctx:           ctx,
+		BaseRunContext: BaseRunContext{
+			Ctx:        ctx,
+			StartTime:  time.Now(),
+			MaxActions: r.config.MaxActions,
+		},
 		agent:         agent,
 		taskPrompt:    taskPrompt,
 		subagentID:    subagentID,
-		startTime:     time.Now(),
-		maxActions:    r.config.MaxActions,
 		runner:        r,
 		originalModel: originalModel,
 	}
-	if rc.maxActions == 0 {
-		rc.maxActions = 20
+	if rc.MaxActions == 0 {
+		rc.MaxActions = 20
 	}
 
-	sessionID, err := r.convService.StartConversation(ctx)
+	sessionID, err := r.ConvService.StartConversation(ctx)
 	if err != nil {
 		return rc.failedResult(err), err
 	}
-	rc.sessionID = sessionID
-	defer r.cleanupConversation(sessionID, agent.Name)
+	rc.SessionID = sessionID
+	defer r.CleanupConversation(sessionID, agent.Name, "agent")
 
 	// Subagents use their own configuration or inherit from static config.
 	// Context-based inheritance is removed in favor of session-based management.
@@ -267,16 +250,14 @@ func (r *SubagentRunner) Run(
 	}
 
 	if thinkingInfo.Enabled {
-		if err := r.convService.SetThinkingMode(sessionID, thinkingInfo); err != nil {
+		if err := r.ConvService.SetThinkingMode(sessionID, thinkingInfo); err != nil {
 			// Log warning but don't fail - thinking mode is optional
-			fmt.Fprintf(
-				os.Stderr,
-				"[SubagentRunner] Failed to set thinking mode for subagent session: error=%v, agent=%s, sessionID=%s, enabled=%t, budget=%d\n",
-				err,
-				rc.agent.Name,
-				sessionID,
-				thinkingInfo.Enabled,
-				thinkingInfo.BudgetTokens,
+			slog.Error("failed to set thinking mode", //nolint:sloglint // no injected logger on this struct
+				"error", err,
+				"agent", rc.agent.Name,
+				"session_id", sessionID,
+				"enabled", thinkingInfo.Enabled,
+				"budget", thinkingInfo.BudgetTokens,
 			)
 		}
 	}
@@ -329,8 +310,8 @@ func (rc *subagentRunContext) failedResult(err error) *SubagentResult {
 		SubagentID:   rc.subagentID,
 		AgentName:    rc.agent.Name,
 		Status:       "failed",
-		ActionsTaken: rc.actionsTaken,
-		Duration:     time.Since(rc.startTime),
+		ActionsTaken: rc.ActionsTaken,
+		Duration:     time.Since(rc.StartTime),
 		Error:        err,
 	}
 }
@@ -343,10 +324,10 @@ func (rc *subagentRunContext) completedResult() *SubagentResult {
 		output = "[SUBAGENT: " + rc.agent.Name + "]\n\n" + rc.lastMessage.Content
 	}
 
-	duration := time.Since(rc.startTime)
+	duration := time.Since(rc.StartTime)
 
 	// Display completion status with details
-	details := fmt.Sprintf("%d actions, %.1fs", rc.actionsTaken, duration.Seconds())
+	details := fmt.Sprintf("%d actions, %.1fs", rc.ActionsTaken, duration.Seconds())
 	rc.runner.displayStatus(rc.agent.Name, statusCompleted, details)
 
 	return &SubagentResult{
@@ -354,7 +335,7 @@ func (rc *subagentRunContext) completedResult() *SubagentResult {
 		AgentName:    rc.agent.Name,
 		Status:       "completed",
 		Output:       output,
-		ActionsTaken: rc.actionsTaken,
+		ActionsTaken: rc.ActionsTaken,
 		Duration:     duration,
 	}
 }
@@ -363,12 +344,12 @@ func (rc *subagentRunContext) completedResult() *SubagentResult {
 func (r *SubagentRunner) setupAgentSession(rc *subagentRunContext) error {
 	// Set custom system prompt from agent configuration
 	systemPrompt := rc.agent.RawContent
-	if err := r.convService.SetCustomSystemPrompt(rc.ctx, rc.sessionID, systemPrompt); err != nil {
+	if err := r.ConvService.SetCustomSystemPrompt(rc.Ctx, rc.SessionID, systemPrompt); err != nil {
 		return err
 	}
 
 	// Add user message with task prompt
-	if _, err := r.convService.AddUserMessage(rc.ctx, rc.sessionID, rc.taskPrompt); err != nil {
+	if _, err := r.ConvService.AddUserMessage(rc.Ctx, rc.SessionID, rc.taskPrompt); err != nil {
 		return err
 	}
 
@@ -377,10 +358,10 @@ func (r *SubagentRunner) setupAgentSession(rc *subagentRunContext) error {
 
 // runExecutionLoop runs the main tool execution loop until completion or limit.
 func (r *SubagentRunner) runExecutionLoop(rc *subagentRunContext) (*SubagentResult, error) {
-	for rc.actionsTaken < rc.maxActions {
+	for rc.ActionsTaken < rc.MaxActions {
 		// Add thinking mode indicator if enabled for this session
-		ctx := rc.ctx
-		thinkingInfo, _ := rc.runner.convService.GetThinkingMode(rc.sessionID)
+		ctx := rc.Ctx
+		thinkingInfo, _ := rc.runner.ConvService.GetThinkingMode(rc.SessionID)
 		if thinkingInfo.Enabled {
 			// Display thinking status indicator.
 			// Note: Thinking content itself is never displayed for subagents,
@@ -402,15 +383,21 @@ func (r *SubagentRunner) runExecutionLoop(rc *subagentRunContext) (*SubagentResu
 		}
 
 		// Execute tools and feed results back
-		if err := r.processToolCalls(rc, toolCalls); err != nil {
+		executor := func(ctx context.Context, tc port.ToolCallInfo) entity.ToolResult {
+			r.displayToolExecution(rc.agent.Name, tc.ToolName)
+			result := r.executeToolCall(ctx, tc)
+			r.displayToolResult(rc.agent.Name, tc.ToolName, result.IsError)
+			return result
+		}
+		if err := r.ProcessToolCalls(&rc.BaseRunContext, toolCalls, "is not allowed for this subagent", executor); err != nil {
 			return rc.failedResult(err), err
 		}
 
 		// Inject turn warning if approaching limit
-		r.injectTurnWarningIfNeeded(rc)
+		r.InjectTurnWarningIfNeeded(&rc.BaseRunContext, DefaultTurnWarningConfig())
 
 		// Stop at MaxActions
-		if rc.actionsTaken >= rc.maxActions {
+		if rc.ActionsTaken >= rc.MaxActions {
 			break
 		}
 	}
@@ -423,7 +410,7 @@ func (r *SubagentRunner) processAssistantResponseWithFallback(
 	ctx context.Context,
 	rc *subagentRunContext,
 ) (*entity.Message, []port.ToolCallInfo, error) {
-	msg, toolCalls, err := r.convService.ProcessAssistantResponse(ctx, rc.sessionID)
+	msg, toolCalls, err := r.ConvService.ProcessAssistantResponse(ctx, rc.SessionID)
 	if err == nil {
 		return msg, toolCalls, nil
 	}
@@ -450,59 +437,7 @@ func (r *SubagentRunner) processAssistantResponseWithFallback(
 	}
 
 	// Retry with parent model
-	return r.convService.ProcessAssistantResponse(ctx, rc.sessionID)
-}
-
-// processToolCalls executes tool calls and feeds results back to the conversation.
-func (r *SubagentRunner) processToolCalls(rc *subagentRunContext, toolCalls []port.ToolCallInfo) error {
-	var toolResults []entity.ToolResult
-	for _, tc := range toolCalls {
-		if !r.isToolCallAllowed(tc) {
-			// Blocked tools return error but DON'T count toward action limit
-			toolResults = append(toolResults, entity.ToolResult{
-				ToolID:  tc.ToolID,
-				Result:  fmt.Sprintf("tool '%s' is not allowed for this subagent", tc.ToolName),
-				IsError: true,
-			})
-			continue
-		}
-
-		// Execute allowed tool
-		r.displayToolExecution(rc.agent.Name, tc.ToolName)
-		result := r.executeToolCall(rc.ctx, tc)
-		toolResults = append(toolResults, result)
-		r.displayToolResult(rc.agent.Name, tc.ToolName, result.IsError)
-
-		// NOTE: actionsTaken increments are safe because tool execution is currently sequential.
-		// If tool execution becomes concurrent in the future, use atomic.AddInt32() instead.
-		rc.actionsTaken++ // Only executed tools count
-	}
-
-	if len(toolResults) > 0 {
-		return r.convService.AddToolResultMessage(rc.ctx, rc.sessionID, toolResults)
-	}
-	return nil
-}
-
-// isToolCallAllowed checks if a tool call is allowed based on config's AllowedTools.
-func (r *SubagentRunner) isToolCallAllowed(tc port.ToolCallInfo) bool {
-	if r.config.AllowedTools == nil {
-		return true // nil = allow all
-	}
-	if len(r.config.AllowedTools) == 0 {
-		return false // empty slice = block all
-	}
-	return r.isToolAllowed(r.config.AllowedTools, tc.ToolName)
-}
-
-// isToolAllowed checks if a tool is in the allowed list.
-func (r *SubagentRunner) isToolAllowed(allowedTools []string, toolName string) bool {
-	for _, allowed := range allowedTools {
-		if allowed == toolName {
-			return true
-		}
-	}
-	return false
+	return r.ConvService.ProcessAssistantResponse(ctx, rc.SessionID)
 }
 
 // executeToolCall executes a single tool call and returns the result.
@@ -516,19 +451,7 @@ func (r *SubagentRunner) executeToolCall(ctx context.Context, tc port.ToolCallIn
 		}
 	}
 
-	result, execErr := r.toolExecutor.ExecuteTool(ctx, tc.ToolName, tc.Input)
-	if execErr != nil {
-		return entity.ToolResult{
-			ToolID:  tc.ToolID,
-			Result:  execErr.Error(),
-			IsError: true,
-		}
-	}
-	return entity.ToolResult{
-		ToolID:  tc.ToolID,
-		Result:  result,
-		IsError: false,
-	}
+	return r.ExecuteToolCall(ctx, tc)
 }
 
 // displayStatus displays a status message for the subagent if UI is available.
@@ -553,20 +476,6 @@ func (r *SubagentRunner) displayToolResult(agentName string, toolName string, is
 			status = "Tool failed"
 		}
 		_ = r.userInterface.DisplaySubagentStatus(agentName, status, toolName)
-	}
-}
-
-// injectTurnWarningIfNeeded injects a warning message if the subagent is approaching the turn limit.
-func (r *SubagentRunner) injectTurnWarningIfNeeded(rc *subagentRunContext) {
-	remaining := rc.maxActions - rc.actionsTaken
-	cfg := DefaultTurnWarningConfig()
-	// Subagents don't use batch_tool, so no hint
-	warningMsg := BuildTurnWarningMessage(remaining, cfg)
-	if warningMsg != "" {
-		if _, err := r.convService.AddUserMessage(rc.ctx, rc.sessionID, warningMsg); err != nil {
-			// Log error but don't fail execution - warnings are non-critical
-			fmt.Fprintf(os.Stderr, "[SubagentRunner] Failed to inject turn warning: %v\n", err)
-		}
 	}
 }
 

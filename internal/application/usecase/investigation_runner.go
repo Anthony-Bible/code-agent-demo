@@ -21,11 +21,6 @@ const (
 	toolBash                  = "bash"
 )
 
-// conversationCleanupTimeout is the maximum time allowed for ending a conversation
-// during cleanup, using a background context so it succeeds even if the parent
-// context was cancelled.
-const conversationCleanupTimeout = 5 * time.Second
-
 // RCAServiceInterface defines the interface for Root Cause Analysis correlation.
 type RCAServiceInterface interface {
 	Correlate(ctx context.Context, findings []entity.InvestigationFinding) ([]entity.RCAFinding, error)
@@ -35,8 +30,8 @@ type RCAServiceInterface interface {
 // It manages the conversation loop with an AI provider, executes tools,
 // and tracks investigation progress.
 type InvestigationRunner struct {
-	convService    ConversationServiceInterface
-	toolExecutor   port.ToolExecutor
+	BaseRunner
+
 	safetyEnforcer SafetyEnforcer
 	promptBuilder  PromptBuilderRegistry
 	skillManager   port.SkillManager
@@ -81,8 +76,7 @@ func NewInvestigationRunner(
 	// safetyEnforcer, skillManager, rcaService, and uiAdapter are optional and can be nil
 
 	return &InvestigationRunner{
-		convService:    convService,
-		toolExecutor:   toolExecutor,
+		BaseRunner:     newBaseRunner(convService, toolExecutor, newSafetyPermissionChecker(safetyEnforcer)),
 		safetyEnforcer: safetyEnforcer,
 		promptBuilder:  promptBuilder,
 		skillManager:   skillManager,
@@ -129,8 +123,7 @@ func NewInvestigationRunnerWithStore(
 	// safetyEnforcer, skillManager, rcaService, and uiAdapter are optional and can be nil
 
 	return &InvestigationRunner{
-		convService:    convService,
-		toolExecutor:   toolExecutor,
+		BaseRunner:     newBaseRunner(convService, toolExecutor, newSafetyPermissionChecker(safetyEnforcer)),
 		safetyEnforcer: safetyEnforcer,
 		promptBuilder:  promptBuilder,
 		skillManager:   skillManager,
@@ -141,7 +134,6 @@ func NewInvestigationRunnerWithStore(
 	}
 }
 
-// SetRCAService sets the RCA service for the runner.
 // SetRCAService sets the RCA service. InvestigationRunner is not shared across
 // goroutines; each investigation creates a new runner instance.
 func (r *InvestigationRunner) SetRCAService(rcaService RCAServiceInterface) {
@@ -150,13 +142,10 @@ func (r *InvestigationRunner) SetRCAService(rcaService RCAServiceInterface) {
 
 // runContext holds state for an investigation run.
 type runContext struct {
-	ctx             context.Context
+	BaseRunContext
+
 	alert           *AlertForInvestigation
 	investigationID string
-	sessionID       string
-	startTime       time.Time
-	actionsTaken    int
-	maxActions      int
 }
 
 // failedResult creates a failed investigation result.
@@ -165,24 +154,18 @@ func (rc *runContext) failedResult(err error) *InvestigationResult {
 		InvestigationID: rc.investigationID,
 		AlertID:         rc.alert.ID(),
 		Status:          "failed",
-		ActionsTaken:    rc.actionsTaken,
-		Duration:        time.Since(rc.startTime),
+		ActionsTaken:    rc.ActionsTaken,
+		Duration:        time.Since(rc.StartTime),
 		Error:           err,
 	}
 }
 
-// executeToolCall executes a single tool call and returns the result.
-func (r *InvestigationRunner) executeToolCall(ctx context.Context, tc port.ToolCallInfo) entity.ToolResult {
-	// Check safety enforcer if configured
+// executeToolCallWithSafety wraps BaseRunner.ExecuteToolCall with command-level safety checks.
+func (r *InvestigationRunner) executeToolCallWithSafety(ctx context.Context, tc port.ToolCallInfo) entity.ToolResult {
 	if err := r.checkToolSafety(tc); err != nil {
 		return entity.ToolResult{ToolID: tc.ToolID, Result: err.Error(), IsError: true}
 	}
-
-	result, execErr := r.toolExecutor.ExecuteTool(ctx, tc.ToolName, tc.Input)
-	if execErr != nil {
-		return entity.ToolResult{ToolID: tc.ToolID, Result: execErr.Error(), IsError: true}
-	}
-	return entity.ToolResult{ToolID: tc.ToolID, Result: result, IsError: false}
+	return r.ExecuteToolCall(ctx, tc)
 }
 
 // checkToolSafety validates tool and command safety using the safety enforcer.
@@ -219,40 +202,9 @@ func extractCommandFromInput(input map[string]interface{}) string {
 	return ""
 }
 
-// processToolCalls executes tool calls and feeds results back.
+// processToolCalls delegates to BaseRunner.ProcessToolCalls with safety-checked execution.
 func (r *InvestigationRunner) processToolCalls(rc *runContext, toolCalls []port.ToolCallInfo) error {
-	var toolResults []entity.ToolResult
-	for _, tc := range toolCalls {
-		if !r.isToolCallAllowed(tc) {
-			// Blocked tools return error but DON'T count toward action limit
-			toolResults = append(toolResults, entity.ToolResult{
-				ToolID:  tc.ToolID,
-				Result:  fmt.Sprintf("tool '%s' is not allowed for this investigation", tc.ToolName),
-				IsError: true,
-			})
-			continue
-		}
-		toolResults = append(toolResults, r.executeToolCall(rc.ctx, tc))
-		rc.actionsTaken++ // Only executed tools count
-	}
-	if len(toolResults) > 0 {
-		return r.convService.AddToolResultMessage(rc.ctx, rc.sessionID, toolResults)
-	}
-	return nil
-}
-
-// cleanupConversation ends an investigation conversation using a background context
-// so cleanup succeeds even if the parent context was cancelled.
-func (r *InvestigationRunner) cleanupConversation(sessionID, investigationID string) {
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), conversationCleanupTimeout)
-	defer cancel()
-	if err := r.convService.EndConversation(cleanupCtx, sessionID); err != nil {
-		slog.Error("failed to end investigation conversation", //nolint:sloglint // no injected logger on this struct
-			"session_id", sessionID,
-			"investigation_id", investigationID,
-			"error", err,
-		)
-	}
+	return r.ProcessToolCalls(&rc.BaseRunContext, toolCalls, "is not allowed for this investigation", r.executeToolCallWithSafety)
 }
 
 // Run executes an investigation for the given alert.
@@ -292,19 +244,21 @@ func (r *InvestigationRunner) Run(
 	}
 
 	rc := &runContext{
-		ctx:             ctx,
+		BaseRunContext: BaseRunContext{
+			Ctx:        ctx,
+			StartTime:  time.Now(),
+			MaxActions: maxActions,
+		},
 		alert:           alert,
 		investigationID: investigationID,
-		startTime:       time.Now(),
-		maxActions:      maxActions,
 	}
 
-	sessionID, err := r.convService.StartConversation(ctx)
+	sessionID, err := r.ConvService.StartConversation(ctx)
 	if err != nil {
 		return rc.failedResult(err), err
 	}
-	rc.sessionID = sessionID
-	defer r.cleanupConversation(sessionID, investigationID)
+	rc.SessionID = sessionID
+	defer r.CleanupConversation(sessionID, investigationID, "investigation_id")
 
 	// Configure extended thinking mode if enabled
 	if r.config.ExtendedThinking {
@@ -317,7 +271,7 @@ func (r *InvestigationRunner) Run(
 			BudgetTokens: thinkingBudget,
 			ShowThinking: r.config.ShowThinking,
 		}
-		_ = r.convService.SetThinkingMode(rc.sessionID, thinkingInfo)
+		_ = r.ConvService.SetThinkingMode(rc.SessionID, thinkingInfo)
 	}
 
 	if err := r.sendInitialPrompt(rc); err != nil {
@@ -363,9 +317,9 @@ func (r *InvestigationRunner) Run(
 		stub := &simpleInvestigationRecord{
 			id:             result.InvestigationID,
 			alertID:        result.AlertID,
-			sessionID:      rc.sessionID,
+			sessionID:      rc.SessionID,
 			status:         result.Status,
-			startedAt:      rc.startTime,
+			startedAt:      rc.StartTime,
 			completedAt:    time.Now(),
 			findings:       result.Findings,
 			actionsTaken:   result.ActionsTaken,
@@ -422,7 +376,7 @@ func (r *InvestigationRunner) sendInitialPrompt(rc *runContext) error {
 	// Get available skills if skill manager is configured
 	var skills []port.SkillInfo
 	if r.skillManager != nil {
-		result, err := r.skillManager.DiscoverSkills(rc.ctx)
+		result, err := r.skillManager.DiscoverSkills(rc.Ctx)
 		if err == nil && result != nil {
 			skills = result.Skills
 		}
@@ -438,7 +392,7 @@ func (r *InvestigationRunner) sendInitialPrompt(rc *runContext) error {
 	// Set the full investigation prompt as a custom system prompt.
 	// This keeps the detailed instructions, tool descriptions, and guidelines
 	// in the system context rather than cluttering the conversation history.
-	if err := r.convService.SetCustomSystemPrompt(rc.ctx, rc.sessionID, prompt); err != nil {
+	if err := r.ConvService.SetCustomSystemPrompt(rc.Ctx, rc.SessionID, prompt); err != nil {
 		return err
 	}
 
@@ -446,7 +400,7 @@ func (r *InvestigationRunner) sendInitialPrompt(rc *runContext) error {
 	// Since the system prompt already contains all context, we only need
 	// basic alert identifiers here to start the conversation.
 	userMessage := r.formatTriggerMessage(rc.alert)
-	if _, err := r.convService.AddUserMessage(rc.ctx, rc.sessionID, userMessage); err != nil {
+	if _, err := r.ConvService.AddUserMessage(rc.Ctx, rc.SessionID, userMessage); err != nil {
 		return err
 	}
 
@@ -475,7 +429,7 @@ func (r *InvestigationRunner) formatTriggerMessage(alert *AlertForInvestigation)
 // getInvestigationTools returns the filtered list of tools for investigation prompts.
 // It filters based on the SafetyEnforcer's allowed tools policy.
 func (r *InvestigationRunner) getInvestigationTools() ([]entity.Tool, error) {
-	allTools, err := r.toolExecutor.ListTools()
+	allTools, err := r.ToolExecutor.ListTools()
 	if err != nil {
 		return nil, err
 	}
@@ -539,8 +493,8 @@ func (rc *runContext) buildCompletionResult(input map[string]interface{}) *Inves
 		InvestigationID: rc.investigationID,
 		AlertID:         rc.alert.ID(),
 		Status:          "completed",
-		ActionsTaken:    rc.actionsTaken,
-		Duration:        time.Since(rc.startTime),
+		ActionsTaken:    rc.ActionsTaken,
+		Duration:        time.Since(rc.StartTime),
 	}
 	if confidence, ok := input["confidence"].(float64); ok {
 		result.Confidence = confidence
@@ -556,8 +510,8 @@ func (rc *runContext) buildEscalationResult(input map[string]interface{}) *Inves
 		AlertID:         rc.alert.ID(),
 		Status:          "escalated",
 		Escalated:       true,
-		ActionsTaken:    rc.actionsTaken,
-		Duration:        time.Since(rc.startTime),
+		ActionsTaken:    rc.ActionsTaken,
+		Duration:        time.Since(rc.StartTime),
 	}
 	if reason, ok := input["reason"].(string); ok {
 		result.EscalateReason = reason
@@ -571,7 +525,7 @@ func (r *InvestigationRunner) checkSafetyTimeout(rc *runContext) error {
 	if r.safetyEnforcer == nil {
 		return nil
 	}
-	return r.safetyEnforcer.CheckTimeout(rc.ctx)
+	return r.safetyEnforcer.CheckTimeout(rc.Ctx)
 }
 
 // checkSafetyBudget checks if the safety enforcer reports budget exhaustion.
@@ -579,7 +533,7 @@ func (r *InvestigationRunner) checkSafetyBudget(rc *runContext) error {
 	if r.safetyEnforcer == nil {
 		return nil
 	}
-	return r.safetyEnforcer.CheckActionBudget(rc.actionsTaken)
+	return r.safetyEnforcer.CheckActionBudget(rc.ActionsTaken)
 }
 
 // checkConfidenceEscalation checks if the AI's confidence is below the escalation threshold.
@@ -602,7 +556,7 @@ func (rc *runContext) escalatedResult(err error, reason string) *InvestigationRe
 
 func (r *InvestigationRunner) runInvestigationLoop(rc *runContext) (*InvestigationResult, error) {
 	for {
-		if err := rc.ctx.Err(); err != nil {
+		if err := rc.Ctx.Err(); err != nil {
 			return nil, err
 		}
 
@@ -628,9 +582,9 @@ func (r *InvestigationRunner) runInvestigationLoop(rc *runContext) (*Investigati
 			return result, err
 		}
 
-		r.injectTurnWarningIfNeeded(rc)
+		r.InjectTurnWarningIfNeeded(&rc.BaseRunContext, TurnWarningConfig{WarningThreshold: 5, BatchToolHint: "batch_tool"})
 
-		if rc.actionsTaken >= rc.maxActions {
+		if rc.ActionsTaken >= rc.MaxActions {
 			if err := r.handleMaxActionsReached(rc); err != nil {
 				slog.Error("error handling max actions", "error", err)
 			}
@@ -663,31 +617,20 @@ func (r *InvestigationRunner) handleNoToolCalls(rc *runContext, msg *entity.Mess
 	return rc.completedResult(), nil
 }
 
-// injectTurnWarningIfNeeded injects a warning message if the agent is approaching the turn limit.
-func (r *InvestigationRunner) injectTurnWarningIfNeeded(rc *runContext) {
-	remaining := rc.maxActions - rc.actionsTaken
-	warningMsg := r.buildTurnWarningMessage(remaining)
-	if warningMsg != "" {
-		if _, err := r.convService.AddUserMessage(rc.ctx, rc.sessionID, warningMsg); err != nil {
-			slog.Error("failed to add warning message", "error", err)
-		}
-	}
-}
-
 // handleMaxActionsReached handles the scenario where max actions limit is reached.
 // Sends a summary request and allows one final AI response.
 func (r *InvestigationRunner) handleMaxActionsReached(rc *runContext) error {
 	slog.Info("max actions limit reached, requesting summary",
-		"actions_taken", rc.actionsTaken,
-		"max_actions", rc.maxActions)
+		"actions_taken", rc.ActionsTaken,
+		"max_actions", rc.MaxActions)
 
 	summaryMsg := "TURN LIMIT REACHED: You have reached the maximum number of allowed turns for this investigation. Please provide a summary of your findings and conclusions based on the investigation performed so far."
-	if _, err := r.convService.AddUserMessage(rc.ctx, rc.sessionID, summaryMsg); err != nil {
+	if _, err := r.ConvService.AddUserMessage(rc.Ctx, rc.SessionID, summaryMsg); err != nil {
 		slog.Error("failed to add summary request", "error", err)
 		return err
 	}
 
-	_, _, err := r.convService.ProcessAssistantResponse(rc.ctx, rc.sessionID)
+	_, _, err := r.ConvService.ProcessAssistantResponse(rc.Ctx, rc.SessionID)
 	if err != nil {
 		slog.Error("error processing final summary response", "error", err)
 		return err
@@ -723,18 +666,18 @@ func (r *InvestigationRunner) getNextToolCalls(rc *runContext) (*entity.Message,
 			thinkingContent.WriteString(thinking)
 			return nil
 		}
-		msg, toolCalls, err = r.convService.ProcessAssistantResponseStreaming(
-			rc.ctx, rc.sessionID, nil, thinkingCallback,
+		msg, toolCalls, err = r.ConvService.ProcessAssistantResponseStreaming(
+			rc.Ctx, rc.SessionID, nil, thinkingCallback,
 		)
 		r.displayThinkingContent(thinkingContent.String())
 	} else {
-		msg, toolCalls, err = r.convService.ProcessAssistantResponse(rc.ctx, rc.sessionID)
+		msg, toolCalls, err = r.ConvService.ProcessAssistantResponse(rc.Ctx, rc.SessionID)
 	}
 
 	if err != nil {
 		return nil, nil, err
 	}
-	return msg, r.limitToolCalls(rc, toolCalls), nil
+	return msg, r.LimitToolCalls(&rc.BaseRunContext, toolCalls), nil
 }
 
 // processLoopIteration handles one iteration of tool processing.
@@ -776,37 +719,7 @@ func (rc *runContext) completedResult() *InvestigationResult {
 		InvestigationID: rc.investigationID,
 		AlertID:         rc.alert.ID(),
 		Status:          "completed",
-		ActionsTaken:    rc.actionsTaken,
-		Duration:        time.Since(rc.startTime),
+		ActionsTaken:    rc.ActionsTaken,
+		Duration:        time.Since(rc.StartTime),
 	}
-}
-
-func (r *InvestigationRunner) limitToolCalls(rc *runContext, toolCalls []port.ToolCallInfo) []port.ToolCallInfo {
-	// Don't filter by allowed tools here - processToolCalls handles it with error results
-	remaining := rc.maxActions - rc.actionsTaken
-	if remaining <= 0 {
-		return nil
-	}
-	if len(toolCalls) > remaining {
-		return toolCalls[:remaining]
-	}
-	return toolCalls
-}
-
-// isToolCallAllowed checks if a tool call is allowed based on SafetyEnforcer policy.
-func (r *InvestigationRunner) isToolCallAllowed(tc port.ToolCallInfo) bool {
-	if r.safetyEnforcer == nil {
-		return true // No enforcer = allow all tools
-	}
-	return r.safetyEnforcer.CheckToolAllowed(tc.ToolName) == nil
-}
-
-// buildTurnWarningMessage generates a warning message based on remaining actions.
-// Returns empty string if no warning should be displayed.
-func (r *InvestigationRunner) buildTurnWarningMessage(remaining int) string {
-	cfg := TurnWarningConfig{
-		WarningThreshold: 5,
-		BatchToolHint:    "batch_tool",
-	}
-	return BuildTurnWarningMessage(remaining, cfg)
 }
