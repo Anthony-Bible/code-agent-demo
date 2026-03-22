@@ -152,20 +152,32 @@ func TestNewSubagentUseCase_NilSubagentRunner(t *testing.T) {
 
 // ==================== Input Validation Tests ====================
 
+func assertErrorContains(t *testing.T, err error, wantContains string) {
+	t.Helper()
+	if err == nil {
+		t.Error("expected error")
+		return
+	}
+	if wantContains != "" && !strings.Contains(err.Error(), wantContains) {
+		t.Errorf("expected error containing %q, got: %v", wantContains, err)
+	}
+}
+
 func TestSubagentUseCase_InputValidation(t *testing.T) {
 	tests := []struct {
-		name         string
-		agentName    string
-		prompt       string
-		setupManager func(*MockSubagentManager)
+		name            string
+		agentName       string
+		prompt          string
+		setupManager    func(*MockSubagentManager)
+		wantErrContains string
 	}{
-		{"empty agent name", "", "some prompt", nil},
-		{"empty prompt", "test-agent", "", nil},
+		{"empty agent name", "", "some prompt", nil, "agentName"},
+		{"empty prompt", "test-agent", "", nil, "prompt"},
 		{"agent not found", "nonexistent", "do something", func(m *MockSubagentManager) {
 			m.LoadAgentMetadataFunc = func(_ context.Context, _ string) (*entity.Subagent, error) {
 				return nil, errors.New("agent not found")
 			}
-		}},
+		}, "not found"},
 	}
 	for _, tt := range tests {
 		t.Run("sync/"+tt.name, func(t *testing.T) {
@@ -174,9 +186,7 @@ func TestSubagentUseCase_InputValidation(t *testing.T) {
 				tt.setupManager(h.manager)
 			}
 			result, err := h.build().SpawnSubagent(context.Background(), tt.agentName, tt.prompt)
-			if err == nil {
-				t.Error("expected error")
-			}
+			assertErrorContains(t, err, tt.wantErrContains)
 			if result != nil {
 				t.Error("expected nil result")
 			}
@@ -187,9 +197,7 @@ func TestSubagentUseCase_InputValidation(t *testing.T) {
 				tt.setupManager(h.manager)
 			}
 			handle, err := h.build().SpawnSubagentAsync(context.Background(), tt.agentName, tt.prompt)
-			if err == nil {
-				t.Error("expected error")
-			}
+			assertErrorContains(t, err, tt.wantErrContains)
 			if handle != nil {
 				t.Error("expected nil handle")
 			}

@@ -367,7 +367,7 @@ func newTestHarness(t *testing.T) *investigationRunnerTestHarness {
 		toolExecutor:   newInvestigationRunnerToolExecutorMock(),
 		safetyEnforcer: NewMockSafetyEnforcer(),
 		promptBuilder:  newInvestigationRunnerPromptBuilderMock(),
-		config:         AlertInvestigationUseCaseConfig{MaxConcurrent: 5},
+		config:         AlertInvestigationUseCaseConfig{MaxConcurrent: 5}, // default for tests; individual tests can override h.config as needed
 	}
 }
 

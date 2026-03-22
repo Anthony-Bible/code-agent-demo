@@ -370,6 +370,36 @@ func TestInvestigationTool_ConcurrentOperations(t *testing.T) {
 	}
 }
 
+func TestInvestigationTool_RaceConditionOnSameInvestigation(t *testing.T) {
+	for _, tc := range getInvestigationToolCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newInvestigationTestHelper(t)
+			numGoroutines := 5
+			invID := fmt.Sprintf("test-inv-race-%s", tc.name)
+			h.adapter.RegisterInvestigation(invID)
+
+			errChan := make(chan error, numGoroutines)
+			for range numGoroutines {
+				go func() {
+					input := tc.validInput(invID)
+					inputJSON, err := json.Marshal(input)
+					if err != nil {
+						errChan <- fmt.Errorf("marshal error: %w", err)
+						return
+					}
+					_, err = tc.execute(h, string(inputJSON))
+					errChan <- err
+				}()
+			}
+
+			successCount := collectConcurrentResults(t, errChan, numGoroutines)
+			if successCount != 1 {
+				t.Errorf("Expected exactly 1 success for same investigation, got %d", successCount)
+			}
+		})
+	}
+}
+
 func TestInvestigationTool_RespectsContextCancellation(t *testing.T) {
 	for _, tc := range getInvestigationToolCases() {
 		t.Run(tc.name, func(t *testing.T) {
