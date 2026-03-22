@@ -83,6 +83,40 @@ func (m *MockSubagentRunner) Run(
 	return nil, errors.New("not implemented")
 }
 
+// ==================== Test Harness ====================
+
+type subagentUseCaseTestHarness struct {
+	t       *testing.T
+	manager *MockSubagentManager
+	runner  *MockSubagentRunner
+}
+
+func newUseCaseTestHarness(t *testing.T) *subagentUseCaseTestHarness {
+	t.Helper()
+	testAgent := &entity.Subagent{
+		Name:       "test-agent",
+		RawContent: "Test system prompt",
+	}
+	return &subagentUseCaseTestHarness{
+		t: t,
+		manager: &MockSubagentManager{
+			LoadAgentMetadataFunc: func(_ context.Context, _ string) (*entity.Subagent, error) {
+				return testAgent, nil
+			},
+		},
+		runner: &MockSubagentRunner{
+			RunFunc: func(_ context.Context, _ *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+				return &SubagentResult{Status: "completed", Output: "Done"}, nil
+			},
+		},
+	}
+}
+
+func (h *subagentUseCaseTestHarness) build() *SubagentUseCase {
+	h.t.Helper()
+	return NewSubagentUseCase(h.manager, h.runner)
+}
+
 // ==================== Constructor Tests ====================
 
 func TestNewSubagentUseCase_ValidDependencies(t *testing.T) {
@@ -120,61 +154,48 @@ func TestNewSubagentUseCase_NilSubagentRunner(t *testing.T) {
 
 // ==================== Input Validation Tests ====================
 
-func TestSpawnSubagent_EmptyAgentName(t *testing.T) {
-	manager := &MockSubagentManager{}
-	runner := &MockSubagentRunner{}
-	uc := NewSubagentUseCase(manager, runner)
-
-	ctx := context.Background()
-	result, err := uc.SpawnSubagent(ctx, "", "some prompt")
-
-	if err == nil {
-		t.Error("SpawnSubagent() did not return error for empty agentName")
+func TestSubagentUseCase_InputValidation(t *testing.T) {
+	tests := []struct {
+		name         string
+		agentName    string
+		prompt       string
+		setupManager func(*MockSubagentManager)
+	}{
+		{"empty agent name", "", "some prompt", nil},
+		{"empty prompt", "test-agent", "", nil},
+		{"agent not found", "nonexistent", "do something", func(m *MockSubagentManager) {
+			m.LoadAgentMetadataFunc = func(_ context.Context, _ string) (*entity.Subagent, error) {
+				return nil, errors.New("agent not found")
+			}
+		}},
 	}
-	if result != nil {
-		t.Error("SpawnSubagent() should return nil result for empty agentName")
-	}
-	if err != nil && !strings.Contains(err.Error(), "agentName") {
-		t.Errorf("Expected error message to mention 'agentName', got: %v", err)
-	}
-}
-
-func TestSpawnSubagent_EmptyPrompt(t *testing.T) {
-	manager := &MockSubagentManager{}
-	runner := &MockSubagentRunner{}
-	uc := NewSubagentUseCase(manager, runner)
-
-	ctx := context.Background()
-	result, err := uc.SpawnSubagent(ctx, "test-agent", "")
-
-	if err == nil {
-		t.Error("SpawnSubagent() did not return error for empty prompt")
-	}
-	if result != nil {
-		t.Error("SpawnSubagent() should return nil result for empty prompt")
-	}
-	if err != nil && !strings.Contains(err.Error(), "prompt") {
-		t.Errorf("Expected error message to mention 'prompt', got: %v", err)
-	}
-}
-
-func TestSpawnSubagent_AgentNotFound(t *testing.T) {
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return nil, errors.New("agent not found")
-		},
-	}
-	runner := &MockSubagentRunner{}
-	uc := NewSubagentUseCase(manager, runner)
-
-	ctx := context.Background()
-	result, err := uc.SpawnSubagent(ctx, "nonexistent-agent", "do something")
-
-	if err == nil {
-		t.Error("SpawnSubagent() did not return error when agent not found")
-	}
-	if result != nil {
-		t.Error("SpawnSubagent() should return nil result when agent not found")
+	for _, tt := range tests {
+		t.Run("sync/"+tt.name, func(t *testing.T) {
+			h := newUseCaseTestHarness(t)
+			if tt.setupManager != nil {
+				tt.setupManager(h.manager)
+			}
+			result, err := h.build().SpawnSubagent(context.Background(), tt.agentName, tt.prompt)
+			if err == nil {
+				t.Error("expected error")
+			}
+			if result != nil {
+				t.Error("expected nil result")
+			}
+		})
+		t.Run("async/"+tt.name, func(t *testing.T) {
+			h := newUseCaseTestHarness(t)
+			if tt.setupManager != nil {
+				tt.setupManager(h.manager)
+			}
+			handle, err := h.build().SpawnSubagentAsync(context.Background(), tt.agentName, tt.prompt)
+			if err == nil {
+				t.Error("expected error")
+			}
+			if handle != nil {
+				t.Error("expected nil handle")
+			}
+		})
 	}
 }
 
@@ -498,66 +519,6 @@ func TestSpawnSubagent_ContextCancellation(t *testing.T) {
 }
 
 // ==================== Async Spawn Tests (Cycle 5.2) ====================
-
-// ==================== Input Validation Tests (Async) ====================
-
-func TestSpawnSubagentAsync_EmptyAgentName(t *testing.T) {
-	manager := &MockSubagentManager{}
-	runner := &MockSubagentRunner{}
-	uc := NewSubagentUseCase(manager, runner)
-
-	ctx := context.Background()
-	handle, err := uc.SpawnSubagentAsync(ctx, "", "some prompt")
-
-	if err == nil {
-		t.Error("SpawnSubagentAsync() did not return error for empty agentName")
-	}
-	if handle != nil {
-		t.Error("SpawnSubagentAsync() should return nil handle for empty agentName")
-	}
-	if err != nil && !strings.Contains(err.Error(), "agentName") {
-		t.Errorf("Expected error message to mention 'agentName', got: %v", err)
-	}
-}
-
-func TestSpawnSubagentAsync_EmptyPrompt(t *testing.T) {
-	manager := &MockSubagentManager{}
-	runner := &MockSubagentRunner{}
-	uc := NewSubagentUseCase(manager, runner)
-
-	ctx := context.Background()
-	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "")
-
-	if err == nil {
-		t.Error("SpawnSubagentAsync() did not return error for empty prompt")
-	}
-	if handle != nil {
-		t.Error("SpawnSubagentAsync() should return nil handle for empty prompt")
-	}
-	if err != nil && !strings.Contains(err.Error(), "prompt") {
-		t.Errorf("Expected error message to mention 'prompt', got: %v", err)
-	}
-}
-
-func TestSpawnSubagentAsync_AgentNotFound(t *testing.T) {
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return nil, errors.New("agent not found")
-		},
-	}
-	runner := &MockSubagentRunner{}
-	uc := NewSubagentUseCase(manager, runner)
-
-	ctx := context.Background()
-	handle, err := uc.SpawnSubagentAsync(ctx, "nonexistent-agent", "do something")
-
-	if err == nil {
-		t.Error("SpawnSubagentAsync() did not return error when agent not found")
-	}
-	if handle != nil {
-		t.Error("SpawnSubagentAsync() should return nil handle when agent not found")
-	}
-}
 
 // ==================== Non-Blocking Behavior Tests ====================
 

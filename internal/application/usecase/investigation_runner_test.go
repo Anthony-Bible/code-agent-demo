@@ -341,156 +341,99 @@ func createAssistantMessage(content string) *entity.Message {
 }
 
 // =============================================================================
-// Core Session Management Tests
+// Test Harness
 // =============================================================================
 
-func TestInvestigationRunner_CreatesSession(t *testing.T) {
-	// Arrange
-	convService := newInvestigationRunnerConvServiceMock()
-	convService.startConversationSession = "inv-session-001"
-	// Configure AI to return a completion message (no tool calls)
-	convService.processResponseMessages = []*entity.Message{
-		createAssistantMessage("Investigation complete. Root cause identified."),
-	}
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
-
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		AlertInvestigationUseCaseConfig{
-			MaxConcurrent: 5,
-		},
-	)
-
-	alert := createTestAlert("alert-001", "warning", "High CPU Usage")
-
-	// Act
-	_, err := runner.Run(context.Background(), alert, "inv-001")
-	// Assert
-	if err != nil {
-		t.Errorf("Run() error = %v, want nil", err)
-	}
-	if convService.startConversationCalls != 1 {
-		t.Errorf("StartConversation() called %d times, want 1", convService.startConversationCalls)
-	}
+// investigationRunnerTestHarness provides pre-configured mocks for InvestigationRunner tests.
+type investigationRunnerTestHarness struct {
+	t              *testing.T
+	convService    *investigationRunnerConvServiceMock
+	toolExecutor   *investigationRunnerToolExecutorMock
+	safetyEnforcer *MockSafetyEnforcer
+	promptBuilder  *investigationRunnerPromptBuilderMock
+	config         AlertInvestigationUseCaseConfig
 }
 
-func TestInvestigationRunner_EndsSessionOnCompletion(t *testing.T) {
-	// Arrange
+func newTestHarness(t *testing.T) *investigationRunnerTestHarness {
+	t.Helper()
 	convService := newInvestigationRunnerConvServiceMock()
-	convService.startConversationSession = "inv-session-002"
-	// Configure AI to return a completion message
 	convService.processResponseMessages = []*entity.Message{
 		createAssistantMessage("Investigation complete."),
 	}
 	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
+	return &investigationRunnerTestHarness{
+		t:              t,
+		convService:    convService,
+		toolExecutor:   newInvestigationRunnerToolExecutorMock(),
+		safetyEnforcer: NewMockSafetyEnforcer(),
+		promptBuilder:  newInvestigationRunnerPromptBuilderMock(),
+		config:         AlertInvestigationUseCaseConfig{MaxConcurrent: 5},
+	}
+}
 
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		AlertInvestigationUseCaseConfig{},
+func (h *investigationRunnerTestHarness) build() *InvestigationRunner {
+	h.t.Helper()
+	return NewInvestigationRunner(
+		h.convService, h.toolExecutor, h.safetyEnforcer, h.promptBuilder,
+		nil, nil, nil, h.config,
 	)
+}
 
-	alert := createTestAlert("alert-002", "warning", "Memory Alert")
+func (h *investigationRunnerTestHarness) run(alert *AlertForInvestigation, invID string) (*InvestigationResult, error) {
+	h.t.Helper()
+	return h.build().Run(context.Background(), alert, invID)
+}
 
-	// Act
-	_, err := runner.Run(context.Background(), alert, "inv-002")
-	// Assert
+// =============================================================================
+// Core Session Management Tests
+// =============================================================================
+
+func TestInvestigationRunner_CreatesSession(t *testing.T) {
+	h := newTestHarness(t)
+	h.convService.startConversationSession = "inv-session-001"
+	_, err := h.run(createTestAlert("alert-001", "warning", "High CPU Usage"), "inv-001")
 	if err != nil {
 		t.Errorf("Run() error = %v, want nil", err)
 	}
-	if convService.endConversationCalls != 1 {
-		t.Errorf("EndConversation() called %d times, want 1", convService.endConversationCalls)
+	if h.convService.startConversationCalls != 1 {
+		t.Errorf("StartConversation() called %d times, want 1", h.convService.startConversationCalls)
 	}
-	if convService.endConversationSession != "inv-session-002" {
+}
+
+func TestInvestigationRunner_EndsSessionOnCompletion(t *testing.T) {
+	h := newTestHarness(t)
+	h.convService.startConversationSession = "inv-session-002"
+	_, err := h.run(createTestAlert("alert-002", "warning", "Memory Alert"), "inv-002")
+	if err != nil {
+		t.Errorf("Run() error = %v, want nil", err)
+	}
+	if h.convService.endConversationCalls != 1 {
+		t.Errorf("EndConversation() called %d times, want 1", h.convService.endConversationCalls)
+	}
+	if h.convService.endConversationSession != "inv-session-002" {
 		t.Errorf("EndConversation() called with session %q, want %q",
-			convService.endConversationSession, "inv-session-002")
+			h.convService.endConversationSession, "inv-session-002")
 	}
 }
 
 func TestInvestigationRunner_EndsSessionOnError(t *testing.T) {
-	// Arrange
-	expectedError := errors.New("AI provider error")
-	convService := newInvestigationRunnerConvServiceMock()
-	convService.startConversationSession = "inv-session-003"
-	convService.processResponseError = expectedError
-
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		AlertInvestigationUseCaseConfig{},
-	)
-
-	alert := createTestAlert("alert-003", "critical", "System Failure")
-
-	// Act
-	_, err := runner.Run(context.Background(), alert, "inv-003")
-
-	// Assert
+	h := newTestHarness(t)
+	h.convService.startConversationSession = "inv-session-003"
+	h.convService.processResponseError = errors.New("AI provider error")
+	_, err := h.run(createTestAlert("alert-003", "critical", "System Failure"), "inv-003")
 	if err == nil {
 		t.Error("Run() should return error when AI fails")
 	}
-	// Session should still be ended for cleanup
-	if convService.endConversationCalls != 1 {
+	if h.convService.endConversationCalls != 1 {
 		t.Errorf("EndConversation() called %d times, want 1 (cleanup on error)",
-			convService.endConversationCalls)
+			h.convService.endConversationCalls)
 	}
 }
 
 func TestInvestigationRunner_StartConversationError(t *testing.T) {
-	// Arrange
-	expectedError := errors.New("failed to start conversation")
-	convService := newInvestigationRunnerConvServiceMock()
-	convService.startConversationError = expectedError
-
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		AlertInvestigationUseCaseConfig{},
-	)
-
-	alert := createTestAlert("alert-004", "warning", "Test Alert")
-
-	// Act
-	result, err := runner.Run(context.Background(), alert, "inv-004")
-
-	// Assert
+	h := newTestHarness(t)
+	h.convService.startConversationError = errors.New("failed to start conversation")
+	result, err := h.run(createTestAlert("alert-004", "warning", "Test Alert"), "inv-004")
 	if err == nil {
 		t.Error("Run() should return error when StartConversation fails")
 	}
@@ -563,94 +506,40 @@ func TestInvestigationRunner_SendsAlertContext(t *testing.T) {
 }
 
 func TestInvestigationRunner_UsesPromptBuilder(t *testing.T) {
-	// Arrange
-	convService := newInvestigationRunnerConvServiceMock()
-	convService.startConversationSession = "inv-session-006"
-	convService.processResponseMessages = []*entity.Message{
-		createAssistantMessage("Investigation complete."),
-	}
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
-
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-	promptBuilder.buildPromptResult = "Custom investigation prompt for HighCPU alert"
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		AlertInvestigationUseCaseConfig{},
-	)
-
-	alert := createTestAlert("alert-prompt-test", "warning", "HighCPU Alert")
-
-	// Act
-	_, err := runner.Run(context.Background(), alert, "inv-006")
-	// Assert
+	h := newTestHarness(t)
+	h.convService.startConversationSession = "inv-session-006"
+	h.promptBuilder.buildPromptResult = "Custom investigation prompt for HighCPU alert"
+	_, err := h.run(createTestAlert("alert-prompt-test", "warning", "HighCPU Alert"), "inv-006")
 	if err != nil {
 		t.Errorf("Run() error = %v, want nil", err)
 	}
-
-	// Verify PromptBuilder was called
-	if promptBuilder.buildPromptForAlertCalls != 1 {
+	if h.promptBuilder.buildPromptForAlertCalls != 1 {
 		t.Errorf("BuildPromptForAlert() called %d times, want 1",
-			promptBuilder.buildPromptForAlertCalls)
+			h.promptBuilder.buildPromptForAlertCalls)
 	}
-
-	// Verify the prompt was set as system prompt
-	if convService.setCustomSystemPromptCalls < 1 {
+	if h.convService.setCustomSystemPromptCalls < 1 {
 		t.Fatal("SetCustomSystemPrompt() was not called")
 	}
-
-	systemPrompt := convService.setCustomSystemPromptContent[0]
+	systemPrompt := h.convService.setCustomSystemPromptContent[0]
 	if !strings.Contains(systemPrompt, "Custom investigation prompt") {
 		t.Errorf("System prompt should contain prompt builder output, got: %s", systemPrompt)
 	}
 }
 
 func TestInvestigationRunner_PromptBuilderError(t *testing.T) {
-	// Arrange
-	expectedError := errors.New("failed to build prompt")
-	convService := newInvestigationRunnerConvServiceMock()
-	convService.startConversationSession = "inv-session-007"
-
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-	promptBuilder.buildPromptError = expectedError
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		AlertInvestigationUseCaseConfig{},
-	)
-
-	alert := createTestAlert("alert-prompt-error", "warning", "Test Alert")
-
-	// Act
-	result, err := runner.Run(context.Background(), alert, "inv-007")
-
-	// Assert
+	h := newTestHarness(t)
+	h.convService.startConversationSession = "inv-session-007"
+	h.promptBuilder.buildPromptError = errors.New("failed to build prompt")
+	result, err := h.run(createTestAlert("alert-prompt-error", "warning", "Test Alert"), "inv-007")
 	if err == nil {
 		t.Error("Run() should return error when PromptBuilder fails")
 	}
 	if result != nil && result.Status != "failed" {
 		t.Errorf("Run() result status = %q, want %q", result.Status, "failed")
 	}
-	// Session should be cleaned up
-	if convService.endConversationCalls != 1 {
+	if h.convService.endConversationCalls != 1 {
 		t.Errorf("EndConversation() should be called for cleanup, got %d calls",
-			convService.endConversationCalls)
+			h.convService.endConversationCalls)
 	}
 }
 
@@ -1188,42 +1077,15 @@ func TestInvestigationRunner_RespectsTimeout(t *testing.T) {
 // =============================================================================
 
 func TestInvestigationRunner_ReturnsCorrectResultStructure(t *testing.T) {
-	// Arrange
-	convService := newInvestigationRunnerConvServiceMock()
-	convService.startConversationSession = "inv-session-017"
-	convService.processResponseMessages = []*entity.Message{
-		createAssistantMessage("Investigation complete. No issues found."),
-	}
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
-
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		AlertInvestigationUseCaseConfig{},
-	)
-
-	alert := createTestAlert("alert-result", "warning", "Test Alert")
-
-	// Act
-	result, err := runner.Run(context.Background(), alert, "inv-017")
-	// Assert
+	h := newTestHarness(t)
+	h.convService.startConversationSession = "inv-session-017"
+	result, err := h.run(createTestAlert("alert-result", "warning", "Test Alert"), "inv-017")
 	if err != nil {
 		t.Errorf("Run() error = %v, want nil", err)
 	}
 	if result == nil {
 		t.Fatal("Run() result is nil")
 	}
-
-	// Check result structure
 	if result.InvestigationID != "inv-017" {
 		t.Errorf("Result.InvestigationID = %q, want %q", result.InvestigationID, "inv-017")
 	}
@@ -1239,27 +1101,8 @@ func TestInvestigationRunner_ReturnsCorrectResultStructure(t *testing.T) {
 }
 
 func TestInvestigationRunner_NilAlertReturnsError(t *testing.T) {
-	// Arrange
-	convService := newInvestigationRunnerConvServiceMock()
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		AlertInvestigationUseCaseConfig{},
-	)
-
-	// Act
-	result, err := runner.Run(context.Background(), nil, "inv-018")
-
-	// Assert
+	h := newTestHarness(t)
+	result, err := h.run(nil, "inv-018")
 	if err == nil {
 		t.Error("Run() should return error for nil alert")
 	}
@@ -1464,143 +1307,68 @@ func assertTableDrivenCalls(
 // =============================================================================
 
 func TestNewInvestigationRunner_NotNil(t *testing.T) {
-	convService := newInvestigationRunnerConvServiceMock()
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-	config := AlertInvestigationUseCaseConfig{}
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		config,
-	)
-
+	h := newTestHarness(t)
+	runner := h.build()
 	if runner == nil {
 		t.Error("NewInvestigationRunner() should not return nil")
 	}
 }
 
 // =============================================================================
-// Empty/Malformed Input Tests
+// Input Validation Tests (consolidated)
 // =============================================================================
 
-func TestInvestigationRunner_EmptyInvestigationID(t *testing.T) {
-	// Arrange
-	convService := newInvestigationRunnerConvServiceMock()
-	convService.startConversationSession = "session-empty-inv"
-	convService.processResponseMessages = []*entity.Message{
-		createAssistantMessage("Investigation complete."),
-	}
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
-
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		AlertInvestigationUseCaseConfig{},
-	)
-
-	alert := createTestAlert("alert-empty-inv", "warning", "Test")
-
-	// Act
-	result, err := runner.Run(context.Background(), alert, "")
-
-	// Assert
-	// Empty investigation ID should be rejected
-	if err == nil {
-		t.Error("Run() should return error for empty investigation ID")
-	}
-	if result != nil && result.Status != "failed" {
-		t.Errorf("Result.Status = %q, want %q for empty investigation ID",
-			result.Status, "failed")
-	}
-}
-
-func TestInvestigationRunner_WhitespaceInvestigationID(t *testing.T) {
-	// Arrange
-	convService := newInvestigationRunnerConvServiceMock()
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		AlertInvestigationUseCaseConfig{},
-	)
-
-	alert := createTestAlert("alert-ws-inv", "warning", "Test")
-
-	// Act
-	result, err := runner.Run(context.Background(), alert, "   ")
-
-	// Assert
-	// Whitespace-only investigation ID should be rejected
-	if err == nil {
-		t.Error("Run() should return error for whitespace-only investigation ID")
-	}
-	if result != nil && result.Status != "failed" {
-		t.Errorf("Result.Status = %q, want %q", result.Status, "failed")
-	}
-}
-
-func TestInvestigationRunner_AlertWithEmptyID(t *testing.T) {
-	// Arrange
-	convService := newInvestigationRunnerConvServiceMock()
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		AlertInvestigationUseCaseConfig{},
-	)
-
-	// Create alert with empty ID
-	alert := &AlertForInvestigation{
-		id:          "",
-		source:      "prometheus",
-		severity:    "warning",
-		title:       "Test Alert",
-		description: "Description",
-		labels:      map[string]string{},
+func TestInvestigationRunner_InputValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		alert   *AlertForInvestigation
+		invID   string
+		wantErr string
+	}{
+		{
+			name:    "nil alert",
+			alert:   nil,
+			invID:   "inv-018",
+			wantErr: "nil alert",
+		},
+		{
+			name:    "empty investigation ID",
+			alert:   createTestAlert("alert-empty-inv", "warning", "Test"),
+			invID:   "",
+			wantErr: "empty investigation ID",
+		},
+		{
+			name:    "whitespace investigation ID",
+			alert:   createTestAlert("alert-ws-inv", "warning", "Test"),
+			invID:   "   ",
+			wantErr: "whitespace-only investigation ID",
+		},
+		{
+			name: "alert with empty ID",
+			alert: &AlertForInvestigation{
+				id:          "",
+				source:      "prometheus",
+				severity:    "warning",
+				title:       "Test Alert",
+				description: "Description",
+				labels:      map[string]string{},
+			},
+			invID:   "inv-empty-alert-id",
+			wantErr: "alert with empty ID",
+		},
 	}
 
-	// Act
-	result, err := runner.Run(context.Background(), alert, "inv-empty-alert-id")
-
-	// Assert
-	// Alert with empty ID should be rejected
-	if err == nil {
-		t.Error("Run() should return error for alert with empty ID")
-	}
-	if result != nil && result.Status != "failed" {
-		t.Errorf("Result.Status = %q, want %q", result.Status, "failed")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newTestHarness(t)
+			result, err := h.run(tt.alert, tt.invID)
+			if err == nil {
+				t.Errorf("Run() should return error for %s", tt.wantErr)
+			}
+			if result != nil && result.Status != "failed" {
+				t.Errorf("Result.Status = %q, want %q", result.Status, "failed")
+			}
+		})
 	}
 }
 
@@ -1821,73 +1589,18 @@ func TestInvestigationRunner_EscalatesOnConsecutiveErrors(t *testing.T) {
 }
 
 func TestInvestigationRunner_EscalatesForCriticalAlert(t *testing.T) {
-	// Arrange
-	convService := newInvestigationRunnerConvServiceMock()
-	convService.startConversationSession = "inv-session-critical"
-	convService.processResponseMessages = []*entity.Message{
-		createAssistantMessage("Critical issue detected."),
-	}
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
-
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		AlertInvestigationUseCaseConfig{
-			AutoStartForCritical: true,
-		},
-	)
-
-	// Critical severity alert
-	alert := createTestAlert("alert-critical", "critical", "Critical System Failure")
-
-	// Act
-	result, err := runner.Run(context.Background(), alert, "inv-critical")
-	// Assert
+	h := newTestHarness(t)
+	h.config.AutoStartForCritical = true
+	result, err := h.run(createTestAlert("alert-critical", "critical", "Critical System Failure"), "inv-critical")
 	if err != nil {
 		t.Errorf("Run() error = %v, want nil", err)
 	}
-	// Critical alerts may require escalation even if investigation completes
 	_ = result
 }
 
 func TestInvestigationRunner_DoesNotEscalateOnHighConfidence(t *testing.T) {
-	// Arrange
-	convService := newInvestigationRunnerConvServiceMock()
-	convService.startConversationSession = "inv-session-high-conf"
-	convService.processResponseMessages = []*entity.Message{
-		createAssistantMessage("Root cause identified with high confidence."),
-	}
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
-
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		AlertInvestigationUseCaseConfig{},
-	)
-
-	alert := createTestAlert("alert-high-conf", "warning", "Clear Issue")
-
-	// Act
-	result, err := runner.Run(context.Background(), alert, "inv-high-conf")
-	// Assert
+	h := newTestHarness(t)
+	result, err := h.run(createTestAlert("alert-high-conf", "warning", "Clear Issue"), "inv-high-conf")
 	if err != nil {
 		t.Errorf("Run() error = %v, want nil", err)
 	}
@@ -2086,35 +1799,8 @@ func TestInvestigationRunner_MalformedToolInput(t *testing.T) {
 }
 
 func TestInvestigationRunner_NilToolCallInfo(t *testing.T) {
-	// Arrange
-	convService := newInvestigationRunnerConvServiceMock()
-	convService.startConversationSession = "inv-session-nil-tool"
-	convService.processResponseMessages = []*entity.Message{
-		createAssistantMessage("Done."),
-	}
-	// nil tool call info in the slice
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
-
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		AlertInvestigationUseCaseConfig{},
-	)
-
-	alert := createTestAlert("alert-nil-tool", "warning", "Test")
-
-	// Act
-	result, err := runner.Run(context.Background(), alert, "inv-nil-tool")
-	// Assert
+	h := newTestHarness(t)
+	result, err := h.run(createTestAlert("alert-nil-tool", "warning", "Test"), "inv-nil-tool")
 	if err != nil {
 		t.Errorf("Run() error = %v, want nil for nil tool calls", err)
 	}
@@ -2435,48 +2121,19 @@ func TestInvestigationRunner_ConcurrentRuns(t *testing.T) {
 // =============================================================================
 
 func TestInvestigationRunner_TracksDuration(t *testing.T) {
-	// Arrange
-	convService := newInvestigationRunnerConvServiceMock()
-	convService.startConversationSession = "inv-session-duration"
-	convService.processResponseMessages = []*entity.Message{
-		createAssistantMessage("Done."),
-	}
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
-
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		AlertInvestigationUseCaseConfig{},
-	)
-
-	alert := createTestAlert("alert-duration", "warning", "Test")
-
-	// Act
+	h := newTestHarness(t)
 	startTime := time.Now()
-	result, err := runner.Run(context.Background(), alert, "inv-duration")
+	result, err := h.run(createTestAlert("alert-duration", "warning", "Test"), "inv-duration")
 	endTime := time.Now()
-
-	// Assert
 	if err != nil {
 		t.Errorf("Run() error = %v, want nil", err)
 	}
 	if result == nil {
 		t.Fatal("Run() result is nil")
 	}
-	// Duration should be positive and reasonable
 	if result.Duration <= 0 {
 		t.Error("Result.Duration should be positive")
 	}
-	// Duration should not exceed actual elapsed time significantly
 	elapsed := endTime.Sub(startTime)
 	if result.Duration > elapsed+time.Second {
 		t.Errorf("Result.Duration = %v, actual elapsed = %v (should be similar)",
@@ -2489,35 +2146,12 @@ func TestInvestigationRunner_TracksDuration(t *testing.T) {
 // =============================================================================
 
 func TestInvestigationRunner_ErrorContainsContext(t *testing.T) {
-	// Arrange
-	convService := newInvestigationRunnerConvServiceMock()
-	convService.startConversationError = errors.New("connection refused to AI provider")
-
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		AlertInvestigationUseCaseConfig{},
-	)
-
-	alert := createTestAlert("alert-error-ctx", "warning", "Test")
-
-	// Act
-	_, err := runner.Run(context.Background(), alert, "inv-error-ctx")
-
-	// Assert
+	h := newTestHarness(t)
+	h.convService.startConversationError = errors.New("connection refused to AI provider")
+	_, err := h.run(createTestAlert("alert-error-ctx", "warning", "Test"), "inv-error-ctx")
 	if err == nil {
 		t.Error("Run() should return error")
 	}
-	// Error should provide context about what failed
 	errorStr := err.Error()
 	if len(errorStr) < 10 {
 		t.Errorf("Error message too short, should provide context: %v", err)
@@ -2529,39 +2163,16 @@ func TestInvestigationRunner_ErrorContainsContext(t *testing.T) {
 // =============================================================================
 
 func TestInvestigationRunner_AddUserMessageError(t *testing.T) {
-	// Arrange
-	convService := newInvestigationRunnerConvServiceMock()
-	convService.startConversationSession = "inv-session-user-msg-err"
-	convService.addUserMessageError = errors.New("failed to add message")
-
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		AlertInvestigationUseCaseConfig{},
-	)
-
-	alert := createTestAlert("alert-user-msg-err", "warning", "Test")
-
-	// Act
-	result, err := runner.Run(context.Background(), alert, "inv-user-msg-err")
-
-	// Assert
+	h := newTestHarness(t)
+	h.convService.startConversationSession = "inv-session-user-msg-err"
+	h.convService.addUserMessageError = errors.New("failed to add message")
+	result, err := h.run(createTestAlert("alert-user-msg-err", "warning", "Test"), "inv-user-msg-err")
 	if err == nil {
 		t.Error("Run() should return error when AddUserMessage fails")
 	}
-	// Session should still be cleaned up
-	if convService.endConversationCalls != 1 {
+	if h.convService.endConversationCalls != 1 {
 		t.Errorf("EndConversation() should be called for cleanup, got %d calls",
-			convService.endConversationCalls)
+			h.convService.endConversationCalls)
 	}
 	_ = result
 }
@@ -2863,35 +2474,8 @@ func TestInvestigationRunner_ZeroMaxActions(t *testing.T) {
 }
 
 func TestInvestigationRunner_ZeroDuration(t *testing.T) {
-	// Arrange
-	convService := newInvestigationRunnerConvServiceMock()
-	convService.startConversationSession = "inv-session-zero-duration"
-	convService.processResponseMessages = []*entity.Message{
-		createAssistantMessage("Done."),
-	}
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
-
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		AlertInvestigationUseCaseConfig{},
-	)
-
-	alert := createTestAlert("alert-zero-duration", "warning", "Test")
-
-	// Act
-	result, err := runner.Run(context.Background(), alert, "inv-zero-duration")
-	// Assert
-	// Zero duration could mean immediate timeout or no timeout limit
+	h := newTestHarness(t)
+	result, err := h.run(createTestAlert("alert-zero-duration", "warning", "Test"), "inv-zero-duration")
 	if err != nil {
 		t.Logf("Run() with MaxDuration=0: error = %v", err)
 	}
@@ -2899,35 +2483,8 @@ func TestInvestigationRunner_ZeroDuration(t *testing.T) {
 }
 
 func TestInvestigationRunner_NegativeValues(t *testing.T) {
-	// Arrange
-	convService := newInvestigationRunnerConvServiceMock()
-	convService.startConversationSession = "inv-session-negative"
-	convService.processResponseMessages = []*entity.Message{
-		createAssistantMessage("Done."),
-	}
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
-
-	toolExecutor := newInvestigationRunnerToolExecutorMock()
-	safetyEnforcer := NewMockSafetyEnforcer()
-	promptBuilder := newInvestigationRunnerPromptBuilderMock()
-
-	runner := NewInvestigationRunner(
-		convService,
-		toolExecutor,
-		safetyEnforcer,
-		promptBuilder,
-		nil, // skillManager
-		nil, // rcaService
-		nil, // uiAdapter
-		AlertInvestigationUseCaseConfig{},
-	)
-
-	alert := createTestAlert("alert-negative", "warning", "Test")
-
-	// Act
-	result, err := runner.Run(context.Background(), alert, "inv-negative")
-	// Assert
-	// Negative values should be handled gracefully (rejected or treated as default)
+	h := newTestHarness(t)
+	result, err := h.run(createTestAlert("alert-negative", "warning", "Test"), "inv-negative")
 	if err != nil {
 		t.Logf("Run() with negative config values: error = %v", err)
 	}

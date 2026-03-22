@@ -393,6 +393,45 @@ func createSubagentAssistantMessage(content string) *entity.Message {
 }
 
 // =============================================================================
+// Test Harness
+// =============================================================================
+
+type subagentRunnerTestHarness struct {
+	t            *testing.T
+	convService  *subagentRunnerConvServiceMock
+	toolExecutor *subagentRunnerToolExecutorMock
+	aiProvider   *subagentRunnerAIProviderMock
+	config       SubagentConfig
+}
+
+func newSubagentTestHarness(t *testing.T) *subagentRunnerTestHarness {
+	t.Helper()
+	convService := newSubagentRunnerConvServiceMock()
+	convService.startConversationSession = "subagent-session-123"
+	convService.processResponseMessages = []*entity.Message{
+		createSubagentAssistantMessage("Task completed successfully"),
+	}
+	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
+	return &subagentRunnerTestHarness{
+		t:            t,
+		convService:  convService,
+		toolExecutor: newSubagentRunnerToolExecutorMock(),
+		aiProvider:   newSubagentRunnerAIProviderMock(),
+		config:       SubagentConfig{MaxActions: 10, AllowedTools: []string{"bash", "read_file"}},
+	}
+}
+
+func (h *subagentRunnerTestHarness) build() *SubagentRunner {
+	h.t.Helper()
+	return NewSubagentRunner(h.convService, h.toolExecutor, h.aiProvider, nil, h.config)
+}
+
+func (h *subagentRunnerTestHarness) run(agent *entity.Subagent, prompt, id string) (*SubagentResult, error) {
+	h.t.Helper()
+	return h.build().Run(context.Background(), agent, prompt, id)
+}
+
+// =============================================================================
 // Constructor Tests
 // =============================================================================
 
@@ -418,52 +457,27 @@ func TestNewSubagentRunner_WithAllDependencies(t *testing.T) {
 	}
 }
 
-func TestNewSubagentRunner_PanicsWithNilConversationService(t *testing.T) {
-	// Arrange
-	toolExecutor := newSubagentRunnerToolExecutorMock()
-	aiProvider := newSubagentRunnerAIProviderMock()
-	config := SubagentConfig{}
-
-	// Act & Assert
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("NewSubagentRunner() should panic with nil convService")
-		}
-	}()
-
-	NewSubagentRunner(nil, toolExecutor, aiProvider, nil, config)
-}
-
-func TestNewSubagentRunner_PanicsWithNilToolExecutor(t *testing.T) {
-	// Arrange
-	convService := newSubagentRunnerConvServiceMock()
-	aiProvider := newSubagentRunnerAIProviderMock()
-	config := SubagentConfig{}
-
-	// Act & Assert
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("NewSubagentRunner() should panic with nil toolExecutor")
-		}
-	}()
-
-	NewSubagentRunner(convService, nil, aiProvider, nil, config)
-}
-
-func TestNewSubagentRunner_PanicsWithNilAIProvider(t *testing.T) {
-	// Arrange
-	convService := newSubagentRunnerConvServiceMock()
-	toolExecutor := newSubagentRunnerToolExecutorMock()
-	config := SubagentConfig{}
-
-	// Act & Assert
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("NewSubagentRunner() should panic with nil aiProvider")
-		}
-	}()
-
-	NewSubagentRunner(convService, toolExecutor, nil, nil, config)
+func TestNewSubagentRunner_PanicsOnNilDependency(t *testing.T) {
+	tests := []struct {
+		name         string
+		convService  ConversationServiceInterface
+		toolExecutor port.ToolExecutor
+		aiProvider   port.AIProvider
+	}{
+		{"nil convService", nil, newSubagentRunnerToolExecutorMock(), newSubagentRunnerAIProviderMock()},
+		{"nil toolExecutor", newSubagentRunnerConvServiceMock(), nil, newSubagentRunnerAIProviderMock()},
+		{"nil aiProvider", newSubagentRunnerConvServiceMock(), newSubagentRunnerToolExecutorMock(), nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r == nil {
+					t.Error("expected panic")
+				}
+			}()
+			NewSubagentRunner(tt.convService, tt.toolExecutor, tt.aiProvider, nil, SubagentConfig{})
+		})
+	}
 }
 
 // =============================================================================
@@ -471,30 +485,10 @@ func TestNewSubagentRunner_PanicsWithNilAIProvider(t *testing.T) {
 // =============================================================================
 
 func TestSubagentRunner_Run_SuccessfulExecution(t *testing.T) {
-	// Arrange
-	convService := newSubagentRunnerConvServiceMock()
-	convService.startConversationSession = "subagent-session-001"
-	// Configure AI to complete without tool calls
-	convService.processResponseMessages = []*entity.Message{
-		createSubagentAssistantMessage("Task completed successfully"),
-	}
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
+	h := newSubagentTestHarness(t)
+	h.convService.startConversationSession = "subagent-session-001"
 
-	toolExecutor := newSubagentRunnerToolExecutorMock()
-	aiProvider := newSubagentRunnerAIProviderMock()
-
-	config := SubagentConfig{
-		MaxActions:   10,
-		MaxDuration:  5 * time.Minute,
-		AllowedTools: []string{"bash", "read_file"},
-	}
-
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
-	agent := createTestAgent("agent-001", "Code Analyzer")
-	taskPrompt := "Analyze the error logs and identify the root cause"
-
-	// Act
-	result, err := runner.Run(context.Background(), agent, taskPrompt, "subagent-001")
+	result, err := h.run(createTestAgent("agent-001", "Code Analyzer"), "Analyze the error logs and identify the root cause", "subagent-001")
 	// Assert
 	if err != nil {
 		t.Errorf("Run() error = %v, want nil", err)
@@ -514,18 +508,10 @@ func TestSubagentRunner_Run_SuccessfulExecution(t *testing.T) {
 }
 
 func TestSubagentRunner_Run_HandlesNilAgent(t *testing.T) {
-	// Arrange
-	convService := newSubagentRunnerConvServiceMock()
-	toolExecutor := newSubagentRunnerToolExecutorMock()
-	aiProvider := newSubagentRunnerAIProviderMock()
-	config := SubagentConfig{}
+	h := newSubagentTestHarness(t)
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+	result, err := h.run(nil, "some task", "subagent-002")
 
-	// Act
-	result, err := runner.Run(context.Background(), nil, "some task", "subagent-002")
-
-	// Assert
 	if err == nil {
 		t.Error("Run() should return error with nil agent")
 	}
@@ -538,19 +524,10 @@ func TestSubagentRunner_Run_HandlesNilAgent(t *testing.T) {
 }
 
 func TestSubagentRunner_Run_HandlesEmptyTaskPrompt(t *testing.T) {
-	// Arrange
-	convService := newSubagentRunnerConvServiceMock()
-	toolExecutor := newSubagentRunnerToolExecutorMock()
-	aiProvider := newSubagentRunnerAIProviderMock()
-	config := SubagentConfig{}
+	h := newSubagentTestHarness(t)
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
-	agent := createTestAgent("agent-003", "Helper")
+	result, err := h.run(createTestAgent("agent-003", "Helper"), "", "subagent-003")
 
-	// Act
-	result, err := runner.Run(context.Background(), agent, "", "subagent-003")
-
-	// Assert
 	if err == nil {
 		t.Error("Run() should return error with empty task prompt")
 	}
@@ -567,108 +544,57 @@ func TestSubagentRunner_Run_HandlesEmptyTaskPrompt(t *testing.T) {
 // =============================================================================
 
 func TestSubagentRunner_CreatesIsolatedSession(t *testing.T) {
-	// Arrange
-	convService := newSubagentRunnerConvServiceMock()
-	convService.startConversationSession = "subagent-session-iso-001"
-	convService.processResponseMessages = []*entity.Message{
-		createSubagentAssistantMessage("Done"),
-	}
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
+	h := newSubagentTestHarness(t)
+	h.convService.startConversationSession = "subagent-session-iso-001"
 
-	toolExecutor := newSubagentRunnerToolExecutorMock()
-	aiProvider := newSubagentRunnerAIProviderMock()
-	config := SubagentConfig{MaxActions: 10}
-
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
-	agent := createTestAgent("agent-iso", "Isolated Agent")
-
-	// Act
-	_, err := runner.Run(context.Background(), agent, "Execute task", "subagent-iso-001")
-	// Assert
+	_, err := h.run(createTestAgent("agent-iso", "Isolated Agent"), "Execute task", "subagent-iso-001")
 	if err != nil {
 		t.Errorf("Run() error = %v, want nil", err)
 	}
-	if convService.startConversationCalls != 1 {
-		t.Errorf("StartConversation() called %d times, want 1", convService.startConversationCalls)
+	if h.convService.startConversationCalls != 1 {
+		t.Errorf("StartConversation() called %d times, want 1", h.convService.startConversationCalls)
 	}
 }
 
 func TestSubagentRunner_CleansUpSessionOnCompletion(t *testing.T) {
-	// Arrange
-	convService := newSubagentRunnerConvServiceMock()
-	convService.startConversationSession = "subagent-session-cleanup-001"
-	convService.processResponseMessages = []*entity.Message{
-		createSubagentAssistantMessage("Completed"),
-	}
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{nil}
+	h := newSubagentTestHarness(t)
+	h.convService.startConversationSession = "subagent-session-cleanup-001"
 
-	toolExecutor := newSubagentRunnerToolExecutorMock()
-	aiProvider := newSubagentRunnerAIProviderMock()
-	config := SubagentConfig{MaxActions: 10}
-
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
-	agent := createTestAgent("agent-cleanup", "Test Agent")
-
-	// Act
-	_, err := runner.Run(context.Background(), agent, "Task", "subagent-cleanup-001")
-	// Assert
+	_, err := h.run(createTestAgent("agent-cleanup", "Test Agent"), "Task", "subagent-cleanup-001")
 	if err != nil {
 		t.Errorf("Run() error = %v, want nil", err)
 	}
-	if convService.endConversationCalls != 1 {
-		t.Errorf("EndConversation() called %d times, want 1", convService.endConversationCalls)
+	if h.convService.endConversationCalls != 1 {
+		t.Errorf("EndConversation() called %d times, want 1", h.convService.endConversationCalls)
 	}
-	if convService.endConversationSession != "subagent-session-cleanup-001" {
+	if h.convService.endConversationSession != "subagent-session-cleanup-001" {
 		t.Errorf("EndConversation() called with session %q, want %q",
-			convService.endConversationSession, "subagent-session-cleanup-001")
+			h.convService.endConversationSession, "subagent-session-cleanup-001")
 	}
 }
 
 func TestSubagentRunner_CleansUpSessionOnError(t *testing.T) {
-	// Arrange
-	expectedError := errors.New("AI processing error")
-	convService := newSubagentRunnerConvServiceMock()
-	convService.startConversationSession = "subagent-session-error-001"
-	convService.processResponseError = expectedError
+	h := newSubagentTestHarness(t)
+	h.convService.startConversationSession = "subagent-session-error-001"
+	h.convService.processResponseError = errors.New("AI processing error")
 
-	toolExecutor := newSubagentRunnerToolExecutorMock()
-	aiProvider := newSubagentRunnerAIProviderMock()
-	config := SubagentConfig{MaxActions: 10}
+	_, err := h.run(createTestAgent("agent-error", "Test Agent"), "Task", "subagent-error-001")
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
-	agent := createTestAgent("agent-error", "Test Agent")
-
-	// Act
-	_, err := runner.Run(context.Background(), agent, "Task", "subagent-error-001")
-
-	// Assert
 	if err == nil {
 		t.Error("Run() should return error when AI fails")
 	}
-	// Session should still be ended for cleanup
-	if convService.endConversationCalls != 1 {
+	if h.convService.endConversationCalls != 1 {
 		t.Errorf("EndConversation() called %d times, want 1 (cleanup on error)",
-			convService.endConversationCalls)
+			h.convService.endConversationCalls)
 	}
 }
 
 func TestSubagentRunner_HandlesStartConversationError(t *testing.T) {
-	// Arrange
-	expectedError := errors.New("failed to start conversation")
-	convService := newSubagentRunnerConvServiceMock()
-	convService.startConversationError = expectedError
+	h := newSubagentTestHarness(t)
+	h.convService.startConversationError = errors.New("failed to start conversation")
 
-	toolExecutor := newSubagentRunnerToolExecutorMock()
-	aiProvider := newSubagentRunnerAIProviderMock()
-	config := SubagentConfig{}
+	result, err := h.run(createTestAgent("agent-start-err", "Test Agent"), "Task", "subagent-start-err")
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
-	agent := createTestAgent("agent-start-err", "Test Agent")
-
-	// Act
-	result, err := runner.Run(context.Background(), agent, "Task", "subagent-start-err")
-
-	// Assert
 	if err == nil {
 		t.Error("Run() should return error when StartConversation fails")
 	}
@@ -1245,170 +1171,87 @@ func TestSubagentRunner_ReturnsResultWithDuration(t *testing.T) {
 // Tool Filtering (AllowedTools) Tests
 // =============================================================================
 
-func TestSubagentRunner_AllowedTools_AllowsOnlySpecifiedTools(t *testing.T) {
-	// Arrange
-	convService := newSubagentRunnerConvServiceMock()
-	convService.startConversationSession = "subagent-session-filter-001"
-	convService.processResponseMessages = []*entity.Message{
-		createSubagentAssistantMessage("Trying to execute tools"),
-		createSubagentAssistantMessage("Done"),
-	}
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{
+func TestSubagentRunner_AllowedToolsFiltering(t *testing.T) {
+	tests := []struct {
+		name              string
+		allowedTools      []string
+		agentAllowedTools []string
+		toolCalls         []port.ToolCallInfo
+		wantExecuteCalls  int
+		wantFirstToolName string
+	}{
 		{
-			{ToolID: "t1", ToolName: "bash", Input: map[string]interface{}{"command": "ls"}},
-			{ToolID: "t2", ToolName: "read_file", Input: map[string]interface{}{"path": "/tmp/test"}},
+			name:              "allows only specified tools",
+			allowedTools:      []string{"bash"},
+			agentAllowedTools: []string{"bash"},
+			toolCalls: []port.ToolCallInfo{
+				{ToolID: "t1", ToolName: "bash", Input: map[string]interface{}{"command": "ls"}},
+				{ToolID: "t2", ToolName: "read_file", Input: map[string]interface{}{"path": "/tmp/test"}},
+			},
+			wantExecuteCalls:  1,
+			wantFirstToolName: "bash",
 		},
-		nil,
-	}
-
-	toolExecutor := newSubagentRunnerToolExecutorMock()
-	aiProvider := newSubagentRunnerAIProviderMock()
-	config := SubagentConfig{
-		MaxActions:   10,
-		AllowedTools: []string{"bash"}, // Only bash allowed
-	}
-
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
-	agent := createTestAgent("agent-filter", "Filter Agent")
-	agent.AllowedTools = []string{"bash"} // Agent also specifies allowed tools
-
-	// Act
-	result, err := runner.Run(context.Background(), agent, "Execute commands", "subagent-filter-001")
-	// Assert
-	if err != nil {
-		t.Errorf("Run() error = %v, want nil", err)
-	}
-	if result == nil {
-		t.Fatal("Run() returned nil result")
-	}
-	// Only bash should have been executed, not read_file
-	if toolExecutor.executeToolCalls != 1 {
-		t.Errorf("ExecuteTool() called %d times, want 1 (only bash should execute)", toolExecutor.executeToolCalls)
-	}
-	if len(toolExecutor.executeToolName) > 0 && toolExecutor.executeToolName[0] != "bash" {
-		t.Errorf("ExecuteTool() called with tool %q, want %q", toolExecutor.executeToolName[0], "bash")
-	}
-}
-
-func TestSubagentRunner_AllowedTools_BlocksNonAllowedTools(t *testing.T) {
-	// Arrange
-	convService := newSubagentRunnerConvServiceMock()
-	convService.startConversationSession = "subagent-session-block-001"
-	convService.processResponseMessages = []*entity.Message{
-		createSubagentAssistantMessage("Trying blocked tool"),
-		createSubagentAssistantMessage("Done"),
-	}
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{
 		{
-			{ToolID: "t1", ToolName: "list_files", Input: map[string]interface{}{"directory": "/"}},
+			name:         "blocks non-allowed tools",
+			allowedTools: []string{"bash", "read_file"},
+			toolCalls: []port.ToolCallInfo{
+				{ToolID: "t1", ToolName: "list_files", Input: map[string]interface{}{"directory": "/"}},
+			},
+			wantExecuteCalls: 0,
 		},
-		nil,
-	}
-
-	toolExecutor := newSubagentRunnerToolExecutorMock()
-	aiProvider := newSubagentRunnerAIProviderMock()
-	config := SubagentConfig{
-		MaxActions:   10,
-		AllowedTools: []string{"bash", "read_file"}, // list_files NOT allowed
-	}
-
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
-	agent := createTestAgent("agent-block", "Block Agent")
-
-	// Act
-	result, err := runner.Run(context.Background(), agent, "List files", "subagent-block-001")
-	// Assert
-	if err != nil {
-		t.Errorf("Run() error = %v, want nil", err)
-	}
-	if result == nil {
-		t.Fatal("Run() returned nil result")
-	}
-	// list_files should have been blocked, no tools executed
-	if toolExecutor.executeToolCalls != 0 {
-		t.Errorf("ExecuteTool() called %d times, want 0 (list_files should be blocked)", toolExecutor.executeToolCalls)
-	}
-}
-
-func TestSubagentRunner_AllowedTools_NilAllowedToolsAllowsAll(t *testing.T) {
-	// Arrange
-	convService := newSubagentRunnerConvServiceMock()
-	convService.startConversationSession = "subagent-session-nil-001"
-	convService.processResponseMessages = []*entity.Message{
-		createSubagentAssistantMessage("Running tools"),
-		createSubagentAssistantMessage("Done"),
-	}
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{
 		{
-			{ToolID: "t1", ToolName: "bash", Input: map[string]interface{}{"command": "echo"}},
-			{ToolID: "t2", ToolName: "read_file", Input: map[string]interface{}{"path": "/tmp/test"}},
-			{ToolID: "t3", ToolName: "list_files", Input: map[string]interface{}{"directory": "/"}},
+			name:         "nil allowed tools allows all",
+			allowedTools: nil,
+			toolCalls: []port.ToolCallInfo{
+				{ToolID: "t1", ToolName: "bash", Input: map[string]interface{}{"command": "echo"}},
+				{ToolID: "t2", ToolName: "read_file", Input: map[string]interface{}{"path": "/tmp/test"}},
+				{ToolID: "t3", ToolName: "list_files", Input: map[string]interface{}{"directory": "/"}},
+			},
+			wantExecuteCalls: 3,
 		},
-		nil,
-	}
-
-	toolExecutor := newSubagentRunnerToolExecutorMock()
-	aiProvider := newSubagentRunnerAIProviderMock()
-	config := SubagentConfig{
-		MaxActions:   10,
-		AllowedTools: nil, // nil means allow all
-	}
-
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
-	agent := createTestAgent("agent-nil", "Nil Filter Agent")
-
-	// Act
-	result, err := runner.Run(context.Background(), agent, "Execute all tools", "subagent-nil-001")
-	// Assert
-	if err != nil {
-		t.Errorf("Run() error = %v, want nil", err)
-	}
-	if result == nil {
-		t.Fatal("Run() returned nil result")
-	}
-	// All three tools should have been executed
-	if toolExecutor.executeToolCalls != 3 {
-		t.Errorf("ExecuteTool() called %d times, want 3 (all tools should execute)", toolExecutor.executeToolCalls)
-	}
-}
-
-func TestSubagentRunner_AllowedTools_EmptySliceBlocksAll(t *testing.T) {
-	// Arrange
-	convService := newSubagentRunnerConvServiceMock()
-	convService.startConversationSession = "subagent-session-empty-001"
-	convService.processResponseMessages = []*entity.Message{
-		createSubagentAssistantMessage("Trying tools"),
-		createSubagentAssistantMessage("Done"),
-	}
-	convService.processResponseToolCalls = [][]port.ToolCallInfo{
 		{
-			{ToolID: "t1", ToolName: "bash", Input: map[string]interface{}{"command": "echo"}},
+			name:         "empty slice blocks all",
+			allowedTools: []string{},
+			toolCalls: []port.ToolCallInfo{
+				{ToolID: "t1", ToolName: "bash", Input: map[string]interface{}{"command": "echo"}},
+			},
+			wantExecuteCalls: 0,
 		},
-		nil,
 	}
 
-	toolExecutor := newSubagentRunnerToolExecutorMock()
-	aiProvider := newSubagentRunnerAIProviderMock()
-	config := SubagentConfig{
-		MaxActions:   10,
-		AllowedTools: []string{}, // Empty slice means block all
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newSubagentTestHarness(t)
+			h.config.AllowedTools = tt.allowedTools
+			h.convService.processResponseMessages = []*entity.Message{
+				createSubagentAssistantMessage("Executing tools"),
+				createSubagentAssistantMessage("Done"),
+			}
+			h.convService.processResponseToolCalls = [][]port.ToolCallInfo{tt.toolCalls, nil}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
-	agent := createTestAgent("agent-empty", "Empty Filter Agent")
+			agent := createTestAgent("agent-filter", "Filter Agent")
+			if tt.agentAllowedTools != nil {
+				agent.AllowedTools = tt.agentAllowedTools
+			}
 
-	// Act
-	result, err := runner.Run(context.Background(), agent, "Execute tools", "subagent-empty-001")
-	// Assert
-	if err != nil {
-		t.Errorf("Run() error = %v, want nil", err)
-	}
-	if result == nil {
-		t.Fatal("Run() returned nil result")
-	}
-	// No tools should have been executed
-	if toolExecutor.executeToolCalls != 0 {
-		t.Errorf("ExecuteTool() called %d times, want 0 (all tools should be blocked)", toolExecutor.executeToolCalls)
+			result, err := h.run(agent, "Execute", "subagent-filter-001")
+			if err != nil {
+				t.Errorf("Run() error = %v, want nil", err)
+			}
+			if result == nil {
+				t.Fatal("Run() returned nil result")
+			}
+			if h.toolExecutor.executeToolCalls != tt.wantExecuteCalls {
+				t.Errorf("ExecuteTool() called %d times, want %d",
+					h.toolExecutor.executeToolCalls, tt.wantExecuteCalls)
+			}
+			if tt.wantFirstToolName != "" &&
+				len(h.toolExecutor.executeToolName) > 0 &&
+				h.toolExecutor.executeToolName[0] != tt.wantFirstToolName {
+				t.Errorf("ExecuteTool() called with tool %q, want %q",
+					h.toolExecutor.executeToolName[0], tt.wantFirstToolName)
+			}
+		})
 	}
 }
 
@@ -2549,137 +2392,8 @@ func TestSubagentRunner_Run_ThinkingModeWithDifferentConfigs(t *testing.T) {
 }
 
 // =============================================================================
-// SubagentConfig Thinking Mode Fields Tests
+// SubagentConfig Thinking Mode Integration Tests
 // =============================================================================
-
-func TestSubagentConfig_HasThinkingEnabledField(t *testing.T) {
-	// Arrange & Act
-	config := SubagentConfig{
-		MaxActions:      10,
-		MaxDuration:     5 * time.Minute,
-		MaxConcurrent:   3,
-		AllowedTools:    []string{"bash"},
-		BlockedCommands: []string{"rm -rf"},
-		ThinkingEnabled: true, // This should compile when field exists
-	}
-
-	// Assert
-	if !config.ThinkingEnabled {
-		t.Error("SubagentConfig.ThinkingEnabled should be true when set to true")
-	}
-
-	// Test false value
-	config.ThinkingEnabled = false
-	if config.ThinkingEnabled {
-		t.Error("SubagentConfig.ThinkingEnabled should be false when set to false")
-	}
-}
-
-func TestSubagentConfig_HasThinkingBudgetField(t *testing.T) {
-	// Arrange & Act
-	config := SubagentConfig{
-		MaxActions:      10,
-		MaxDuration:     5 * time.Minute,
-		MaxConcurrent:   3,
-		AllowedTools:    []string{"bash"},
-		BlockedCommands: []string{"rm -rf"},
-		ThinkingBudget:  10000, // This should compile when field exists
-	}
-
-	// Assert
-	expectedBudget := int64(10000)
-	if config.ThinkingBudget != expectedBudget {
-		t.Errorf("SubagentConfig.ThinkingBudget = %d, want %d", config.ThinkingBudget, expectedBudget)
-	}
-
-	// Test zero value
-	config.ThinkingBudget = 0
-	if config.ThinkingBudget != 0 {
-		t.Errorf("SubagentConfig.ThinkingBudget = %d, want 0", config.ThinkingBudget)
-	}
-
-	// Test negative value (should be allowed as int64)
-	config.ThinkingBudget = -1
-	if config.ThinkingBudget != -1 {
-		t.Errorf("SubagentConfig.ThinkingBudget = %d, want -1", config.ThinkingBudget)
-	}
-}
-
-func TestSubagentConfig_HasShowThinkingField(t *testing.T) {
-	// Arrange & Act
-	config := SubagentConfig{
-		MaxActions:      10,
-		MaxDuration:     5 * time.Minute,
-		MaxConcurrent:   3,
-		AllowedTools:    []string{"bash"},
-		BlockedCommands: []string{"rm -rf"},
-		ShowThinking:    true, // This should compile when field exists
-	}
-
-	// Assert
-	if !config.ShowThinking {
-		t.Error("SubagentConfig.ShowThinking should be true when set to true")
-	}
-
-	// Test false value
-	config.ShowThinking = false
-	if config.ShowThinking {
-		t.Error("SubagentConfig.ShowThinking should be false when set to false")
-	}
-}
-
-func TestSubagentConfig_AllThinkingFieldsTogether(t *testing.T) {
-	// Arrange & Act - Test all thinking fields can be set together
-	config := SubagentConfig{
-		MaxActions:      15,
-		MaxDuration:     10 * time.Minute,
-		MaxConcurrent:   5,
-		AllowedTools:    []string{"bash", "read_file"},
-		BlockedCommands: []string{"rm -rf", "dd"},
-		ThinkingEnabled: true,
-		ThinkingBudget:  20000,
-		ShowThinking:    false,
-	}
-
-	// Assert all thinking fields
-	if !config.ThinkingEnabled {
-		t.Error("SubagentConfig.ThinkingEnabled should be true")
-	}
-	if config.ThinkingBudget != 20000 {
-		t.Errorf("SubagentConfig.ThinkingBudget = %d, want 20000", config.ThinkingBudget)
-	}
-	if config.ShowThinking {
-		t.Error("SubagentConfig.ShowThinking should be false")
-	}
-
-	// Verify original fields still work
-	if config.MaxActions != 15 {
-		t.Errorf("SubagentConfig.MaxActions = %d, want 15", config.MaxActions)
-	}
-	if len(config.AllowedTools) != 2 {
-		t.Errorf("SubagentConfig.AllowedTools length = %d, want 2", len(config.AllowedTools))
-	}
-}
-
-func TestSubagentConfig_ThinkingFieldsDefaultValues(t *testing.T) {
-	// Arrange & Act - Create config without setting thinking fields
-	config := SubagentConfig{
-		MaxActions:   10,
-		MaxDuration:  5 * time.Minute,
-		AllowedTools: []string{"bash"},
-	}
-
-	// Assert zero values for thinking fields
-	if config.ThinkingEnabled != false {
-		t.Errorf("SubagentConfig.ThinkingEnabled default = %v, want false", config.ThinkingEnabled)
-	}
-	if config.ThinkingBudget != 0 {
-		t.Errorf("SubagentConfig.ThinkingBudget default = %d, want 0", config.ThinkingBudget)
-	}
-	if config.ShowThinking != false {
-		t.Errorf("SubagentConfig.ShowThinking default = %v, want false", config.ShowThinking)
-	}
-}
 
 func TestSubagentRunner_AcceptsConfigWithThinkingFields(t *testing.T) {
 	// Arrange

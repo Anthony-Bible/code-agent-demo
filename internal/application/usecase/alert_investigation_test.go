@@ -15,6 +15,20 @@ import (
 // These tests verify the behavior of AlertInvestigationUseCase.
 // =============================================================================
 
+// setupAlertInvestigationTest creates a fully wired AlertInvestigationUseCase
+// with mock ConversationService, ToolExecutor, and PromptBuilderRegistry.
+func setupAlertInvestigationTest(t *testing.T) *AlertInvestigationUseCase {
+	t.Helper()
+	uc := NewAlertInvestigationUseCase()
+	if uc == nil {
+		t.Fatal("NewAlertInvestigationUseCase() returned nil")
+	}
+	uc.SetConversationService(newInvestigationRunnerConvServiceMock())
+	uc.SetToolExecutor(newInvestigationRunnerToolExecutorMock())
+	uc.SetPromptBuilderRegistry(newInvestigationRunnerPromptBuilderMock())
+	return uc
+}
+
 // =============================================================================
 // Constructor Tests
 // =============================================================================
@@ -52,13 +66,7 @@ func TestNewAlertInvestigationUseCase_InitialActiveCountZero(t *testing.T) {
 // =============================================================================
 
 func TestAlertInvestigationUseCase_HandleAlert_Success(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
-	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
-	}
-	uc.SetConversationService(newInvestigationRunnerConvServiceMock())
-	uc.SetToolExecutor(newInvestigationRunnerToolExecutorMock())
-	uc.SetPromptBuilderRegistry(newInvestigationRunnerPromptBuilderMock())
+	uc := setupAlertInvestigationTest(t)
 
 	alert := &AlertForInvestigation{
 		id:       "alert-001",
@@ -142,13 +150,7 @@ func TestAlertInvestigationUseCase_HandleAlert_Timeout(t *testing.T) {
 }
 
 func TestAlertInvestigationUseCase_HandleAlert_CriticalAlert(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
-	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
-	}
-	uc.SetConversationService(newInvestigationRunnerConvServiceMock())
-	uc.SetToolExecutor(newInvestigationRunnerToolExecutorMock())
-	uc.SetPromptBuilderRegistry(newInvestigationRunnerPromptBuilderMock())
+	uc := setupAlertInvestigationTest(t)
 
 	alert := &AlertForInvestigation{
 		id:       "alert-critical",
@@ -168,13 +170,7 @@ func TestAlertInvestigationUseCase_HandleAlert_CriticalAlert(t *testing.T) {
 }
 
 func TestAlertInvestigationUseCase_HandleAlert_ReturnsInvestigationID(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
-	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
-	}
-	uc.SetConversationService(newInvestigationRunnerConvServiceMock())
-	uc.SetToolExecutor(newInvestigationRunnerToolExecutorMock())
-	uc.SetPromptBuilderRegistry(newInvestigationRunnerPromptBuilderMock())
+	uc := setupAlertInvestigationTest(t)
 
 	alert := &AlertForInvestigation{
 		id:       "alert-id-test",
@@ -980,13 +976,7 @@ func TestAlertInvestigationUseCase_SetInvestigationStore(t *testing.T) {
 }
 
 func TestAlertInvestigationUseCase_HandleAlert_WithStore_PersistsInvestigation(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
-	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
-	}
-	uc.SetConversationService(newInvestigationRunnerConvServiceMock())
-	uc.SetToolExecutor(newInvestigationRunnerToolExecutorMock())
-	uc.SetPromptBuilderRegistry(newInvestigationRunnerPromptBuilderMock())
+	uc := setupAlertInvestigationTest(t)
 
 	store := NewMockInvestigationStore()
 	if store == nil {
@@ -1020,13 +1010,7 @@ func TestAlertInvestigationUseCase_HandleAlert_WithStore_PersistsInvestigation(t
 }
 
 func TestAlertInvestigationUseCase_HandleAlert_WithStore_UpdatesStatus(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
-	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
-	}
-	uc.SetConversationService(newInvestigationRunnerConvServiceMock())
-	uc.SetToolExecutor(newInvestigationRunnerToolExecutorMock())
-	uc.SetPromptBuilderRegistry(newInvestigationRunnerPromptBuilderMock())
+	uc := setupAlertInvestigationTest(t)
 
 	store := NewMockInvestigationStore()
 	if store == nil {
