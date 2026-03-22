@@ -32,9 +32,7 @@ func newTestAdapter(t *testing.T, input string) (*ui.CLIAdapter, *strings.Builde
 
 func TestCLIAdapter_GetUserInput(t *testing.T) {
 	t.Run("gets user input successfully", func(t *testing.T) {
-		input := strings.NewReader("hello world\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "hello world\n")
 
 		result, ok := adapter.GetUserInput(context.Background())
 
@@ -43,9 +41,7 @@ func TestCLIAdapter_GetUserInput(t *testing.T) {
 	})
 
 	t.Run("handles empty input", func(t *testing.T) {
-		input := strings.NewReader("\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "\n")
 
 		result, ok := adapter.GetUserInput(context.Background())
 
@@ -54,9 +50,7 @@ func TestCLIAdapter_GetUserInput(t *testing.T) {
 	})
 
 	t.Run("handles input with spaces", func(t *testing.T) {
-		input := strings.NewReader("  hello   world  \n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "  hello   world  \n")
 
 		result, ok := adapter.GetUserInput(context.Background())
 
@@ -65,9 +59,7 @@ func TestCLIAdapter_GetUserInput(t *testing.T) {
 	})
 
 	t.Run("handles EOF (ctrl+d)", func(t *testing.T) {
-		input := strings.NewReader("") // Empty reader simulates EOF
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "") // Empty reader simulates EOF
 
 		_, ok := adapter.GetUserInput(context.Background())
 
@@ -75,9 +67,7 @@ func TestCLIAdapter_GetUserInput(t *testing.T) {
 	})
 
 	t.Run("handles context cancellation", func(t *testing.T) {
-		input := strings.NewReader("test\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "test\n")
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
@@ -89,9 +79,7 @@ func TestCLIAdapter_GetUserInput(t *testing.T) {
 
 	t.Run("preserves special characters in input", func(t *testing.T) {
 		specialInput := "test ~!@#$%^&*()_+-={}[]|\\:;\"'<>?,./"
-		input := strings.NewReader(specialInput + "\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, specialInput+"\n")
 
 		result, ok := adapter.GetUserInput(context.Background())
 
@@ -541,9 +529,7 @@ func TestCLIAdapter_SetColorScheme(t *testing.T) {
 
 func TestCLIAdapter_IntegrationScenarios(t *testing.T) {
 	t.Run("complete conversation flow", func(t *testing.T) {
-		input := strings.NewReader("Hello AI\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "Hello AI\n")
 
 		// Simulate a conversation flow
 		// 1. Get user input
@@ -705,9 +691,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	// These tests define the expected behavior before implementation.
 
 	t.Run("confirms execution when user types lowercase y", func(t *testing.T) {
-		input := strings.NewReader("y\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "y\n")
 
 		result := adapter.ConfirmBashCommand("echo hello", false, "", "")
 
@@ -715,9 +699,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("confirms execution when user types yes", func(t *testing.T) {
-		input := strings.NewReader("yes\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "yes\n")
 
 		result := adapter.ConfirmBashCommand("ls -la", false, "", "")
 
@@ -725,9 +707,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("confirms execution when user types uppercase Y", func(t *testing.T) {
-		input := strings.NewReader("Y\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "Y\n")
 
 		result := adapter.ConfirmBashCommand("pwd", false, "", "")
 
@@ -735,9 +715,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("confirms execution when user types uppercase YES", func(t *testing.T) {
-		input := strings.NewReader("YES\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "YES\n")
 
 		result := adapter.ConfirmBashCommand("cat file.txt", false, "", "")
 
@@ -745,9 +723,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("confirms execution when user types mixed case Yes", func(t *testing.T) {
-		input := strings.NewReader("Yes\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "Yes\n")
 
 		result := adapter.ConfirmBashCommand("grep pattern file", false, "", "")
 
@@ -755,9 +731,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("denies execution when user types n", func(t *testing.T) {
-		input := strings.NewReader("n\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "n\n")
 
 		result := adapter.ConfirmBashCommand("rm file.txt", true, "destructive rm command", "")
 
@@ -765,9 +739,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("denies execution when user types no", func(t *testing.T) {
-		input := strings.NewReader("no\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "no\n")
 
 		result := adapter.ConfirmBashCommand("rm -rf /", true, "destructive rm command", "")
 
@@ -775,9 +747,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("denies execution on empty input (default deny)", func(t *testing.T) {
-		input := strings.NewReader("\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "\n")
 
 		result := adapter.ConfirmBashCommand("echo test", false, "", "")
 
@@ -785,9 +755,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("denies execution on EOF", func(t *testing.T) {
-		input := strings.NewReader("") // Empty reader simulates EOF
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "") // Empty reader simulates EOF
 
 		result := adapter.ConfirmBashCommand("echo test", false, "", "")
 
@@ -795,9 +763,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("denies execution on unrecognized input", func(t *testing.T) {
-		input := strings.NewReader("maybe\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "maybe\n")
 
 		result := adapter.ConfirmBashCommand("echo test", false, "", "")
 
@@ -805,9 +771,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("denies execution on whitespace-only input", func(t *testing.T) {
-		input := strings.NewReader("   \n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "   \n")
 
 		result := adapter.ConfirmBashCommand("echo test", false, "", "")
 
@@ -815,9 +779,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("displays dangerous warning in red for dangerous commands", func(t *testing.T) {
-		input := strings.NewReader("n\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "n\n")
 
 		adapter.ConfirmBashCommand("rm -rf /home", true, "destructive rm command", "")
 
@@ -829,9 +791,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("displays standard prefix in cyan for non-dangerous commands", func(t *testing.T) {
-		input := strings.NewReader("n\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "n\n")
 
 		adapter.ConfirmBashCommand("ls -la", false, "", "")
 
@@ -842,9 +802,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("displays the command in green color", func(t *testing.T) {
-		input := strings.NewReader("n\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "n\n")
 
 		command := "echo 'hello world'"
 		adapter.ConfirmBashCommand(command, false, "", "")
@@ -856,9 +814,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("displays confirmation prompt", func(t *testing.T) {
-		input := strings.NewReader("y\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "y\n")
 
 		adapter.ConfirmBashCommand("echo test", false, "", "")
 
@@ -872,9 +828,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("handles multiline command display", func(t *testing.T) {
-		input := strings.NewReader("y\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "y\n")
 
 		multilineCmd := "echo line1 && \\\necho line2"
 		result := adapter.ConfirmBashCommand(multilineCmd, false, "", "")
@@ -885,9 +839,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("handles command with special characters", func(t *testing.T) {
-		input := strings.NewReader("y\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "y\n")
 
 		specialCmd := "echo 'test' | grep -E \"[a-z]+\" && ls $HOME"
 		result := adapter.ConfirmBashCommand(specialCmd, false, "", "")
@@ -898,9 +850,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("trims whitespace from user input before checking", func(t *testing.T) {
-		input := strings.NewReader("  y  \n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "  y  \n")
 
 		result := adapter.ConfirmBashCommand("echo test", false, "", "")
 
@@ -908,9 +858,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("dangerous command with empty reason still shows warning", func(t *testing.T) {
-		input := strings.NewReader("n\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "n\n")
 
 		adapter.ConfirmBashCommand("sudo rm -rf /", true, "", "")
 
@@ -924,9 +872,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("resets color after output", func(t *testing.T) {
-		input := strings.NewReader("y\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "y\n")
 
 		adapter.ConfirmBashCommand("echo test", false, "", "")
 
@@ -1618,10 +1564,7 @@ func TestCLIAdapter_InteractiveMode(t *testing.T) {
 		// NewCLIAdapterWithIO is used for testing with custom io.Reader/Writer,
 		// and should always be non-interactive since test readers are not terminals.
 
-		input := strings.NewReader("test input\n")
-		output := &strings.Builder{}
-
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "test input\n")
 
 		result := adapter.IsInteractive()
 
@@ -1697,10 +1640,7 @@ func TestCLIAdapter_UseInteractiveFlag(t *testing.T) {
 		// 1. useInteractive field does not exist yet
 		// 2. IsInteractive() method does not exist yet
 
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "")
 
 		// The adapter should have an IsInteractive method
 		isInteractive := adapter.IsInteractive()
@@ -1714,10 +1654,7 @@ func TestCLIAdapter_UseInteractiveFlag(t *testing.T) {
 		// This test verifies that the existing bufio.Scanner behavior works
 		// when useInteractive is false.
 
-		input := strings.NewReader("hello world\n")
-		output := &strings.Builder{}
-
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "hello world\n")
 
 		// Verify non-interactive mode
 		assert.False(t, adapter.IsInteractive(),
@@ -1739,10 +1676,7 @@ func TestCLIAdapter_UseInteractiveFlag(t *testing.T) {
 		// This method allows forcing interactive or non-interactive mode,
 		// which is useful for testing.
 
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "")
 
 		// Initially non-interactive
 		assert.False(t, adapter.IsInteractive(), "should start non-interactive")
@@ -1760,10 +1694,7 @@ func TestCLIAdapter_UseInteractiveFlag(t *testing.T) {
 		// This test will fail because IsInteractive() does not exist yet.
 		// The interactive flag should not change during usage.
 
-		input := strings.NewReader("line1\nline2\nline3\n")
-		output := &strings.Builder{}
-
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "line1\nline2\nline3\n")
 
 		// Verify mode before first call
 		initialMode := adapter.IsInteractive()
@@ -1809,10 +1740,7 @@ func TestCLIAdapter_InteractiveModeWithContext(t *testing.T) {
 	t.Run("non-interactive mode respects context cancellation", func(t *testing.T) {
 		// This should work with existing implementation but tests the documented behavior
 
-		input := strings.NewReader("this should not be read\n")
-		output := &strings.Builder{}
-
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "this should not be read\n")
 
 		// Cancel context before reading
 		ctx, cancel := context.WithCancel(context.Background())
@@ -1864,10 +1792,7 @@ func TestCLIAdapter_InputModeString(t *testing.T) {
 	t.Run("returns 'non-interactive' for non-interactive mode", func(t *testing.T) {
 		// This test will fail because InputModeString() method does not exist yet
 
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "")
 
 		modeStr := adapter.InputModeString()
 
@@ -1914,10 +1839,7 @@ func TestCLIAdapter_GetUserInput_InteractiveMode(t *testing.T) {
 
 	t.Run("non-interactive mode continues to use bufio.Scanner", func(t *testing.T) {
 		// This test verifies that the existing non-interactive behavior is preserved.
-		input := strings.NewReader("test input line\n")
-		output := &strings.Builder{}
-
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "test input line\n")
 
 		assert.False(t, adapter.IsInteractive(),
 			"adapter created with custom IO should be non-interactive")
@@ -1936,9 +1858,7 @@ func TestCLIAdapter_GetUserInput_InteractiveMode(t *testing.T) {
 		// GetUserInput should return false since go-prompt requires real
 		// terminal file descriptors.
 
-		input := strings.NewReader("input\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "input\n")
 
 		// Force interactive mode on adapter with custom IO
 		adapter.SetInteractive(true)
@@ -1957,8 +1877,7 @@ func TestCLIAdapter_GetUserInput_InteractiveMode(t *testing.T) {
 
 func TestCLIAdapter_DisplayRCAFindings(t *testing.T) {
 	t.Run("successfully displays RCA findings", func(t *testing.T) {
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(strings.NewReader(""), output)
+		adapter, output := newTestAdapter(t, "")
 
 		findings := []entity.RCAFinding{
 			{
@@ -1998,8 +1917,7 @@ func TestCLIAdapter_DisplayRCAFindings(t *testing.T) {
 	})
 
 	t.Run("does nothing for empty findings", func(t *testing.T) {
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(strings.NewReader(""), output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplayRCAFindings(nil)
 

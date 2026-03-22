@@ -31,21 +31,88 @@ func createAgentFile(t *testing.T, dir, agentName, description string) {
 	}
 }
 
+// agentSpec describes an agent to be created during test setup.
+type agentSpec struct {
+	name        string
+	description string
+}
+
+// setupResult holds the output of setupManager for use in tests.
+type setupResult struct {
+	manager                *LocalSubagentManager
+	projectAgentsDir       string
+	projectClaudeAgentsDir string
+	userAgentsDir          string
+}
+
+// setupManager creates a LocalSubagentManager with the standard three-directory
+// layout (project, project-claude, user) under a temp directory. Agents from
+// each map are created via createAgentFile. Pass nil for any slice to skip that
+// directory's agents.
+func setupManager(
+	t *testing.T,
+	projectAgents, projectClaudeAgents, userAgents []agentSpec,
+) setupResult {
+	t.Helper()
+	tempDir := t.TempDir()
+
+	projectAgentsDir := filepath.Join(tempDir, "project", "agents")
+	projectClaudeAgentsDir := filepath.Join(tempDir, "project", ".claude", "agents")
+	userAgentsDir := filepath.Join(tempDir, "home", ".claude", "agents")
+
+	for _, a := range projectAgents {
+		createAgentFile(t, projectAgentsDir, a.name, a.description)
+	}
+	for _, a := range projectClaudeAgents {
+		createAgentFile(t, projectClaudeAgentsDir, a.name, a.description)
+	}
+	for _, a := range userAgents {
+		createAgentFile(t, userAgentsDir, a.name, a.description)
+	}
+
+	sm := &LocalSubagentManager{
+		agentsDirs: []DirConfig{
+			{Path: projectAgentsDir, SourceType: entity.SubagentSourceProject},
+			{Path: projectClaudeAgentsDir, SourceType: entity.SubagentSourceProjectClaude},
+			{Path: userAgentsDir, SourceType: entity.SubagentSourceUser},
+		},
+		agents:       make(map[string]*entity.Subagent),
+		programmatic: make(map[string]*entity.Subagent),
+	}
+
+	return setupResult{
+		manager:                sm,
+		projectAgentsDir:       projectAgentsDir,
+		projectClaudeAgentsDir: projectClaudeAgentsDir,
+		userAgentsDir:          userAgentsDir,
+	}
+}
+
+// setupSingleDirManager creates a manager with a single project agents directory.
+func setupSingleDirManager(t *testing.T, agents []agentSpec) (*LocalSubagentManager, string) {
+	t.Helper()
+	tempDir := t.TempDir()
+	agentsDir := filepath.Join(tempDir, "agents")
+
+	for _, a := range agents {
+		createAgentFile(t, agentsDir, a.name, a.description)
+	}
+
+	sm := &LocalSubagentManager{
+		agentsDirs:   []DirConfig{{Path: agentsDir, SourceType: entity.SubagentSourceProject}},
+		agents:       make(map[string]*entity.Subagent),
+		programmatic: make(map[string]*entity.Subagent),
+	}
+
+	return sm, agentsDir
+}
+
 // =============================================================================
 // Basic Discovery Tests
 // =============================================================================
 
 func TestLocalSubagentManager_DiscoverAgents_EmptyAgentsDirectory(t *testing.T) {
-	tempDir := t.TempDir()
-	emptyAgentsDir := filepath.Join(tempDir, "empty-agents")
-
-	sm := &LocalSubagentManager{
-		agentsDirs: []DirConfig{
-			{Path: emptyAgentsDir, SourceType: entity.SubagentSourceProject},
-		},
-		agents:       make(map[string]*entity.Subagent),
-		programmatic: make(map[string]*entity.Subagent),
-	}
+	sm, _ := setupSingleDirManager(t, nil)
 	result, err := sm.DiscoverAgents(context.Background())
 	if err != nil {
 		t.Fatalf("DiscoverAgents() returned unexpected error: %v", err)
@@ -65,31 +132,9 @@ func TestLocalSubagentManager_DiscoverAgents_EmptyAgentsDirectory(t *testing.T) 
 }
 
 func TestLocalSubagentManager_DiscoverAgents_WithAgentFiles(t *testing.T) {
-	// Create a temporary agents directory
-	tempDir := t.TempDir()
-	agentsDir := filepath.Join(tempDir, "agents")
-	testAgentDir := filepath.Join(agentsDir, "test-agent")
-
-	if err := os.MkdirAll(testAgentDir, 0o750); err != nil {
-		t.Fatalf("Failed to create test directory: %v", err)
-	}
-
-	// Create an AGENT.md file
-	agentContent := `---
-name: test-agent
-description: A test agent
----
-Test content`
-	if err := os.WriteFile(filepath.Join(testAgentDir, "AGENT.md"), []byte(agentContent), 0o644); err != nil {
-		t.Fatalf("Failed to write AGENT.md: %v", err)
-	}
-
-	// Create agent manager with custom agents dir
-	sm := &LocalSubagentManager{
-		agentsDirs:   []DirConfig{{Path: agentsDir, SourceType: entity.SubagentSourceProject}},
-		agents:       make(map[string]*entity.Subagent),
-		programmatic: make(map[string]*entity.Subagent),
-	}
+	sm, _ := setupSingleDirManager(t, []agentSpec{
+		{name: "test-agent", description: "A test agent"},
+	})
 
 	result, err := sm.DiscoverAgents(context.Background())
 	if err != nil {
@@ -124,31 +169,13 @@ Test content`
 // - Project .claude directory (./.claude/agents)
 // - Project root (./agents).
 func TestLocalSubagentManager_DiscoverAgents_MultipleDirectories(t *testing.T) {
-	// Create a temporary base directory to simulate the environment
-	tempDir := t.TempDir()
+	s := setupManager(t,
+		[]agentSpec{{name: "project-agent", description: "An agent only in project root directory"}},
+		[]agentSpec{{name: "project-claude-agent", description: "An agent only in project .claude directory"}},
+		[]agentSpec{{name: "user-only-agent", description: "An agent only in user global directory"}},
+	)
 
-	// Simulate the three agent directories
-	userAgentsDir := filepath.Join(tempDir, "home", ".claude", "agents")
-	projectClaudeAgentsDir := filepath.Join(tempDir, "project", ".claude", "agents")
-	projectAgentsDir := filepath.Join(tempDir, "project", "agents")
-
-	// Create unique agents in each directory
-	createAgentFile(t, userAgentsDir, "user-only-agent", "An agent only in user global directory")
-	createAgentFile(t, projectClaudeAgentsDir, "project-claude-agent", "An agent only in project .claude directory")
-	createAgentFile(t, projectAgentsDir, "project-agent", "An agent only in project root directory")
-
-	// Create the agent manager with multiple directories
-	sm := &LocalSubagentManager{
-		agentsDirs: []DirConfig{
-			{Path: projectAgentsDir, SourceType: entity.SubagentSourceProject},
-			{Path: projectClaudeAgentsDir, SourceType: entity.SubagentSourceProjectClaude},
-			{Path: userAgentsDir, SourceType: entity.SubagentSourceUser},
-		},
-		agents:       make(map[string]*entity.Subagent),
-		programmatic: make(map[string]*entity.Subagent),
-	}
-
-	result, err := sm.DiscoverAgents(context.Background())
+	result, err := s.manager.DiscoverAgents(context.Background())
 	if err != nil {
 		t.Fatalf("DiscoverAgents() returned unexpected error: %v", err)
 	}
@@ -181,34 +208,19 @@ func TestLocalSubagentManager_DiscoverAgents_MultipleDirectories(t *testing.T) {
 // agent name exists in multiple directories, the highest priority directory wins.
 // Priority: ./agents > ./.claude/agents > ~/.claude/agents.
 func TestLocalSubagentManager_DiscoverAgents_PriorityOverride(t *testing.T) {
-	tempDir := t.TempDir()
-
-	// Simulate the three agent directories
-	userAgentsDir := filepath.Join(tempDir, "home", ".claude", "agents")
-	projectClaudeAgentsDir := filepath.Join(tempDir, "project", ".claude", "agents")
-	projectAgentsDir := filepath.Join(tempDir, "project", "agents")
-
-	// Create the SAME agent in all three directories with different descriptions
-	createAgentFile(t, userAgentsDir, "common-agent", "User global version of common-agent")
-	createAgentFile(t, projectClaudeAgentsDir, "common-agent", "Project .claude version of common-agent")
-	createAgentFile(t, projectAgentsDir, "common-agent", "Project root version of common-agent (highest priority)")
-
-	// Also create an agent that only exists in user and project-claude (to test mid-priority override)
-	createAgentFile(t, userAgentsDir, "mid-priority-agent", "User global version")
-	createAgentFile(t, projectClaudeAgentsDir, "mid-priority-agent", "Project .claude version (should win)")
-
-	// Create agent manager
-	sm := &LocalSubagentManager{
-		agentsDirs: []DirConfig{
-			{Path: projectAgentsDir, SourceType: entity.SubagentSourceProject},
-			{Path: projectClaudeAgentsDir, SourceType: entity.SubagentSourceProjectClaude},
-			{Path: userAgentsDir, SourceType: entity.SubagentSourceUser},
+	s := setupManager(t,
+		[]agentSpec{{name: "common-agent", description: "Project root version of common-agent (highest priority)"}},
+		[]agentSpec{
+			{name: "common-agent", description: "Project .claude version of common-agent"},
+			{name: "mid-priority-agent", description: "Project .claude version (should win)"},
 		},
-		agents:       make(map[string]*entity.Subagent),
-		programmatic: make(map[string]*entity.Subagent),
-	}
+		[]agentSpec{
+			{name: "common-agent", description: "User global version of common-agent"},
+			{name: "mid-priority-agent", description: "User global version"},
+		},
+	)
 
-	result, err := sm.DiscoverAgents(context.Background())
+	result, err := s.manager.DiscoverAgents(context.Background())
 	if err != nil {
 		t.Fatalf("DiscoverAgents() returned unexpected error: %v", err)
 	}
@@ -274,27 +286,14 @@ func TestLocalSubagentManager_DiscoverAgents_PriorityOverride(t *testing.T) {
 // TestLocalSubagentManager_DiscoverAgents_MissingDirectories verifies that discovery
 // gracefully handles missing directories without erroring.
 func TestLocalSubagentManager_DiscoverAgents_MissingDirectories(t *testing.T) {
-	tempDir := t.TempDir()
-
 	// Only create the project agents directory, leave others missing
-	projectAgentsDir := filepath.Join(tempDir, "project", "agents")
-	userAgentsDir := filepath.Join(tempDir, "home", ".claude", "agents")             // Does not exist
-	projectClaudeAgentsDir := filepath.Join(tempDir, "project", ".claude", "agents") // Does not exist
+	s := setupManager(t,
+		[]agentSpec{{name: "existing-agent", description: "An agent in the existing directory"}},
+		nil, // project-claude: no agents, but dir created by createAgentFile only if specs provided
+		nil, // user: same
+	)
 
-	createAgentFile(t, projectAgentsDir, "existing-agent", "An agent in the existing directory")
-
-	// Create agent manager that should handle missing directories gracefully
-	sm := &LocalSubagentManager{
-		agentsDirs: []DirConfig{
-			{Path: projectAgentsDir, SourceType: entity.SubagentSourceProject},
-			{Path: projectClaudeAgentsDir, SourceType: entity.SubagentSourceProjectClaude},
-			{Path: userAgentsDir, SourceType: entity.SubagentSourceUser},
-		},
-		agents:       make(map[string]*entity.Subagent),
-		programmatic: make(map[string]*entity.Subagent),
-	}
-
-	result, err := sm.DiscoverAgents(context.Background())
+	result, err := s.manager.DiscoverAgents(context.Background())
 	// Should NOT error when some directories are missing
 	if err != nil {
 		t.Fatalf("DiscoverAgents() should not error when some directories are missing: %v", err)
@@ -315,29 +314,13 @@ func TestLocalSubagentManager_DiscoverAgents_MissingDirectories(t *testing.T) {
 // TestLocalSubagentManager_DiscoverAgents_SourceType verifies that each discovered agent
 // has the correct SourceType field set based on which directory it was found in.
 func TestLocalSubagentManager_DiscoverAgents_SourceType(t *testing.T) {
-	tempDir := t.TempDir()
+	s := setupManager(t,
+		[]agentSpec{{name: "root-agent", description: "Project root agent"}},
+		[]agentSpec{{name: "claude-agent", description: "Project .claude agent"}},
+		[]agentSpec{{name: "user-agent", description: "User global agent"}},
+	)
 
-	// Create agent directories
-	userAgentsDir := filepath.Join(tempDir, "home", ".claude", "agents")
-	projectClaudeAgentsDir := filepath.Join(tempDir, "project", ".claude", "agents")
-	projectAgentsDir := filepath.Join(tempDir, "project", "agents")
-
-	// Create unique agents in each directory
-	createAgentFile(t, userAgentsDir, "user-agent", "User global agent")
-	createAgentFile(t, projectClaudeAgentsDir, "claude-agent", "Project .claude agent")
-	createAgentFile(t, projectAgentsDir, "root-agent", "Project root agent")
-
-	sm := &LocalSubagentManager{
-		agentsDirs: []DirConfig{
-			{Path: projectAgentsDir, SourceType: entity.SubagentSourceProject},
-			{Path: projectClaudeAgentsDir, SourceType: entity.SubagentSourceProjectClaude},
-			{Path: userAgentsDir, SourceType: entity.SubagentSourceUser},
-		},
-		agents:       make(map[string]*entity.Subagent),
-		programmatic: make(map[string]*entity.Subagent),
-	}
-
-	result, err := sm.DiscoverAgents(context.Background())
+	result, err := s.manager.DiscoverAgents(context.Background())
 	if err != nil {
 		t.Fatalf("DiscoverAgents() returned unexpected error: %v", err)
 	}
@@ -485,40 +468,26 @@ func TestLocalSubagentManager_LoadAgentMetadata_PathTraversalPrevention(t *testi
 }
 
 func TestLocalSubagentManager_LoadAgentMetadata_FromCorrectDirectory(t *testing.T) {
-	tempDir := t.TempDir()
-
-	// Create agent directories
-	userAgentsDir := filepath.Join(tempDir, "home", ".claude", "agents")
-	projectClaudeAgentsDir := filepath.Join(tempDir, "project", ".claude", "agents")
-	projectAgentsDir := filepath.Join(tempDir, "project", "agents")
-
-	// Create the same agent in user and project-claude directories
-	// Project-claude should win (higher priority)
-	createAgentFile(t, userAgentsDir, "shared-agent", "User version - should be overridden")
-	createAgentFile(t, projectClaudeAgentsDir, "shared-agent", "Project .claude version - should win")
-
-	// Create a user-only agent
-	createAgentFile(t, userAgentsDir, "user-exclusive", "Only in user directory")
-
-	sm := &LocalSubagentManager{
-		agentsDirs: []DirConfig{
-			{Path: projectAgentsDir, SourceType: entity.SubagentSourceProject},
-			{Path: projectClaudeAgentsDir, SourceType: entity.SubagentSourceProjectClaude},
-			{Path: userAgentsDir, SourceType: entity.SubagentSourceUser},
+	s := setupManager(t,
+		nil, // no project agents
+		[]agentSpec{
+			{name: "shared-agent", description: "Project .claude version - should win"},
 		},
-		agents:       make(map[string]*entity.Subagent),
-		programmatic: make(map[string]*entity.Subagent),
-	}
+		[]agentSpec{
+			{name: "shared-agent", description: "User version - should be overridden"},
+			{name: "user-exclusive", description: "Only in user directory"},
+		},
+	)
 
 	// First discover agents
-	_, err := sm.DiscoverAgents(context.Background())
+	_, err := s.manager.DiscoverAgents(context.Background())
 	if err != nil {
 		t.Fatalf("DiscoverAgents() returned unexpected error: %v", err)
 	}
 
 	// Test loading shared-agent - should get project-claude version
 	t.Run("shared-agent loads from project-claude", func(t *testing.T) {
-		agent, err := sm.LoadAgentMetadata(context.Background(), "shared-agent")
+		agent, err := s.manager.LoadAgentMetadata(context.Background(), "shared-agent")
 		// FAILING ASSERTION: Agent not found because multi-dir discovery not implemented
 		if err != nil {
 			t.Fatalf("LoadAgentMetadata(shared-agent) returned error: %v", err)
@@ -539,7 +508,7 @@ func TestLocalSubagentManager_LoadAgentMetadata_FromCorrectDirectory(t *testing.
 
 	// Test loading user-exclusive - should come from user directory
 	t.Run("user-exclusive loads from user directory", func(t *testing.T) {
-		agent, err := sm.LoadAgentMetadata(context.Background(), "user-exclusive")
+		agent, err := s.manager.LoadAgentMetadata(context.Background(), "user-exclusive")
 		// FAILING ASSERTION: Agent not found because multi-dir discovery not implemented
 		if err != nil {
 			t.Fatalf("LoadAgentMetadata(user-exclusive) returned error: %v", err)
@@ -705,32 +674,9 @@ func TestLocalSubagentManager_UnregisterAgent_NonExistent(t *testing.T) {
 // =============================================================================
 
 func TestLocalSubagentManager_GetAgentByName(t *testing.T) {
-	// Create a temporary agents directory
-	tempDir := t.TempDir()
-	agentsDir := filepath.Join(tempDir, "agents")
-	testAgentDir := filepath.Join(agentsDir, "test-agent")
-
-	if err := os.MkdirAll(testAgentDir, 0o750); err != nil {
-		t.Fatalf("Failed to create test directory: %v", err)
-	}
-
-	// Create an AGENT.md file
-	agentContent := `---
-name: test-agent
-description: A test agent
-model: haiku
----
-Test content`
-	if err := os.WriteFile(filepath.Join(testAgentDir, "AGENT.md"), []byte(agentContent), 0o644); err != nil {
-		t.Fatalf("Failed to write AGENT.md: %v", err)
-	}
-
-	// Create agent manager and discover agents
-	sm := &LocalSubagentManager{
-		agentsDirs:   []DirConfig{{Path: agentsDir, SourceType: entity.SubagentSourceProject}},
-		agents:       make(map[string]*entity.Subagent),
-		programmatic: make(map[string]*entity.Subagent),
-	}
+	sm, _ := setupSingleDirManager(t, []agentSpec{
+		{name: "test-agent", description: "A test agent"},
+	})
 
 	_, err := sm.DiscoverAgents(context.Background())
 	if err != nil {
@@ -770,18 +716,9 @@ func TestLocalSubagentManager_GetAgentByName_NotFound(t *testing.T) {
 }
 
 func TestLocalSubagentManager_GetAgentByName_ReturnsSourceType(t *testing.T) {
-	tempDir := t.TempDir()
-
-	projectAgentsDir := filepath.Join(tempDir, "project", "agents")
-	createAgentFile(t, projectAgentsDir, "test-agent", "A test agent")
-
-	sm := &LocalSubagentManager{
-		agentsDirs: []DirConfig{
-			{Path: projectAgentsDir, SourceType: entity.SubagentSourceProject},
-		},
-		agents:       make(map[string]*entity.Subagent),
-		programmatic: make(map[string]*entity.Subagent),
-	}
+	sm, _ := setupSingleDirManager(t, []agentSpec{
+		{name: "test-agent", description: "A test agent"},
+	})
 
 	_, err := sm.DiscoverAgents(context.Background())
 	if err != nil {
@@ -805,33 +742,10 @@ func TestLocalSubagentManager_GetAgentByName_ReturnsSourceType(t *testing.T) {
 // =============================================================================
 
 func TestLocalSubagentManager_ListAgents(t *testing.T) {
-	// Create a temporary agents directory
-	tempDir := t.TempDir()
-	agentsDir := filepath.Join(tempDir, "agents")
-
-	// Create two agent directories with explicit names
-	for _, agentName := range []string{"agent-a", "agent-b"} {
-		testAgentDir := filepath.Join(agentsDir, agentName)
-		if err := os.MkdirAll(testAgentDir, 0o750); err != nil {
-			t.Fatalf("Failed to create test directory: %v", err)
-		}
-
-		agentContent := `---
-name: ` + agentName + `
-description: Test agent
----
-Content`
-		if err := os.WriteFile(filepath.Join(testAgentDir, "AGENT.md"), []byte(agentContent), 0o644); err != nil {
-			t.Fatalf("Failed to write AGENT.md: %v", err)
-		}
-	}
-
-	// Create agent manager and discover agents
-	sm := &LocalSubagentManager{
-		agentsDirs:   []DirConfig{{Path: agentsDir, SourceType: entity.SubagentSourceProject}},
-		agents:       make(map[string]*entity.Subagent),
-		programmatic: make(map[string]*entity.Subagent),
-	}
+	sm, _ := setupSingleDirManager(t, []agentSpec{
+		{name: "agent-a", description: "Test agent"},
+		{name: "agent-b", description: "Test agent"},
+	})
 
 	_, err := sm.DiscoverAgents(context.Background())
 	if err != nil {
@@ -914,20 +828,14 @@ func TestLocalSubagentManager_ListAgents_IncludesProgrammatic(t *testing.T) {
 // =============================================================================
 
 func TestLocalSubagentManager_ConcurrentDiscovery(t *testing.T) {
-	tempDir := t.TempDir()
-	agentsDir := filepath.Join(tempDir, "agents")
-
-	// Create multiple agents
+	specs := make([]agentSpec, 5)
 	for i := range 5 {
-		agentName := "concurrent-agent-" + string(rune('a'+i))
-		createAgentFile(t, agentsDir, agentName, "Concurrent test agent")
+		specs[i] = agentSpec{
+			name:        "concurrent-agent-" + string(rune('a'+i)),
+			description: "Concurrent test agent",
+		}
 	}
-
-	sm := &LocalSubagentManager{
-		agentsDirs:   []DirConfig{{Path: agentsDir, SourceType: entity.SubagentSourceProject}},
-		agents:       make(map[string]*entity.Subagent),
-		programmatic: make(map[string]*entity.Subagent),
-	}
+	sm, _ := setupSingleDirManager(t, specs)
 
 	// Run concurrent discoveries
 	var wg sync.WaitGroup
@@ -1000,24 +908,9 @@ func TestLocalSubagentManager_ConcurrentRegistration(t *testing.T) {
 // =============================================================================
 
 func TestLocalSubagentManager_DiscoverAgents_AllDirectoriesMissing(t *testing.T) {
-	tempDir := t.TempDir()
+	s := setupManager(t, nil, nil, nil)
 
-	// None of these directories exist
-	userAgentsDir := filepath.Join(tempDir, "nonexistent", "home", ".claude", "agents")
-	projectClaudeAgentsDir := filepath.Join(tempDir, "nonexistent", "project", ".claude", "agents")
-	projectAgentsDir := filepath.Join(tempDir, "nonexistent", "project", "agents")
-
-	sm := &LocalSubagentManager{
-		agentsDirs: []DirConfig{
-			{Path: projectAgentsDir, SourceType: entity.SubagentSourceProject},
-			{Path: projectClaudeAgentsDir, SourceType: entity.SubagentSourceProjectClaude},
-			{Path: userAgentsDir, SourceType: entity.SubagentSourceUser},
-		},
-		agents:       make(map[string]*entity.Subagent),
-		programmatic: make(map[string]*entity.Subagent),
-	}
-
-	result, err := sm.DiscoverAgents(context.Background())
+	result, err := s.manager.DiscoverAgents(context.Background())
 	// Should NOT error - missing directories are acceptable
 	if err != nil {
 		t.Fatalf("DiscoverAgents() should not error when all directories are missing: %v", err)
@@ -1034,28 +927,13 @@ func TestLocalSubagentManager_DiscoverAgents_AllDirectoriesMissing(t *testing.T)
 }
 
 func TestLocalSubagentManager_DiscoverAgents_DirectoryOrderInResult(t *testing.T) {
-	tempDir := t.TempDir()
+	s := setupManager(t,
+		[]agentSpec{{name: "agent-a", description: "Agent A"}},
+		[]agentSpec{{name: "agent-b", description: "Agent B"}},
+		[]agentSpec{{name: "agent-c", description: "Agent C"}},
+	)
 
-	projectAgentsDir := filepath.Join(tempDir, "project", "agents")
-	projectClaudeAgentsDir := filepath.Join(tempDir, "project", ".claude", "agents")
-	userAgentsDir := filepath.Join(tempDir, "home", ".claude", "agents")
-
-	// Create all directories with agents
-	createAgentFile(t, projectAgentsDir, "agent-a", "Agent A")
-	createAgentFile(t, projectClaudeAgentsDir, "agent-b", "Agent B")
-	createAgentFile(t, userAgentsDir, "agent-c", "Agent C")
-
-	sm := &LocalSubagentManager{
-		agentsDirs: []DirConfig{
-			{Path: projectAgentsDir, SourceType: entity.SubagentSourceProject},
-			{Path: projectClaudeAgentsDir, SourceType: entity.SubagentSourceProjectClaude},
-			{Path: userAgentsDir, SourceType: entity.SubagentSourceUser},
-		},
-		agents:       make(map[string]*entity.Subagent),
-		programmatic: make(map[string]*entity.Subagent),
-	}
-
-	result, err := sm.DiscoverAgents(context.Background())
+	result, err := s.manager.DiscoverAgents(context.Background())
 	if err != nil {
 		t.Fatalf("DiscoverAgents() returned unexpected error: %v", err)
 	}
@@ -1067,7 +945,7 @@ func TestLocalSubagentManager_DiscoverAgents_DirectoryOrderInResult(t *testing.T
 
 	// FAILING ASSERTION: Directories should be in priority order (highest first)
 	// Expected order: ./agents, ./.claude/agents, ~/.claude/agents
-	expectedOrder := []string{projectAgentsDir, projectClaudeAgentsDir, userAgentsDir}
+	expectedOrder := []string{s.projectAgentsDir, s.projectClaudeAgentsDir, s.userAgentsDir}
 
 	// Make copies to sort for comparison since we care about order
 	gotDirs := make([]string, len(result.AgentsDirs))
@@ -1086,28 +964,13 @@ func TestLocalSubagentManager_DiscoverAgents_DirectoryOrderInResult(t *testing.T
 }
 
 func TestLocalSubagentManager_DiscoverAgents_AgentsListedByPriority(t *testing.T) {
-	tempDir := t.TempDir()
+	s := setupManager(t,
+		[]agentSpec{{name: "ccc-agent", description: "Project agent (highest priority)"}},
+		[]agentSpec{{name: "bbb-agent", description: "Project .claude agent"}},
+		[]agentSpec{{name: "aaa-agent", description: "User agent (lowest priority)"}},
+	)
 
-	userAgentsDir := filepath.Join(tempDir, "home", ".claude", "agents")
-	projectClaudeAgentsDir := filepath.Join(tempDir, "project", ".claude", "agents")
-	projectAgentsDir := filepath.Join(tempDir, "project", "agents")
-
-	// Create agents in reverse priority order to test sorting
-	createAgentFile(t, userAgentsDir, "aaa-agent", "User agent (lowest priority)")
-	createAgentFile(t, projectClaudeAgentsDir, "bbb-agent", "Project .claude agent")
-	createAgentFile(t, projectAgentsDir, "ccc-agent", "Project agent (highest priority)")
-
-	sm := &LocalSubagentManager{
-		agentsDirs: []DirConfig{
-			{Path: projectAgentsDir, SourceType: entity.SubagentSourceProject},
-			{Path: projectClaudeAgentsDir, SourceType: entity.SubagentSourceProjectClaude},
-			{Path: userAgentsDir, SourceType: entity.SubagentSourceUser},
-		},
-		agents:       make(map[string]*entity.Subagent),
-		programmatic: make(map[string]*entity.Subagent),
-	}
-
-	result, err := sm.DiscoverAgents(context.Background())
+	result, err := s.manager.DiscoverAgents(context.Background())
 	if err != nil {
 		t.Fatalf("DiscoverAgents() returned unexpected error: %v", err)
 	}

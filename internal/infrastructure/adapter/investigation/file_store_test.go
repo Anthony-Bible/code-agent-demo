@@ -19,21 +19,40 @@ import (
 // the InvestigationStore interface with file-based persistence.
 // =============================================================================
 
+// setupStoreTest creates a FileInvestigationStore backed by a temp directory.
+// The store is registered for cleanup via t.Cleanup.
+func setupStoreTest(t *testing.T) *FileInvestigationStore {
+	t.Helper()
+	tmpDir := t.TempDir()
+	store, err := NewFileInvestigationStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return store
+}
+
+// setupStoreTestWithDir creates a FileInvestigationStore and returns both the
+// store and the backing temp directory path for tests that need to inspect files.
+func setupStoreTestWithDir(t *testing.T) (*FileInvestigationStore, string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	store, err := NewFileInvestigationStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return store, tmpDir
+}
+
 // =============================================================================
 // Constructor Tests
 // =============================================================================
 
 func TestNewFileInvestigationStore_NotNil(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
+	store := setupStoreTest(t)
 	if store == nil {
 		t.Error("NewFileInvestigationStore() should not return nil")
-	}
-	if store != nil {
-		_ = store.Close()
 	}
 }
 
@@ -97,16 +116,7 @@ func TestNewFileInvestigationStore_InvalidPath(t *testing.T) {
 }
 
 func TestNewFileInvestigationStore_InitialCountZero(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	count, err := store.Count(context.Background())
 	if err != nil {
@@ -122,40 +132,22 @@ func TestNewFileInvestigationStore_InitialCountZero(t *testing.T) {
 // =============================================================================
 
 func TestFileInvestigationStore_Store_Success(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	inv := helpers.NewInvestigationRecordForTest("inv-001", "alert-001", "session-001", "started")
 
-	err = store.Store(context.Background(), inv)
+	err := store.Store(context.Background(), inv)
 	if err != nil {
 		t.Errorf("Store() error = %v", err)
 	}
 }
 
 func TestFileInvestigationStore_Store_CreatesFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store, tmpDir := setupStoreTestWithDir(t)
 
 	inv := helpers.NewInvestigationRecordForTest("inv-file-test", "alert-001", "session-001", "started")
 
-	err = store.Store(context.Background(), inv)
+	err := store.Store(context.Background(), inv)
 	if err != nil {
 		t.Fatalf("Store() error = %v", err)
 	}
@@ -168,20 +160,11 @@ func TestFileInvestigationStore_Store_CreatesFile(t *testing.T) {
 }
 
 func TestFileInvestigationStore_Store_DuplicateID(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	inv := helpers.NewInvestigationRecordForTest("inv-dup", "alert-001", "session-001", "started")
 
-	err = store.Store(context.Background(), inv)
+	err := store.Store(context.Background(), inv)
 	if err != nil {
 		t.Fatalf("First Store() error = %v", err)
 	}
@@ -197,18 +180,9 @@ func TestFileInvestigationStore_Store_DuplicateID(t *testing.T) {
 }
 
 func TestFileInvestigationStore_Store_NilInvestigation(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
-	err = store.Store(context.Background(), nil)
+	err := store.Store(context.Background(), nil)
 	if err == nil {
 		t.Error("Store(nil) should return error")
 	}
@@ -218,16 +192,7 @@ func TestFileInvestigationStore_Store_NilInvestigation(t *testing.T) {
 }
 
 func TestFileInvestigationStore_Store_IncrementsCount(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	ctx := context.Background()
 
@@ -257,16 +222,7 @@ func TestFileInvestigationStore_Store_IncrementsCount(t *testing.T) {
 // =============================================================================
 
 func TestFileInvestigationStore_Get_Exists(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	ctx := context.Background()
 	inv := helpers.NewInvestigationRecordForTest("inv-get-test", "alert-001", "session-001", "running")
@@ -326,18 +282,9 @@ func TestFileInvestigationStore_Get_ReadsFromDisk(t *testing.T) {
 }
 
 func TestFileInvestigationStore_Get_NotExists(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
-	_, err = store.Get(context.Background(), "nonexistent")
+	_, err := store.Get(context.Background(), "nonexistent")
 	if err == nil {
 		t.Error("Get() should return error for nonexistent ID")
 	}
@@ -347,18 +294,9 @@ func TestFileInvestigationStore_Get_NotExists(t *testing.T) {
 }
 
 func TestFileInvestigationStore_Get_EmptyID(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
-	_, err = store.Get(context.Background(), "")
+	_, err := store.Get(context.Background(), "")
 	if err == nil {
 		t.Error("Get('') should return error")
 	}
@@ -372,16 +310,7 @@ func TestFileInvestigationStore_Get_EmptyID(t *testing.T) {
 // =============================================================================
 
 func TestFileInvestigationStore_Update_Exists(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	ctx := context.Background()
 	inv := helpers.NewInvestigationRecordForTest("inv-update-test", "alert-001", "session-001", "started")
@@ -403,16 +332,7 @@ func TestFileInvestigationStore_Update_Exists(t *testing.T) {
 }
 
 func TestFileInvestigationStore_Update_ModifiesFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store, tmpDir := setupStoreTestWithDir(t)
 
 	ctx := context.Background()
 	inv := helpers.NewInvestigationRecordForTest("inv-update-file", "alert-001", "session-001", "started")
@@ -446,20 +366,11 @@ func TestFileInvestigationStore_Update_ModifiesFile(t *testing.T) {
 }
 
 func TestFileInvestigationStore_Update_NotExists(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	inv := helpers.NewInvestigationRecordForTest("nonexistent", "alert-001", "session-001", "started")
 
-	err = store.Update(context.Background(), inv)
+	err := store.Update(context.Background(), inv)
 	if err == nil {
 		t.Error("Update() should return error for nonexistent ID")
 	}
@@ -469,18 +380,9 @@ func TestFileInvestigationStore_Update_NotExists(t *testing.T) {
 }
 
 func TestFileInvestigationStore_Update_NilInvestigation(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
-	err = store.Update(context.Background(), nil)
+	err := store.Update(context.Background(), nil)
 	if err == nil {
 		t.Error("Update(nil) should return error")
 	}
@@ -494,16 +396,7 @@ func TestFileInvestigationStore_Update_NilInvestigation(t *testing.T) {
 // =============================================================================
 
 func TestFileInvestigationStore_Delete_Exists(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	ctx := context.Background()
 	inv := helpers.NewInvestigationRecordForTest("inv-delete-test", "alert-001", "session-001", "started")
@@ -517,23 +410,14 @@ func TestFileInvestigationStore_Delete_Exists(t *testing.T) {
 	}
 
 	// Verify deleted
-	_, err = store.Get(ctx, "inv-delete-test")
+	_, err := store.Get(ctx, "inv-delete-test")
 	if err == nil {
 		t.Error("Get() after Delete() should return error")
 	}
 }
 
 func TestFileInvestigationStore_Delete_RemovesFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store, tmpDir := setupStoreTestWithDir(t)
 
 	ctx := context.Background()
 	inv := helpers.NewInvestigationRecordForTest("inv-delete-file", "alert-001", "session-001", "started")
@@ -557,18 +441,9 @@ func TestFileInvestigationStore_Delete_RemovesFile(t *testing.T) {
 }
 
 func TestFileInvestigationStore_Delete_NotExists(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
-	err = store.Delete(context.Background(), "nonexistent")
+	err := store.Delete(context.Background(), "nonexistent")
 	if err == nil {
 		t.Error("Delete() should return error for nonexistent ID")
 	}
@@ -578,16 +453,7 @@ func TestFileInvestigationStore_Delete_NotExists(t *testing.T) {
 }
 
 func TestFileInvestigationStore_Delete_DecrementsCount(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	ctx := context.Background()
 	inv := helpers.NewInvestigationRecordForTest("inv-count-test", "alert-001", "session-001", "started")
@@ -616,16 +482,7 @@ func TestFileInvestigationStore_Delete_DecrementsCount(t *testing.T) {
 // =============================================================================
 
 func TestFileInvestigationStore_Query_EmptyStore(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	results, err := store.Query(context.Background(), service.InvestigationQuery{})
 	if err != nil {
@@ -673,16 +530,7 @@ func TestFileInvestigationStore_Query_ByAlertIDOrSessionID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			store, err := NewFileInvestigationStore(tmpDir)
-			if err != nil {
-				t.Fatalf("NewFileInvestigationStore() error = %v", err)
-			}
-			defer func() {
-				if store != nil {
-					_ = store.Close()
-				}
-			}()
+			store := setupStoreTest(t)
 
 			ctx := context.Background()
 
@@ -705,16 +553,7 @@ func TestFileInvestigationStore_Query_ByAlertIDOrSessionID(t *testing.T) {
 }
 
 func TestFileInvestigationStore_Query_ByStatus(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	ctx := context.Background()
 
@@ -743,16 +582,7 @@ func TestFileInvestigationStore_Query_ByStatus(t *testing.T) {
 }
 
 func TestFileInvestigationStore_Query_ByMultipleStatuses(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	ctx := context.Background()
 
@@ -813,16 +643,7 @@ func TestFileInvestigationStore_Query_ByTimeRange(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			store, err := NewFileInvestigationStore(tmpDir)
-			if err != nil {
-				t.Fatalf("NewFileInvestigationStore() error = %v", err)
-			}
-			defer func() {
-				if store != nil {
-					_ = store.Close()
-				}
-			}()
+			store := setupStoreTest(t)
 
 			ctx := context.Background()
 			now := time.Now()
@@ -859,16 +680,7 @@ func TestFileInvestigationStore_Query_ByTimeRange(t *testing.T) {
 }
 
 func TestFileInvestigationStore_Query_WithLimit(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	ctx := context.Background()
 
@@ -894,16 +706,7 @@ func TestFileInvestigationStore_Query_WithLimit(t *testing.T) {
 }
 
 func TestFileInvestigationStore_Query_CombinedFilters(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	ctx := context.Background()
 
@@ -938,65 +741,38 @@ func TestFileInvestigationStore_Query_CombinedFilters(t *testing.T) {
 // =============================================================================
 
 func TestFileInvestigationStore_Store_CancelledContext(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	inv := helpers.NewInvestigationRecordForTest("inv-ctx", "a1", "s1", "started")
 
-	err = store.Store(ctx, inv)
+	err := store.Store(ctx, inv)
 	if err == nil {
 		t.Error("Store() with cancelled context should return error")
 	}
 }
 
 func TestFileInvestigationStore_Get_CancelledContext(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err = store.Get(ctx, "any")
+	_, err := store.Get(ctx, "any")
 	if err == nil {
 		t.Error("Get() with cancelled context should return error")
 	}
 }
 
 func TestFileInvestigationStore_Query_CancelledContext(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err = store.Query(ctx, service.InvestigationQuery{})
+	_, err := store.Query(ctx, service.InvestigationQuery{})
 	if err == nil {
 		t.Error("Query() with cancelled context should return error")
 	}
@@ -1007,24 +783,16 @@ func TestFileInvestigationStore_Query_CancelledContext(t *testing.T) {
 // =============================================================================
 
 func TestFileInvestigationStore_Close_Success(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
+	store := setupStoreTest(t)
 
-	err = store.Close()
+	err := store.Close()
 	if err != nil {
 		t.Errorf("Close() error = %v", err)
 	}
 }
 
 func TestFileInvestigationStore_Close_Idempotent(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
+	store := setupStoreTest(t)
 
 	// Close multiple times should not error
 	if err := store.Close(); err != nil {
@@ -1036,11 +804,7 @@ func TestFileInvestigationStore_Close_Idempotent(t *testing.T) {
 }
 
 func TestFileInvestigationStore_Close_ThenStore(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
+	store := setupStoreTest(t)
 
 	if err := store.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -1048,7 +812,7 @@ func TestFileInvestigationStore_Close_ThenStore(t *testing.T) {
 
 	inv := helpers.NewInvestigationRecordForTest("inv-after-close", "a1", "s1", "started")
 
-	err = store.Store(context.Background(), inv)
+	err := store.Store(context.Background(), inv)
 	if err == nil {
 		t.Error("Store() after Close() should return error")
 	}
@@ -1058,17 +822,13 @@ func TestFileInvestigationStore_Close_ThenStore(t *testing.T) {
 }
 
 func TestFileInvestigationStore_Close_ThenGet(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
+	store := setupStoreTest(t)
 
 	if err := store.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
 
-	_, err = store.Get(context.Background(), "any")
+	_, err := store.Get(context.Background(), "any")
 	if err == nil {
 		t.Error("Get() after Close() should return error")
 	}
@@ -1078,17 +838,13 @@ func TestFileInvestigationStore_Close_ThenGet(t *testing.T) {
 }
 
 func TestFileInvestigationStore_Close_ThenQuery(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
+	store := setupStoreTest(t)
 
 	if err := store.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
 
-	_, err = store.Query(context.Background(), service.InvestigationQuery{})
+	_, err := store.Query(context.Background(), service.InvestigationQuery{})
 	if err == nil {
 		t.Error("Query() after Close() should return error")
 	}
@@ -1098,17 +854,13 @@ func TestFileInvestigationStore_Close_ThenQuery(t *testing.T) {
 }
 
 func TestFileInvestigationStore_Close_ThenCount(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
+	store := setupStoreTest(t)
 
 	if err := store.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
 
-	_, err = store.Count(context.Background())
+	_, err := store.Count(context.Background())
 	if err == nil {
 		t.Error("Count() after Close() should return error")
 	}
@@ -1122,16 +874,7 @@ func TestFileInvestigationStore_Close_ThenCount(t *testing.T) {
 // =============================================================================
 
 func TestFileInvestigationStore_ConcurrentStoreAndGet(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	ctx := context.Background()
 	var wg sync.WaitGroup
@@ -1181,16 +924,7 @@ func TestFileInvestigationStore_ConcurrentStoreAndGet(t *testing.T) {
 }
 
 func TestFileInvestigationStore_ConcurrentUpdateAndDelete(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	ctx := context.Background()
 
@@ -1243,16 +977,7 @@ func TestFileInvestigationStore_ConcurrentUpdateAndDelete(t *testing.T) {
 // =============================================================================
 
 func TestFileInvestigationStore_CorruptedFile_Get(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store, tmpDir := setupStoreTestWithDir(t)
 
 	// Create a corrupted JSON file
 	corruptedPath := filepath.Join(tmpDir, "inv-corrupt.json")
@@ -1261,7 +986,7 @@ func TestFileInvestigationStore_CorruptedFile_Get(t *testing.T) {
 	}
 
 	// Get should handle corrupted file gracefully
-	_, err = store.Get(context.Background(), "inv-corrupt")
+	_, err := store.Get(context.Background(), "inv-corrupt")
 	if err == nil {
 		t.Error("Get() on corrupted file should return error")
 	}
@@ -1269,16 +994,7 @@ func TestFileInvestigationStore_CorruptedFile_Get(t *testing.T) {
 }
 
 func TestFileInvestigationStore_EmptyFile_Get(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store, tmpDir := setupStoreTestWithDir(t)
 
 	// Create an empty file
 	emptyPath := filepath.Join(tmpDir, "inv-empty.json")
@@ -1287,7 +1003,7 @@ func TestFileInvestigationStore_EmptyFile_Get(t *testing.T) {
 	}
 
 	// Get should handle empty file gracefully
-	_, err = store.Get(context.Background(), "inv-empty")
+	_, err := store.Get(context.Background(), "inv-empty")
 	if err == nil {
 		t.Error("Get() on empty file should return error")
 	}
@@ -1299,16 +1015,7 @@ func TestFileInvestigationStore_EmptyFile_Get(t *testing.T) {
 // =============================================================================
 
 func TestFileInvestigationStore_ImplementsInterface(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewFileInvestigationStore(tmpDir)
-	if err != nil {
-		t.Fatalf("NewFileInvestigationStore() error = %v", err)
-	}
-	defer func() {
-		if store != nil {
-			_ = store.Close()
-		}
-	}()
+	store := setupStoreTest(t)
 
 	// Compile-time check that FileInvestigationStore implements InvestigationStore
 	var _ service.InvestigationStore = store
