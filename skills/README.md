@@ -11,6 +11,10 @@ Skills are modular capabilities that extend the AI agent's functionality. Each s
 - `test-skill` - A test skill for validation and integration testing
 - `code-review` - Performs code review with best practices
 
+### Community Skills
+
+- [google-cloud-metrics-skill](https://github.com/Anthony-Bible/google-cloud-metrics-skill) - Query Google Cloud Monitoring metrics during investigations
+
 ## Creating A New Skill
 
 1. Create a new directory for your skill:
