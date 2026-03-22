@@ -357,6 +357,17 @@ func (a *AnthropicAdapter) GetModel() string {
 	return a.model
 }
 
+// Clone returns a copy of this AnthropicAdapter with independent mutable state.
+// The clone shares the HTTP client (thread-safe) but has its own model and maxTokens values.
+func (a *AnthropicAdapter) Clone() port.AIProvider {
+	return &AnthropicAdapter{
+		client:          a.client,
+		model:           a.model,
+		maxTokens:       a.maxTokens,
+		subagentManager: a.subagentManager,
+	}
+}
+
 // convertMessages converts port MessageParam slice to Anthropic SDK MessageParam slice.
 func (a *AnthropicAdapter) convertMessages(messages []port.MessageParam) []anthropic.MessageParam {
 	result := make([]anthropic.MessageParam, len(messages))

@@ -342,6 +342,15 @@ func (m *subagentRunnerAIProviderMock) GetModel() string {
 	return m.currentModel
 }
 
+func (m *subagentRunnerAIProviderMock) Clone() port.AIProvider {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return &subagentRunnerAIProviderMock{
+		sendMessageResponse: m.sendMessageResponse,
+		currentModel:        m.currentModel,
+	}
+}
+
 // =============================================================================
 // Helper Functions
 // =============================================================================
@@ -423,7 +432,11 @@ func newSubagentTestHarness(t *testing.T) *subagentRunnerTestHarness {
 
 func (h *subagentRunnerTestHarness) build() *SubagentRunner {
 	h.t.Helper()
-	return NewSubagentRunner(h.convService, h.toolExecutor, h.aiProvider, nil, h.config)
+	convService := h.convService
+	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
+		return convService, nil
+	}
+	return NewSubagentRunner(h.convService, h.toolExecutor, h.aiProvider, nil, h.config, factory)
 }
 
 func (h *subagentRunnerTestHarness) run(agent *entity.Subagent, prompt, id string) (*SubagentResult, error) {
@@ -452,15 +465,20 @@ func TestNewSubagentRunner_WithAllDependencies(t *testing.T) {
 }
 
 func TestNewSubagentRunner_PanicsOnNilDependency(t *testing.T) {
+	dummyFactory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
+		return newSubagentRunnerConvServiceMock(), nil
+	}
 	tests := []struct {
 		name         string
 		convService  ConversationServiceInterface
 		toolExecutor port.ToolExecutor
 		aiProvider   port.AIProvider
+		convFactory  ConversationServiceFactory
 	}{
-		{"nil convService", nil, newSubagentRunnerToolExecutorMock(), newSubagentRunnerAIProviderMock()},
-		{"nil toolExecutor", newSubagentRunnerConvServiceMock(), nil, newSubagentRunnerAIProviderMock()},
-		{"nil aiProvider", newSubagentRunnerConvServiceMock(), newSubagentRunnerToolExecutorMock(), nil},
+		{"nil convService", nil, newSubagentRunnerToolExecutorMock(), newSubagentRunnerAIProviderMock(), dummyFactory},
+		{"nil toolExecutor", newSubagentRunnerConvServiceMock(), nil, newSubagentRunnerAIProviderMock(), dummyFactory},
+		{"nil aiProvider", newSubagentRunnerConvServiceMock(), newSubagentRunnerToolExecutorMock(), nil, dummyFactory},
+		{"nil convFactory", newSubagentRunnerConvServiceMock(), newSubagentRunnerToolExecutorMock(), newSubagentRunnerAIProviderMock(), nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -469,7 +487,7 @@ func TestNewSubagentRunner_PanicsOnNilDependency(t *testing.T) {
 					t.Error("expected panic")
 				}
 			}()
-			NewSubagentRunner(tt.convService, tt.toolExecutor, tt.aiProvider, nil, SubagentConfig{})
+			NewSubagentRunner(tt.convService, tt.toolExecutor, tt.aiProvider, nil, SubagentConfig{}, tt.convFactory)
 		})
 	}
 }
@@ -1464,6 +1482,9 @@ func TestSubagentRunner_ModelSwitch_SetsModel(t *testing.T) {
 			agent := createTestAgent(tt.agentName, strings.Title(tt.modelAlias)+" Agent")
 			agent.Model = tt.modelAlias
 
+			// Record original model before run
+			originalModel := h.aiProvider.GetModel()
+
 			// Act
 			result, err := h.run(agent, "Task", "subagent-"+tt.sessionSuffix)
 			// Assert
@@ -1473,11 +1494,13 @@ func TestSubagentRunner_ModelSwitch_SetsModel(t *testing.T) {
 			if result == nil {
 				t.Fatal("Run() returned nil result")
 			}
-			if h.aiProvider.setModelCalls == 0 {
-				t.Errorf("SetModel() was not called, want it to be called with resolved %s model ID", tt.modelAlias)
+			if result.Status != "completed" {
+				t.Errorf("Run() result status = %q, want %q", result.Status, "completed")
 			}
-			if len(h.aiProvider.setModelValues) > 0 && h.aiProvider.setModelValues[0] != tt.expectedModel {
-				t.Errorf("SetModel() called with %q, want %q", h.aiProvider.setModelValues[0], tt.expectedModel)
+			// Original provider's model must be unchanged (clone isolation)
+			if h.aiProvider.GetModel() != originalModel {
+				t.Errorf("Original provider model = %q, want %q (clone should not mutate original)",
+					h.aiProvider.GetModel(), originalModel)
 			}
 		})
 	}
@@ -1581,19 +1604,20 @@ func TestSubagentRunner_ModelSwitch_RestoresOriginalModelAfterError(t *testing.T
 	}
 }
 
-func TestSubagentRunner_ModelSwitch_LogsErrorOnRestoreFailure(t *testing.T) {
-	// Arrange
+func TestSubagentRunner_ModelSwitch_CloneIsolation(t *testing.T) {
+	// Arrange — verify that model switching uses a clone and never touches the original
 	h := newSubagentTestHarness(t)
-	h.convService.startConversationSession = "subagent-session-restore-fail"
-	h.aiProvider.setModelRestoreError = errors.New("provider unavailable")
-	agent := createTestAgent("agent-restore-fail", "Restore Fail Agent")
+	h.convService.startConversationSession = "subagent-session-clone-iso"
+	agent := createTestAgent("agent-clone-iso", "Clone Isolation Agent")
 	agent.Model = "haiku"
 
-	// Act — the defer cleanup will fail on SetModel restore, but Run should still succeed
-	result, err := h.run(agent, "Do something", "subagent-restore-fail-001")
-	// Assert — subagent result is returned despite cleanup error
+	originalModel := h.aiProvider.GetModel()
+
+	// Act
+	result, err := h.run(agent, "Do something", "subagent-clone-iso-001")
+	// Assert — subagent completes and original provider is untouched
 	if err != nil {
-		t.Errorf("Run() error = %v, want nil (cleanup error should not propagate)", err)
+		t.Errorf("Run() error = %v, want nil", err)
 	}
 	if result == nil {
 		t.Fatal("Run() returned nil result")
@@ -1601,9 +1625,13 @@ func TestSubagentRunner_ModelSwitch_LogsErrorOnRestoreFailure(t *testing.T) {
 	if result.Status != "completed" {
 		t.Errorf("result.Status = %q, want %q", result.Status, "completed")
 	}
-	// SetModel was called twice: once to set agent model, once to restore
-	if h.aiProvider.setModelCalls != 2 {
-		t.Errorf("SetModel calls = %d, want 2", h.aiProvider.setModelCalls)
+	// Original provider's SetModel should never be called (clone handles it)
+	if h.aiProvider.setModelCalls != 0 {
+		t.Errorf("Original provider SetModel calls = %d, want 0 (should only mutate clone)",
+			h.aiProvider.setModelCalls)
+	}
+	if h.aiProvider.GetModel() != originalModel {
+		t.Errorf("Original provider model = %q, want %q", h.aiProvider.GetModel(), originalModel)
 	}
 }
 

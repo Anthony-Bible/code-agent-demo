@@ -69,7 +69,10 @@ func TestSubagentRunner_Loop_TriggersThinkingStatus(t *testing.T) {
 		ThinkingBudget:  10000,
 		ShowThinking:    true,
 	}
-	runner := NewSubagentRunner(convServiceMock, toolExecutorMock, aiProviderMock, nil, config)
+	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
+		return convServiceMock, nil
+	}
+	runner := NewSubagentRunner(convServiceMock, toolExecutorMock, aiProviderMock, nil, config, factory)
 
 	// Execute: Run a subagent task
 	agent := &entity.Subagent{
@@ -120,7 +123,10 @@ func TestSubagentRunner_Loop_RespectsMaxActions(t *testing.T) {
 	config := SubagentConfig{
 		MaxActions: 3,
 	}
-	runner := NewSubagentRunner(convServiceMock, toolExecutorMock, aiProviderMock, nil, config)
+	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
+		return convServiceMock, nil
+	}
+	runner := NewSubagentRunner(convServiceMock, toolExecutorMock, aiProviderMock, nil, config, factory)
 
 	// Execute
 	agent := &entity.Subagent{Name: "test-agent"}

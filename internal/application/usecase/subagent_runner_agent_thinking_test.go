@@ -41,7 +41,10 @@ func TestSubagentRunner_AgentThinkingEnabled_OverridesStaticDisabled(t *testing.
 		ShowThinking:    false,
 	}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
+		return convService, nil
+	}
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory)
 
 	// Agent specifies thinking_enabled: true (override)
 	agent := createTestAgent("agent-001", "Test Agent")
@@ -93,7 +96,10 @@ func TestSubagentRunner_AgentThinkingDisabled_OverridesStaticEnabled(t *testing.
 		ShowThinking:    true,
 	}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
+		return convService, nil
+	}
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory)
 
 	// Agent specifies thinking_enabled: false (override)
 	agent := createTestAgent("agent-002", "Test Agent")
@@ -138,7 +144,10 @@ func TestSubagentRunner_AgentThinkingBudget_OverridesStaticBudget(t *testing.T) 
 		ShowThinking:    true,
 	}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
+		return convService, nil
+	}
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory)
 
 	// Agent specifies thinking_budget: 15000 (override)
 	agent := createTestAgent("agent-004", "Test Agent")
@@ -186,7 +195,10 @@ func TestSubagentRunner_AgentThinkingOverride_NoContextFallsBackToStatic(t *test
 		ShowThinking:    true,
 	}
 
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config)
+	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
+		return convService, nil
+	}
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory)
 
 	// Agent does NOT specify thinking fields
 	agent := createTestAgent("agent-008", "Test Agent")

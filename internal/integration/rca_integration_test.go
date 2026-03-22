@@ -39,6 +39,7 @@ func (m *mockAIProviderForRCA) GenerateToolSchema() port.ToolInputSchemaParam { 
 func (m *mockAIProviderForRCA) HealthCheck(ctx context.Context) error         { return nil }
 func (m *mockAIProviderForRCA) SetModel(model string) error                   { return nil }
 func (m *mockAIProviderForRCA) GetModel() string                              { return "test-model" }
+func (m *mockAIProviderForRCA) Clone() port.AIProvider                        { return m }
 
 // mockToolExecutorForRCA implements port.ToolExecutor.
 type mockToolExecutorForRCA struct {

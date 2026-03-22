@@ -2780,17 +2780,16 @@ Please prioritize your remaining actions carefully. Consider using the batch_too
 		},
 	}
 
+	cfg := TurnWarningConfig{
+		WarningThreshold: 5,
+		BatchToolHint:    "batch_tool",
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := newTestHarness(t)
-			runner := h.build()
+			got := BuildTurnWarningMessage(tt.remaining, cfg)
 
-			// Call buildTurnWarningMessage (this method doesn't exist yet - will fail)
-			got := runner.buildTurnWarningMessage(tt.remaining)
-
-			// Verify result
 			if got != tt.want {
-				t.Errorf("buildTurnWarningMessage(%d) = %q, want %q", tt.remaining, got, tt.want)
+				t.Errorf("BuildTurnWarningMessage(%d) = %q, want %q", tt.remaining, got, tt.want)
 			}
 		})
 	}

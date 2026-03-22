@@ -182,7 +182,10 @@ func TestSubagentRunner_ThinkingStatusDisplay_WhenEnabled(t *testing.T) {
 	convMock.processResponseToolCalls = [][]port.ToolCallInfo{{}} // Empty tool calls = completion
 
 	config := SubagentConfig{MaxActions: 10}
-	runner := NewSubagentRunner(convMock, toolMock, aiMock, uiMock, config)
+	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
+		return convMock, nil
+	}
+	runner := NewSubagentRunner(convMock, toolMock, aiMock, uiMock, config, factory)
 
 	agent := &entity.Subagent{
 		Name:        "test-agent",
@@ -226,7 +229,10 @@ func TestSubagentRunner_ThinkingStatusDisplay_NotShownWhenDisabled(t *testing.T)
 	convMock.processResponseToolCalls = [][]port.ToolCallInfo{{}}
 
 	config := SubagentConfig{MaxActions: 10}
-	runner := NewSubagentRunner(convMock, toolMock, aiMock, uiMock, config)
+	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
+		return convMock, nil
+	}
+	runner := NewSubagentRunner(convMock, toolMock, aiMock, uiMock, config, factory)
 
 	agent := &entity.Subagent{
 		Name:        "test-agent",
@@ -265,7 +271,10 @@ func TestSubagentRunner_ThinkingStatusDisplay_CorrectAgentName(t *testing.T) {
 	convMock.processResponseToolCalls = [][]port.ToolCallInfo{{}}
 
 	config := SubagentConfig{MaxActions: 10}
-	runner := NewSubagentRunner(convMock, toolMock, aiMock, uiMock, config)
+	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
+		return convMock, nil
+	}
+	runner := NewSubagentRunner(convMock, toolMock, aiMock, uiMock, config, factory)
 
 	agent := &entity.Subagent{
 		Name:        "code-reviewer",
@@ -324,7 +333,10 @@ func TestSubagentRunner_ThinkingStatusDisplay_BeforeProcessAssistantResponse(t *
 	convMock.processResponseToolCalls = [][]port.ToolCallInfo{{}}
 
 	config := SubagentConfig{MaxActions: 10}
-	runner := NewSubagentRunner(convMock, toolMock, aiMock, uiMock, config)
+	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
+		return convMock, nil
+	}
+	runner := NewSubagentRunner(convMock, toolMock, aiMock, uiMock, config, factory)
 
 	agent := &entity.Subagent{
 		Name:        "test-agent",
@@ -386,7 +398,10 @@ func TestSubagentRunner_ThinkingStatusDisplay_MultipleStatusTypes(t *testing.T) 
 	}
 
 	config := SubagentConfig{MaxActions: 10}
-	runner := NewSubagentRunner(convMock, toolMock, aiMock, uiMock, config)
+	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
+		return convMock, nil
+	}
+	runner := NewSubagentRunner(convMock, toolMock, aiMock, uiMock, config, factory)
 
 	agent := &entity.Subagent{
 		Name:        "multi-status-agent",
@@ -459,7 +474,10 @@ func TestSubagentRunner_ThinkingStatusDisplay_OnEveryLoopIteration(t *testing.T)
 	}
 
 	config := SubagentConfig{MaxActions: 10}
-	runner := NewSubagentRunner(convMock, toolMock, aiMock, uiMock, config)
+	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
+		return convMock, nil
+	}
+	runner := NewSubagentRunner(convMock, toolMock, aiMock, uiMock, config, factory)
 
 	agent := &entity.Subagent{
 		Name:        "multi-tool-agent",
@@ -523,7 +541,10 @@ func TestSubagentRunner_ThinkingStatusDisplay_ShowThinkingFlagDoesNotAffectStatu
 			convMock.processResponseToolCalls = [][]port.ToolCallInfo{{}}
 
 			config := SubagentConfig{MaxActions: 10}
-			runner := NewSubagentRunner(convMock, toolMock, aiMock, uiMock, config)
+			factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
+				return convMock, nil
+			}
+			runner := NewSubagentRunner(convMock, toolMock, aiMock, uiMock, config, factory)
 
 			agent := &entity.Subagent{
 				Name:        "test-agent",
@@ -567,7 +588,10 @@ func TestSubagentRunner_ThinkingStatusDisplay_EmptyDetails(t *testing.T) {
 	convMock.processResponseToolCalls = [][]port.ToolCallInfo{{}}
 
 	config := SubagentConfig{MaxActions: 10}
-	runner := NewSubagentRunner(convMock, toolMock, aiMock, uiMock, config)
+	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
+		return convMock, nil
+	}
+	runner := NewSubagentRunner(convMock, toolMock, aiMock, uiMock, config, factory)
 
 	agent := &entity.Subagent{
 		Name:        "test-agent",
@@ -623,7 +647,10 @@ func TestSubagentRunner_ThinkingStatusDisplay_CallOrder(t *testing.T) {
 	}
 
 	config := SubagentConfig{MaxActions: 10}
-	runner := NewSubagentRunner(convMock, toolMock, aiMock, uiMock, config)
+	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
+		return convMock, nil
+	}
+	runner := NewSubagentRunner(convMock, toolMock, aiMock, uiMock, config, factory)
 
 	agent := &entity.Subagent{
 		Name:        "order-test-agent",

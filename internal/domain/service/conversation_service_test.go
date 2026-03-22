@@ -837,6 +837,10 @@ func (m *mockAIProvider) GetModel() string {
 	return m.model
 }
 
+func (m *mockAIProvider) Clone() port.AIProvider {
+	return m
+}
+
 type mockToolExecutor struct {
 	tools   map[string]entity.Tool
 	results map[string]string
