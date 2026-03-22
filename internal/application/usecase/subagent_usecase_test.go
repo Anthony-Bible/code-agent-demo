@@ -83,13 +83,45 @@ func (m *MockSubagentRunner) Run(
 	return nil, errors.New("not implemented")
 }
 
+// ==================== Test Harness ====================
+
+type subagentUseCaseTestHarness struct {
+	t       *testing.T
+	manager *MockSubagentManager
+	runner  *MockSubagentRunner
+}
+
+func newUseCaseTestHarness(t *testing.T) *subagentUseCaseTestHarness {
+	t.Helper()
+	testAgent := &entity.Subagent{
+		Name:       "test-agent",
+		RawContent: "Test system prompt",
+	}
+	return &subagentUseCaseTestHarness{
+		t: t,
+		manager: &MockSubagentManager{
+			LoadAgentMetadataFunc: func(_ context.Context, _ string) (*entity.Subagent, error) {
+				return testAgent, nil
+			},
+		},
+		runner: &MockSubagentRunner{
+			RunFunc: func(_ context.Context, _ *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+				return &SubagentResult{Status: "completed", Output: "Done"}, nil
+			},
+		},
+	}
+}
+
+func (h *subagentUseCaseTestHarness) build() *SubagentUseCase {
+	h.t.Helper()
+	return NewSubagentUseCase(h.manager, h.runner)
+}
+
 // ==================== Constructor Tests ====================
 
 func TestNewSubagentUseCase_ValidDependencies(t *testing.T) {
-	manager := &MockSubagentManager{}
-	runner := &MockSubagentRunner{}
-
-	uc := NewSubagentUseCase(manager, runner)
+	h := newUseCaseTestHarness(t)
+	uc := h.build()
 
 	if uc == nil {
 		t.Fatal("NewSubagentUseCase() returned nil with valid dependencies")
@@ -103,8 +135,8 @@ func TestNewSubagentUseCase_NilSubagentManager(t *testing.T) {
 		}
 	}()
 
-	runner := &MockSubagentRunner{}
-	NewSubagentUseCase(nil, runner)
+	h := newUseCaseTestHarness(t)
+	NewSubagentUseCase(nil, h.runner)
 }
 
 func TestNewSubagentUseCase_NilSubagentRunner(t *testing.T) {
@@ -114,79 +146,72 @@ func TestNewSubagentUseCase_NilSubagentRunner(t *testing.T) {
 		}
 	}()
 
-	manager := &MockSubagentManager{}
-	NewSubagentUseCase(manager, nil)
+	h := newUseCaseTestHarness(t)
+	NewSubagentUseCase(h.manager, nil)
 }
 
 // ==================== Input Validation Tests ====================
 
-func TestSpawnSubagent_EmptyAgentName(t *testing.T) {
-	manager := &MockSubagentManager{}
-	runner := &MockSubagentRunner{}
-	uc := NewSubagentUseCase(manager, runner)
-
-	ctx := context.Background()
-	result, err := uc.SpawnSubagent(ctx, "", "some prompt")
-
+func assertErrorContains(t *testing.T, err error, wantContains string) {
+	t.Helper()
 	if err == nil {
-		t.Error("SpawnSubagent() did not return error for empty agentName")
+		t.Error("expected error")
+		return
 	}
-	if result != nil {
-		t.Error("SpawnSubagent() should return nil result for empty agentName")
-	}
-	if err != nil && !strings.Contains(err.Error(), "agentName") {
-		t.Errorf("Expected error message to mention 'agentName', got: %v", err)
+	if wantContains != "" && !strings.Contains(err.Error(), wantContains) {
+		t.Errorf("expected error containing %q, got: %v", wantContains, err)
 	}
 }
 
-func TestSpawnSubagent_EmptyPrompt(t *testing.T) {
-	manager := &MockSubagentManager{}
-	runner := &MockSubagentRunner{}
-	uc := NewSubagentUseCase(manager, runner)
-
-	ctx := context.Background()
-	result, err := uc.SpawnSubagent(ctx, "test-agent", "")
-
-	if err == nil {
-		t.Error("SpawnSubagent() did not return error for empty prompt")
+func TestSubagentUseCase_InputValidation(t *testing.T) {
+	tests := []struct {
+		name            string
+		agentName       string
+		prompt          string
+		setupManager    func(*MockSubagentManager)
+		wantErrContains string
+	}{
+		{"empty agent name", "", "some prompt", nil, "agentName"},
+		{"empty prompt", "test-agent", "", nil, "prompt"},
+		{"agent not found", "nonexistent", "do something", func(m *MockSubagentManager) {
+			m.LoadAgentMetadataFunc = func(_ context.Context, _ string) (*entity.Subagent, error) {
+				return nil, errors.New("agent not found")
+			}
+		}, "not found"},
 	}
-	if result != nil {
-		t.Error("SpawnSubagent() should return nil result for empty prompt")
-	}
-	if err != nil && !strings.Contains(err.Error(), "prompt") {
-		t.Errorf("Expected error message to mention 'prompt', got: %v", err)
-	}
-}
-
-func TestSpawnSubagent_AgentNotFound(t *testing.T) {
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return nil, errors.New("agent not found")
-		},
-	}
-	runner := &MockSubagentRunner{}
-	uc := NewSubagentUseCase(manager, runner)
-
-	ctx := context.Background()
-	result, err := uc.SpawnSubagent(ctx, "nonexistent-agent", "do something")
-
-	if err == nil {
-		t.Error("SpawnSubagent() did not return error when agent not found")
-	}
-	if result != nil {
-		t.Error("SpawnSubagent() should return nil result when agent not found")
+	for _, tt := range tests {
+		t.Run("sync/"+tt.name, func(t *testing.T) {
+			h := newUseCaseTestHarness(t)
+			if tt.setupManager != nil {
+				tt.setupManager(h.manager)
+			}
+			result, err := h.build().SpawnSubagent(context.Background(), tt.agentName, tt.prompt)
+			assertErrorContains(t, err, tt.wantErrContains)
+			if result != nil {
+				t.Error("expected nil result")
+			}
+		})
+		t.Run("async/"+tt.name, func(t *testing.T) {
+			h := newUseCaseTestHarness(t)
+			if tt.setupManager != nil {
+				tt.setupManager(h.manager)
+			}
+			handle, err := h.build().SpawnSubagentAsync(context.Background(), tt.agentName, tt.prompt)
+			assertErrorContains(t, err, tt.wantErrContains)
+			if handle != nil {
+				t.Error("expected nil handle")
+			}
+		})
 	}
 }
 
 func TestSpawnSubagent_LoadAgentMetadataError(t *testing.T) {
 	expectedErr := errors.New("metadata load failure")
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return nil, expectedErr
-		},
+	h := newUseCaseTestHarness(t)
+	h.manager.LoadAgentMetadataFunc = func(_ context.Context, _ string) (*entity.Subagent, error) {
+		return nil, expectedErr
 	}
-	runner := &MockSubagentRunner{}
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 
 	ctx := context.Background()
 	result, err := uc.SpawnSubagent(ctx, "test-agent", "do something")
@@ -205,21 +230,6 @@ func TestSpawnSubagent_LoadAgentMetadataError(t *testing.T) {
 // ==================== Successful Spawn Tests ====================
 
 func TestSpawnSubagent_SuccessfulSpawn(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name:        "test-agent",
-		Description: "A test agent",
-		RawContent:  "Test system prompt",
-	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			if agentName == "test-agent" {
-				return testAgent, nil
-			}
-			return nil, errors.New("agent not found")
-		},
-	}
-
 	expectedResult := &SubagentResult{
 		Status:    "completed",
 		AgentName: "test-agent",
@@ -227,13 +237,11 @@ func TestSpawnSubagent_SuccessfulSpawn(t *testing.T) {
 		Error:     nil,
 	}
 
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			return expectedResult, nil
-		},
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, _ *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+		return expectedResult, nil
 	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	result, err := uc.SpawnSubagent(ctx, "test-agent", "do something cool")
@@ -255,27 +263,13 @@ func TestSpawnSubagent_SuccessfulSpawn(t *testing.T) {
 }
 
 func TestSpawnSubagent_GeneratesUniqueID(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name:        "test-agent",
-		Description: "A test agent",
-		RawContent:  "Test system prompt",
-	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
 	var capturedIDs []string
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			capturedIDs = append(capturedIDs, subagentID)
-			return &SubagentResult{Status: "completed"}, nil
-		},
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, _ *entity.Subagent, _ string, subagentID string) (*SubagentResult, error) {
+		capturedIDs = append(capturedIDs, subagentID)
+		return &SubagentResult{Status: "completed"}, nil
 	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	// Spawn multiple times
@@ -306,21 +300,16 @@ func TestSpawnSubagent_PassesCorrectAgentToRunner(t *testing.T) {
 		RawContent:  "You are super awesome",
 	}
 
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
+	h := newUseCaseTestHarness(t)
+	h.manager.LoadAgentMetadataFunc = func(_ context.Context, _ string) (*entity.Subagent, error) {
+		return testAgent, nil
 	}
-
 	var capturedAgent *entity.Subagent
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			capturedAgent = agent
-			return &SubagentResult{Status: "completed"}, nil
-		},
+	h.runner.RunFunc = func(_ context.Context, agent *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+		capturedAgent = agent
+		return &SubagentResult{Status: "completed"}, nil
 	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	_, err := uc.SpawnSubagent(ctx, "super-agent", "do stuff")
@@ -344,25 +333,13 @@ func TestSpawnSubagent_PassesCorrectAgentToRunner(t *testing.T) {
 }
 
 func TestSpawnSubagent_PassesCorrectPromptToRunner(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
-	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
 	var capturedPrompt string
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			capturedPrompt = taskPrompt
-			return &SubagentResult{Status: "completed"}, nil
-		},
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, _ *entity.Subagent, taskPrompt string, _ string) (*SubagentResult, error) {
+		capturedPrompt = taskPrompt
+		return &SubagentResult{Status: "completed"}, nil
 	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	expectedPrompt := "analyze this codebase thoroughly"
@@ -379,24 +356,12 @@ func TestSpawnSubagent_PassesCorrectPromptToRunner(t *testing.T) {
 // ==================== Error Handling Tests ====================
 
 func TestSpawnSubagent_RunnerErrorPropagates(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
-	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
 	expectedErr := errors.New("runner execution failed")
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			return nil, expectedErr
-		},
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, _ *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+		return nil, expectedErr
 	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	result, err := uc.SpawnSubagent(ctx, "test-agent", "do something")
@@ -413,16 +378,6 @@ func TestSpawnSubagent_RunnerErrorPropagates(t *testing.T) {
 }
 
 func TestSpawnSubagent_FailedResultWithErrorDetails(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
-	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
 	failedResult := &SubagentResult{
 		Status:    "failed",
 		AgentName: "test-agent",
@@ -430,13 +385,11 @@ func TestSpawnSubagent_FailedResultWithErrorDetails(t *testing.T) {
 		Error:     errors.New("task execution failed"),
 	}
 
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			return failedResult, nil
-		},
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, _ *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+		return failedResult, nil
 	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	result, err := uc.SpawnSubagent(ctx, "test-agent", "do something risky")
@@ -458,29 +411,17 @@ func TestSpawnSubagent_FailedResultWithErrorDetails(t *testing.T) {
 }
 
 func TestSpawnSubagent_ContextCancellation(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(ctx context.Context, _ *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+		// Check if context was passed correctly
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+			return &SubagentResult{Status: "completed"}, nil
+		}
 	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			// Check if context was passed correctly
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			default:
-				return &SubagentResult{Status: "completed"}, nil
-			}
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 
 	// Create cancelled context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -499,99 +440,25 @@ func TestSpawnSubagent_ContextCancellation(t *testing.T) {
 
 // ==================== Async Spawn Tests (Cycle 5.2) ====================
 
-// ==================== Input Validation Tests (Async) ====================
-
-func TestSpawnSubagentAsync_EmptyAgentName(t *testing.T) {
-	manager := &MockSubagentManager{}
-	runner := &MockSubagentRunner{}
-	uc := NewSubagentUseCase(manager, runner)
-
-	ctx := context.Background()
-	handle, err := uc.SpawnSubagentAsync(ctx, "", "some prompt")
-
-	if err == nil {
-		t.Error("SpawnSubagentAsync() did not return error for empty agentName")
-	}
-	if handle != nil {
-		t.Error("SpawnSubagentAsync() should return nil handle for empty agentName")
-	}
-	if err != nil && !strings.Contains(err.Error(), "agentName") {
-		t.Errorf("Expected error message to mention 'agentName', got: %v", err)
-	}
-}
-
-func TestSpawnSubagentAsync_EmptyPrompt(t *testing.T) {
-	manager := &MockSubagentManager{}
-	runner := &MockSubagentRunner{}
-	uc := NewSubagentUseCase(manager, runner)
-
-	ctx := context.Background()
-	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "")
-
-	if err == nil {
-		t.Error("SpawnSubagentAsync() did not return error for empty prompt")
-	}
-	if handle != nil {
-		t.Error("SpawnSubagentAsync() should return nil handle for empty prompt")
-	}
-	if err != nil && !strings.Contains(err.Error(), "prompt") {
-		t.Errorf("Expected error message to mention 'prompt', got: %v", err)
-	}
-}
-
-func TestSpawnSubagentAsync_AgentNotFound(t *testing.T) {
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return nil, errors.New("agent not found")
-		},
-	}
-	runner := &MockSubagentRunner{}
-	uc := NewSubagentUseCase(manager, runner)
-
-	ctx := context.Background()
-	handle, err := uc.SpawnSubagentAsync(ctx, "nonexistent-agent", "do something")
-
-	if err == nil {
-		t.Error("SpawnSubagentAsync() did not return error when agent not found")
-	}
-	if handle != nil {
-		t.Error("SpawnSubagentAsync() should return nil handle when agent not found")
-	}
-}
-
 // ==================== Non-Blocking Behavior Tests ====================
 
 func TestSpawnSubagentAsync_ReturnsImmediately(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name:        "test-agent",
-		Description: "A test agent",
-		RawContent:  "Test system prompt",
-	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
+	h := newUseCaseTestHarness(t)
 	// Mock runner with intentional delay to verify non-blocking behavior
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			// Simulate slow execution (100ms)
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(100 * time.Millisecond):
-				return &SubagentResult{
-					Status:    "completed",
-					AgentName: "test-agent",
-					Output:    "Task completed",
-				}, nil
-			}
-		},
+	h.runner.RunFunc = func(ctx context.Context, _ *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+		// Simulate slow execution (100ms)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+			return &SubagentResult{
+				Status:    "completed",
+				AgentName: "test-agent",
+				Output:    "Task completed",
+			}, nil
+		}
 	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	start := time.Now()
@@ -621,23 +488,8 @@ func TestSpawnSubagentAsync_ReturnsImmediately(t *testing.T) {
 }
 
 func TestSpawnSubagentAsync_ReturnsValidHandle(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
-	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			return &SubagentResult{Status: "completed"}, nil
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	h := newUseCaseTestHarness(t)
+	uc := h.build()
 	ctx := context.Background()
 
 	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "test prompt")
@@ -664,23 +516,8 @@ func TestSpawnSubagentAsync_ReturnsValidHandle(t *testing.T) {
 }
 
 func TestSpawnSubagentAsync_GeneratesUniqueSubagentID(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
-	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			return &SubagentResult{Status: "completed"}, nil
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	h := newUseCaseTestHarness(t)
+	uc := h.build()
 	ctx := context.Background()
 
 	// Spawn multiple async subagents
@@ -710,23 +547,11 @@ func TestSpawnSubagentAsync_GeneratesUniqueSubagentID(t *testing.T) {
 }
 
 func TestSpawnSubagentAsync_HandleContainsCorrectAgentName(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "super-agent",
+	h := newUseCaseTestHarness(t)
+	h.manager.LoadAgentMetadataFunc = func(_ context.Context, _ string) (*entity.Subagent, error) {
+		return &entity.Subagent{Name: "super-agent"}, nil
 	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			return &SubagentResult{Status: "completed"}, nil
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	handle, err := uc.SpawnSubagentAsync(ctx, "super-agent", "test prompt")
@@ -748,29 +573,17 @@ func TestSpawnSubagentAsync_HandleContainsCorrectAgentName(t *testing.T) {
 // ==================== Background Execution Tests ====================
 
 func TestSpawnSubagentAsync_ResultSentToChannel(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
-	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
 	expectedResult := &SubagentResult{
 		Status:    "completed",
 		AgentName: "test-agent",
 		Output:    "Task completed successfully",
 	}
 
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			return expectedResult, nil
-		},
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, _ *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+		return expectedResult, nil
 	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "test prompt")
@@ -801,24 +614,12 @@ func TestSpawnSubagentAsync_ResultSentToChannel(t *testing.T) {
 }
 
 func TestSpawnSubagentAsync_ErrorSentToChannel(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
-	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
 	expectedErr := errors.New("runner execution failed")
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			return nil, expectedErr
-		},
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, _ *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+		return nil, expectedErr
 	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "test prompt")
@@ -843,23 +644,8 @@ func TestSpawnSubagentAsync_ErrorSentToChannel(t *testing.T) {
 }
 
 func TestSpawnSubagentAsync_ChannelsClosedAfterResult(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
-	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			return &SubagentResult{Status: "completed"}, nil
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	h := newUseCaseTestHarness(t)
+	uc := h.build()
 	ctx := context.Background()
 
 	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "test prompt")
@@ -900,23 +686,8 @@ func TestSpawnSubagentAsync_ChannelsClosedAfterResult(t *testing.T) {
 }
 
 func TestSpawnSubagentAsync_OnlyOneMessageSent(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
-	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			return &SubagentResult{Status: "completed"}, nil
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	h := newUseCaseTestHarness(t)
+	uc := h.build()
 	ctx := context.Background()
 
 	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "test prompt")
@@ -955,31 +726,19 @@ func TestSpawnSubagentAsync_OnlyOneMessageSent(t *testing.T) {
 }
 
 func TestSpawnSubagentAsync_MultipleSpawnsDontInterfere(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
-	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
 	var callCount atomic.Int32
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			count := callCount.Add(1)
-			// Different delays to ensure they execute concurrently
-			delay := time.Duration(count*10) * time.Millisecond
-			time.Sleep(delay)
-			return &SubagentResult{
-				Status: "completed",
-				Output: taskPrompt, // Echo prompt to verify isolation
-			}, nil
-		},
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, _ *entity.Subagent, taskPrompt string, _ string) (*SubagentResult, error) {
+		count := callCount.Add(1)
+		// Different delays to ensure they execute concurrently
+		delay := time.Duration(count*10) * time.Millisecond
+		time.Sleep(delay)
+		return &SubagentResult{
+			Status: "completed",
+			Output: taskPrompt, // Echo prompt to verify isolation
+		}, nil
 	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	// Spawn 3 subagents concurrently
@@ -1013,29 +772,17 @@ func TestSpawnSubagentAsync_MultipleSpawnsDontInterfere(t *testing.T) {
 // ==================== Context Cancellation Tests ====================
 
 func TestSpawnSubagentAsync_ContextCancellationDuringExecution(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(ctx context.Context, _ *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+		// Simulate long-running task that respects context
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+			return &SubagentResult{Status: "completed"}, nil
+		}
 	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			// Simulate long-running task that respects context
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(200 * time.Millisecond):
-				return &SubagentResult{Status: "completed"}, nil
-			}
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 
 	// Create cancellable context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1066,28 +813,16 @@ func TestSpawnSubagentAsync_ContextCancellationDuringExecution(t *testing.T) {
 }
 
 func TestSpawnSubagentAsync_CancelledContextBeforeSpawn(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(ctx context.Context, _ *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+			return &SubagentResult{Status: "completed"}, nil
+		}
 	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			default:
-				return &SubagentResult{Status: "completed"}, nil
-			}
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 
 	// Create already-cancelled context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1105,29 +840,17 @@ func TestSpawnSubagentAsync_CancelledContextBeforeSpawn(t *testing.T) {
 }
 
 func TestSpawnSubagentAsync_ContextTimeoutPropagates(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(ctx context.Context, _ *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+		// Simulate long task
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(300 * time.Millisecond):
+			return &SubagentResult{Status: "completed"}, nil
+		}
 	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			// Simulate long task
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(300 * time.Millisecond):
-				return &SubagentResult{Status: "completed"}, nil
-			}
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 
 	// Context with short timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -1158,13 +881,11 @@ func TestSpawnSubagentAsync_ContextTimeoutPropagates(t *testing.T) {
 
 func TestSpawnSubagentAsync_LoadAgentMetadataError(t *testing.T) {
 	expectedErr := errors.New("metadata load failure")
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return nil, expectedErr
-		},
+	h := newUseCaseTestHarness(t)
+	h.manager.LoadAgentMetadataFunc = func(_ context.Context, _ string) (*entity.Subagent, error) {
+		return nil, expectedErr
 	}
-	runner := &MockSubagentRunner{}
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 
 	ctx := context.Background()
 	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "test prompt")
@@ -1182,22 +903,19 @@ func TestSpawnSubagentAsync_LoadAgentMetadataError(t *testing.T) {
 }
 
 func TestSpawnSubagentAsync_LoadAgentMetadataNoChannelsSent(t *testing.T) {
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return nil, errors.New("agent not found")
-		},
+	h := newUseCaseTestHarness(t)
+	h.manager.LoadAgentMetadataFunc = func(_ context.Context, _ string) (*entity.Subagent, error) {
+		return nil, errors.New("agent not found")
 	}
 
 	// Runner should NOT be called if LoadAgentMetadata fails
 	runnerCalled := false
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			runnerCalled = true
-			return &SubagentResult{Status: "completed"}, nil
-		},
+	h.runner.RunFunc = func(_ context.Context, _ *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+		runnerCalled = true
+		return &SubagentResult{Status: "completed"}, nil
 	}
 
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	handle, err := uc.SpawnSubagentAsync(ctx, "test-agent", "test prompt")
@@ -1222,9 +940,8 @@ func TestSpawnSubagentAsync_LoadAgentMetadataNoChannelsSent(t *testing.T) {
 // ==================== Input Validation Tests (Parallel) ====================
 
 func TestSpawnMultiple_NilRequestsSlice(t *testing.T) {
-	manager := &MockSubagentManager{}
-	runner := &MockSubagentRunner{}
-	uc := NewSubagentUseCase(manager, runner)
+	h := newUseCaseTestHarness(t)
+	uc := h.build()
 
 	ctx := context.Background()
 	result, err := uc.SpawnMultiple(ctx, nil)
@@ -1243,9 +960,8 @@ func TestSpawnMultiple_NilRequestsSlice(t *testing.T) {
 }
 
 func TestSpawnMultiple_EmptyRequestsSlice(t *testing.T) {
-	manager := &MockSubagentManager{}
-	runner := &MockSubagentRunner{}
-	uc := NewSubagentUseCase(manager, runner)
+	h := newUseCaseTestHarness(t)
+	uc := h.build()
 
 	ctx := context.Background()
 	result, err := uc.SpawnMultiple(ctx, []*SubagentRequest{})
@@ -1264,31 +980,17 @@ func TestSpawnMultiple_EmptyRequestsSlice(t *testing.T) {
 }
 
 func TestSpawnMultiple_SingleRequest(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name:        "test-agent",
-		Description: "A test agent",
-		RawContent:  "Test system prompt",
-	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
 	expectedResult := &SubagentResult{
 		Status:    "completed",
 		AgentName: "test-agent",
 		Output:    "Task completed",
 	}
 
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			return expectedResult, nil
-		},
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, _ *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+		return expectedResult, nil
 	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	requests := []*SubagentRequest{
@@ -1319,31 +1021,17 @@ func TestSpawnMultiple_SingleRequest(t *testing.T) {
 // ==================== Parallel Execution Tests ====================
 
 func TestSpawnMultiple_MultipleSuccessfulSpawns(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name:        "test-agent",
-		Description: "A test agent",
-		RawContent:  "Test system prompt",
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, agent *entity.Subagent, taskPrompt string, _ string) (*SubagentResult, error) {
+		// Simulate work to verify parallel execution
+		time.Sleep(10 * time.Millisecond)
+		return &SubagentResult{
+			Status:    "completed",
+			AgentName: agent.Name,
+			Output:    taskPrompt,
+		}, nil
 	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			// Simulate work to verify parallel execution
-			time.Sleep(10 * time.Millisecond)
-			return &SubagentResult{
-				Status:    "completed",
-				AgentName: agent.Name,
-				Output:    taskPrompt,
-			}, nil
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	// Create 3 requests
@@ -1390,40 +1078,28 @@ func TestSpawnMultiple_MultipleSuccessfulSpawns(t *testing.T) {
 }
 
 func TestSpawnMultiple_ResultsMatchRequestOrder(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, agent *entity.Subagent, taskPrompt string, _ string) (*SubagentResult, error) {
+		// Different delays to ensure non-sequential completion
+		// This tests that results are properly ordered despite completion order
+		delay := time.Duration(0)
+		switch taskPrompt {
+		case "task 1":
+			delay = 20 * time.Millisecond
+		case "task 2":
+			delay = 10 * time.Millisecond
+		case "task 3":
+			delay = 5 * time.Millisecond
+		}
+		time.Sleep(delay)
+
+		return &SubagentResult{
+			Status:    "completed",
+			AgentName: agent.Name,
+			Output:    taskPrompt, // Echo prompt to verify ordering
+		}, nil
 	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			// Different delays to ensure non-sequential completion
-			// This tests that results are properly ordered despite completion order
-			delay := time.Duration(0)
-			switch taskPrompt {
-			case "task 1":
-				delay = 20 * time.Millisecond
-			case "task 2":
-				delay = 10 * time.Millisecond
-			case "task 3":
-				delay = 5 * time.Millisecond
-			}
-			time.Sleep(delay)
-
-			return &SubagentResult{
-				Status:    "completed",
-				AgentName: agent.Name,
-				Output:    taskPrompt, // Echo prompt to verify ordering
-			}, nil
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	requests := []*SubagentRequest{
@@ -1450,28 +1126,16 @@ func TestSpawnMultiple_ResultsMatchRequestOrder(t *testing.T) {
 }
 
 func TestSpawnMultiple_EachSpawnGetsUniqueSubagentID(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
-	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
 	var capturedIDs []string
 	var mu sync.Mutex
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			mu.Lock()
-			capturedIDs = append(capturedIDs, subagentID)
-			mu.Unlock()
-			return &SubagentResult{Status: "completed"}, nil
-		},
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, _ *entity.Subagent, _ string, subagentID string) (*SubagentResult, error) {
+		mu.Lock()
+		capturedIDs = append(capturedIDs, subagentID)
+		mu.Unlock()
+		return &SubagentResult{Status: "completed"}, nil
 	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	requests := []*SubagentRequest{
@@ -1503,44 +1167,32 @@ func TestSpawnMultiple_EachSpawnGetsUniqueSubagentID(t *testing.T) {
 }
 
 func TestSpawnMultiple_ActuallyRunsInParallel(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
-	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
 	// Track concurrent execution using counter
 	var concurrentCount int32
 	var maxConcurrent int32
 	var mu sync.Mutex
 
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			// Increment concurrent counter
-			current := atomic.AddInt32(&concurrentCount, 1)
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, _ *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+		// Increment concurrent counter
+		current := atomic.AddInt32(&concurrentCount, 1)
 
-			// Track maximum concurrent executions
-			mu.Lock()
-			if current > maxConcurrent {
-				maxConcurrent = current
-			}
-			mu.Unlock()
+		// Track maximum concurrent executions
+		mu.Lock()
+		if current > maxConcurrent {
+			maxConcurrent = current
+		}
+		mu.Unlock()
 
-			// Simulate work
-			time.Sleep(20 * time.Millisecond)
+		// Simulate work
+		time.Sleep(20 * time.Millisecond)
 
-			// Decrement concurrent counter
-			atomic.AddInt32(&concurrentCount, -1)
+		// Decrement concurrent counter
+		atomic.AddInt32(&concurrentCount, -1)
 
-			return &SubagentResult{Status: "completed"}, nil
-		},
+		return &SubagentResult{Status: "completed"}, nil
 	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	// Create 5 requests to ensure we see parallel execution
@@ -1567,26 +1219,14 @@ func TestSpawnMultiple_ActuallyRunsInParallel(t *testing.T) {
 }
 
 func TestSpawnMultiple_LargeBatch(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, _ *entity.Subagent, taskPrompt string, _ string) (*SubagentResult, error) {
+		return &SubagentResult{
+			Status: "completed",
+			Output: taskPrompt,
+		}, nil
 	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			return &SubagentResult{
-				Status: "completed",
-				Output: taskPrompt,
-			}, nil
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	// Create 15 requests
@@ -1628,30 +1268,18 @@ func TestSpawnMultiple_LargeBatch(t *testing.T) {
 // ==================== Individual Error Handling Tests ====================
 
 func TestSpawnMultiple_OneFailedSpawnDoesntAffectOthers(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, _ *entity.Subagent, taskPrompt string, _ string) (*SubagentResult, error) {
+		// Fail only the second task
+		if taskPrompt == "task 2" {
+			return nil, errors.New("task 2 failed")
+		}
+		return &SubagentResult{
+			Status: "completed",
+			Output: taskPrompt,
+		}, nil
 	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			// Fail only the second task
-			if taskPrompt == "task 2" {
-				return nil, errors.New("task 2 failed")
-			}
-			return &SubagentResult{
-				Status: "completed",
-				Output: taskPrompt,
-			}, nil
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	requests := []*SubagentRequest{
@@ -1694,30 +1322,18 @@ func TestSpawnMultiple_OneFailedSpawnDoesntAffectOthers(t *testing.T) {
 }
 
 func TestSpawnMultiple_MixedSuccessAndFailure(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, _ *entity.Subagent, taskPrompt string, _ string) (*SubagentResult, error) {
+		// Fail tasks with even numbers in the prompt
+		if strings.Contains(taskPrompt, "2") || strings.Contains(taskPrompt, "4") {
+			return nil, fmt.Errorf("%s failed", taskPrompt)
+		}
+		return &SubagentResult{
+			Status: "completed",
+			Output: taskPrompt,
+		}, nil
 	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			// Fail tasks with even numbers in the prompt
-			if strings.Contains(taskPrompt, "2") || strings.Contains(taskPrompt, "4") {
-				return nil, fmt.Errorf("%s failed", taskPrompt)
-			}
-			return &SubagentResult{
-				Status: "completed",
-				Output: taskPrompt,
-			}, nil
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	requests := []*SubagentRequest{
@@ -1757,27 +1373,15 @@ func TestSpawnMultiple_MixedSuccessAndFailure(t *testing.T) {
 }
 
 func TestSpawnMultiple_ErrorsArrayMatchesRequestOrder(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, _ *entity.Subagent, taskPrompt string, _ string) (*SubagentResult, error) {
+		// Fail with error message containing task name
+		if strings.Contains(taskPrompt, "fail") {
+			return nil, fmt.Errorf("error for %s", taskPrompt)
+		}
+		return &SubagentResult{Status: "completed"}, nil
 	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			// Fail with error message containing task name
-			if strings.Contains(taskPrompt, "fail") {
-				return nil, fmt.Errorf("error for %s", taskPrompt)
-			}
-			return &SubagentResult{Status: "completed"}, nil
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	requests := []*SubagentRequest{
@@ -1816,24 +1420,12 @@ func TestSpawnMultiple_ErrorsArrayMatchesRequestOrder(t *testing.T) {
 }
 
 func TestSpawnMultiple_AllFailuresReturnsAllErrors(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, _ *entity.Subagent, taskPrompt string, _ string) (*SubagentResult, error) {
+		// All tasks fail
+		return nil, fmt.Errorf("error: %s", taskPrompt)
 	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			// All tasks fail
-			return nil, fmt.Errorf("error: %s", taskPrompt)
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	requests := []*SubagentRequest{
@@ -1869,32 +1461,20 @@ func TestSpawnMultiple_AllFailuresReturnsAllErrors(t *testing.T) {
 // ==================== Context Cancellation Tests ====================
 
 func TestSpawnMultiple_ContextCancellationStopsPendingSpawns(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
-	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
 	var startedCount int32
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			atomic.AddInt32(&startedCount, 1)
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(ctx context.Context, _ *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+		atomic.AddInt32(&startedCount, 1)
 
-			// Simulate long-running task that respects context
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(200 * time.Millisecond):
-				return &SubagentResult{Status: "completed"}, nil
-			}
-		},
+		// Simulate long-running task that respects context
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+			return &SubagentResult{Status: "completed"}, nil
+		}
 	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 
 	// Create cancellable context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1933,28 +1513,16 @@ func TestSpawnMultiple_ContextCancellationStopsPendingSpawns(t *testing.T) {
 }
 
 func TestSpawnMultiple_PreCancelledContext(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(ctx context.Context, _ *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+			return &SubagentResult{Status: "completed"}, nil
+		}
 	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			default:
-				return &SubagentResult{Status: "completed"}, nil
-			}
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 
 	// Create already-cancelled context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1986,29 +1554,17 @@ func TestSpawnMultiple_PreCancelledContext(t *testing.T) {
 }
 
 func TestSpawnMultiple_TimeoutDuringExecution(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(ctx context.Context, _ *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+		// Simulate long task
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+			return &SubagentResult{Status: "completed"}, nil
+		}
 	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			// Simulate long task
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(200 * time.Millisecond):
-				return &SubagentResult{Status: "completed"}, nil
-			}
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 
 	// Context with short timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -2040,29 +1596,17 @@ func TestSpawnMultiple_TimeoutDuringExecution(t *testing.T) {
 // ==================== Race Condition Tests ====================
 
 func TestSpawnMultiple_ConcurrentWritesDontCorruptResults(t *testing.T) {
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, _ *entity.Subagent, taskPrompt string, _ string) (*SubagentResult, error) {
+		// Random small delay to increase likelihood of races
+		delay := time.Duration(1+len(taskPrompt)%5) * time.Millisecond
+		time.Sleep(delay)
+		return &SubagentResult{
+			Status: "completed",
+			Output: taskPrompt,
+		}, nil
 	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			// Random small delay to increase likelihood of races
-			delay := time.Duration(1+len(taskPrompt)%5) * time.Millisecond
-			time.Sleep(delay)
-			return &SubagentResult{
-				Status: "completed",
-				Output: taskPrompt,
-			}, nil
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	// Create many requests to stress-test concurrent writes
@@ -2099,29 +1643,17 @@ func TestSpawnMultiple_ConcurrentWritesDontCorruptResults(t *testing.T) {
 
 func TestSpawnMultiple_RaceFlagPasses(t *testing.T) {
 	// NOTE: This test should be run with: go test -race ./internal/application/usecase -v -run TestSpawnMultiple_RaceFlagPasses
-	testAgent := &entity.Subagent{
-		Name: "test-agent",
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, _ *entity.Subagent, taskPrompt string, _ string) (*SubagentResult, error) {
+		// Small random delays to trigger race detector if there are issues
+		delay := time.Duration(1+(len(taskPrompt)*7)%10) * time.Millisecond
+		time.Sleep(delay)
+		return &SubagentResult{
+			Status: "completed",
+			Output: taskPrompt,
+		}, nil
 	}
-
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			return testAgent, nil
-		},
-	}
-
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			// Small random delays to trigger race detector if there are issues
-			delay := time.Duration(1+(len(taskPrompt)*7)%10) * time.Millisecond
-			time.Sleep(delay)
-			return &SubagentResult{
-				Status: "completed",
-				Output: taskPrompt,
-			}, nil
-		},
-	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	// Run multiple parallel batches to stress test
@@ -2153,27 +1685,22 @@ func TestSpawnDynamicSubagent_Success(t *testing.T) {
 	var capturedAgent *entity.Subagent
 	var capturedPrompt string
 
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			capturedAgent = agent
-			capturedPrompt = taskPrompt
-			return &SubagentResult{
-				Status:    "completed",
-				AgentName: agent.Name,
-				Output:    "Task completed successfully",
-			}, nil
-		},
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, agent *entity.Subagent, taskPrompt string, _ string) (*SubagentResult, error) {
+		capturedAgent = agent
+		capturedPrompt = taskPrompt
+		return &SubagentResult{
+			Status:    "completed",
+			AgentName: agent.Name,
+			Output:    "Task completed successfully",
+		}, nil
 	}
-
 	// Manager should NOT be called for dynamic agents
-	manager := &MockSubagentManager{
-		LoadAgentMetadataFunc: func(ctx context.Context, agentName string) (*entity.Subagent, error) {
-			t.Error("LoadAgentMetadata should not be called for dynamic subagents")
-			return nil, errors.New("should not be called")
-		},
+	h.manager.LoadAgentMetadataFunc = func(_ context.Context, _ string) (*entity.Subagent, error) {
+		t.Error("LoadAgentMetadata should not be called for dynamic subagents")
+		return nil, errors.New("should not be called")
 	}
-
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 	ctx := context.Background()
 
 	config := DynamicSubagentConfig{
@@ -2226,9 +1753,8 @@ func TestSpawnDynamicSubagent_Success(t *testing.T) {
 }
 
 func TestSpawnDynamicSubagent_MissingName(t *testing.T) {
-	manager := &MockSubagentManager{}
-	runner := &MockSubagentRunner{}
-	uc := NewSubagentUseCase(manager, runner)
+	h := newUseCaseTestHarness(t)
+	uc := h.build()
 
 	ctx := context.Background()
 	config := DynamicSubagentConfig{
@@ -2249,9 +1775,8 @@ func TestSpawnDynamicSubagent_MissingName(t *testing.T) {
 }
 
 func TestSpawnDynamicSubagent_MissingSystemPrompt(t *testing.T) {
-	manager := &MockSubagentManager{}
-	runner := &MockSubagentRunner{}
-	uc := NewSubagentUseCase(manager, runner)
+	h := newUseCaseTestHarness(t)
+	uc := h.build()
 
 	ctx := context.Background()
 	config := DynamicSubagentConfig{
@@ -2272,9 +1797,8 @@ func TestSpawnDynamicSubagent_MissingSystemPrompt(t *testing.T) {
 }
 
 func TestSpawnDynamicSubagent_MissingTask(t *testing.T) {
-	manager := &MockSubagentManager{}
-	runner := &MockSubagentRunner{}
-	uc := NewSubagentUseCase(manager, runner)
+	h := newUseCaseTestHarness(t)
+	uc := h.build()
 
 	ctx := context.Background()
 	config := DynamicSubagentConfig{
@@ -2297,15 +1821,12 @@ func TestSpawnDynamicSubagent_MissingTask(t *testing.T) {
 func TestSpawnDynamicSubagent_AppliesDefaults(t *testing.T) {
 	var capturedAgent *entity.Subagent
 
-	runner := &MockSubagentRunner{
-		RunFunc: func(ctx context.Context, agent *entity.Subagent, taskPrompt string, subagentID string) (*SubagentResult, error) {
-			capturedAgent = agent
-			return &SubagentResult{Status: "completed"}, nil
-		},
+	h := newUseCaseTestHarness(t)
+	h.runner.RunFunc = func(_ context.Context, agent *entity.Subagent, _ string, _ string) (*SubagentResult, error) {
+		capturedAgent = agent
+		return &SubagentResult{Status: "completed"}, nil
 	}
-
-	manager := &MockSubagentManager{}
-	uc := NewSubagentUseCase(manager, runner)
+	uc := h.build()
 
 	ctx := context.Background()
 	config := DynamicSubagentConfig{

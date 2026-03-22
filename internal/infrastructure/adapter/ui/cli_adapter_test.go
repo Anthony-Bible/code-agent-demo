@@ -21,11 +21,18 @@ import (
 // These tests are intentionally written to fail during the Red Phase of TDD.
 // They define the expected behavior of the CLIAdapter before implementation.
 
+// newTestAdapter creates a CLIAdapter with the given input string and returns
+// both the adapter and the output buffer for assertion.
+func newTestAdapter(t *testing.T, input string) (*ui.CLIAdapter, *strings.Builder) {
+	t.Helper()
+	output := &strings.Builder{}
+	adapter := ui.NewCLIAdapterWithIO(strings.NewReader(input), output)
+	return adapter, output
+}
+
 func TestCLIAdapter_GetUserInput(t *testing.T) {
 	t.Run("gets user input successfully", func(t *testing.T) {
-		input := strings.NewReader("hello world\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "hello world\n")
 
 		result, ok := adapter.GetUserInput(context.Background())
 
@@ -34,9 +41,7 @@ func TestCLIAdapter_GetUserInput(t *testing.T) {
 	})
 
 	t.Run("handles empty input", func(t *testing.T) {
-		input := strings.NewReader("\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "\n")
 
 		result, ok := adapter.GetUserInput(context.Background())
 
@@ -45,9 +50,7 @@ func TestCLIAdapter_GetUserInput(t *testing.T) {
 	})
 
 	t.Run("handles input with spaces", func(t *testing.T) {
-		input := strings.NewReader("  hello   world  \n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "  hello   world  \n")
 
 		result, ok := adapter.GetUserInput(context.Background())
 
@@ -56,9 +59,7 @@ func TestCLIAdapter_GetUserInput(t *testing.T) {
 	})
 
 	t.Run("handles EOF (ctrl+d)", func(t *testing.T) {
-		input := strings.NewReader("") // Empty reader simulates EOF
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "") // Empty reader simulates EOF
 
 		_, ok := adapter.GetUserInput(context.Background())
 
@@ -66,9 +67,7 @@ func TestCLIAdapter_GetUserInput(t *testing.T) {
 	})
 
 	t.Run("handles context cancellation", func(t *testing.T) {
-		input := strings.NewReader("test\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "test\n")
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
@@ -80,9 +79,7 @@ func TestCLIAdapter_GetUserInput(t *testing.T) {
 
 	t.Run("preserves special characters in input", func(t *testing.T) {
 		specialInput := "test ~!@#$%^&*()_+-={}[]|\\:;\"'<>?,./"
-		input := strings.NewReader(specialInput + "\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, specialInput+"\n")
 
 		result, ok := adapter.GetUserInput(context.Background())
 
@@ -93,9 +90,7 @@ func TestCLIAdapter_GetUserInput(t *testing.T) {
 
 func TestCLIAdapter_DisplayMessage(t *testing.T) {
 	t.Run("displays user message with correct color", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplayMessage("Hello world", "user")
 
@@ -107,9 +102,7 @@ func TestCLIAdapter_DisplayMessage(t *testing.T) {
 	})
 
 	t.Run("displays assistant message with correct color", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplayMessage("I can help with that", "assistant")
 
@@ -120,9 +113,7 @@ func TestCLIAdapter_DisplayMessage(t *testing.T) {
 	})
 
 	t.Run("displays system message with correct color", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplayMessage("System initialized", "system")
 
@@ -133,9 +124,7 @@ func TestCLIAdapter_DisplayMessage(t *testing.T) {
 	})
 
 	t.Run("handles empty message", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplayMessage("", "user")
 
@@ -145,9 +134,7 @@ func TestCLIAdapter_DisplayMessage(t *testing.T) {
 	})
 
 	t.Run("handles multiline message", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		multiline := "Line 1\nLine 2\nLine 3"
 		err := adapter.DisplayMessage(multiline, "user")
@@ -160,9 +147,7 @@ func TestCLIAdapter_DisplayMessage(t *testing.T) {
 	})
 
 	t.Run("handles unknown message role defaults to user", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplayMessage("Unknown role message", "unknown_role")
 
@@ -173,9 +158,7 @@ func TestCLIAdapter_DisplayMessage(t *testing.T) {
 	})
 
 	t.Run("handles message with special characters", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		specialChars := "Special chars: ~`!@#$%^&*()_-+={}|[]\\:;\"'<>?,./"
 		err := adapter.DisplayMessage(specialChars, "user")
@@ -186,9 +169,7 @@ func TestCLIAdapter_DisplayMessage(t *testing.T) {
 	})
 
 	t.Run("handles very long message", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		longMessage := strings.Repeat("This is a long message. ", 1000)
 		err := adapter.DisplayMessage(longMessage, "user")
@@ -202,9 +183,7 @@ func TestCLIAdapter_DisplayMessage(t *testing.T) {
 
 func TestCLIAdapter_DisplayError(t *testing.T) {
 	t.Run("displays error message with correct color", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		testErr := errors.New("something went wrong")
 		err := adapter.DisplayError(testErr)
@@ -218,9 +197,7 @@ func TestCLIAdapter_DisplayError(t *testing.T) {
 	})
 
 	t.Run("handles nil error", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplayError(nil)
 
@@ -230,9 +207,7 @@ func TestCLIAdapter_DisplayError(t *testing.T) {
 	})
 
 	t.Run("handles complex error with message", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		complexErr := errors.New("complex error: nested error occurred")
 		err := adapter.DisplayError(complexErr)
@@ -243,9 +218,7 @@ func TestCLIAdapter_DisplayError(t *testing.T) {
 	})
 
 	t.Run("handles error with special characters", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		specialErr := errors.New("Error with special chars: !@#$%^&*()")
 		err := adapter.DisplayError(specialErr)
@@ -258,9 +231,7 @@ func TestCLIAdapter_DisplayError(t *testing.T) {
 
 func TestCLIAdapter_DisplayToolResult(t *testing.T) {
 	t.Run("displays tool result with correct color", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Use bash tool as it doesn't have compact display
 		err := adapter.DisplayToolResult("bash", "echo hello", "hello")
@@ -275,9 +246,7 @@ func TestCLIAdapter_DisplayToolResult(t *testing.T) {
 	})
 
 	t.Run("handles empty tool name", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplayToolResult("", "input", "result")
 
@@ -287,9 +256,7 @@ func TestCLIAdapter_DisplayToolResult(t *testing.T) {
 	})
 
 	t.Run("handles empty input path", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplayToolResult("bash", "", "result")
 
@@ -300,9 +267,7 @@ func TestCLIAdapter_DisplayToolResult(t *testing.T) {
 	})
 
 	t.Run("handles empty result", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplayToolResult("bash", "input", "")
 
@@ -312,9 +277,7 @@ func TestCLIAdapter_DisplayToolResult(t *testing.T) {
 	})
 
 	t.Run("handles multiline result", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		multilineResult := "Line 1\nLine 2\nLine 3"
 		err := adapter.DisplayToolResult("bash", "input", multilineResult)
@@ -327,9 +290,7 @@ func TestCLIAdapter_DisplayToolResult(t *testing.T) {
 	})
 
 	t.Run("handles result with special characters", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		specialResult := "Result with special chars: ~`!@#$%^&*()_-+={}|[]\\:;\"'<>?,./"
 		err := adapter.DisplayToolResult("bash", "input", specialResult)
@@ -342,9 +303,7 @@ func TestCLIAdapter_DisplayToolResult(t *testing.T) {
 
 func TestCLIAdapter_DisplaySystemMessage(t *testing.T) {
 	t.Run("displays system message with correct color", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplaySystemMessage("System initialized")
 
@@ -357,9 +316,7 @@ func TestCLIAdapter_DisplaySystemMessage(t *testing.T) {
 	})
 
 	t.Run("handles empty system message", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplaySystemMessage("")
 
@@ -369,9 +326,7 @@ func TestCLIAdapter_DisplaySystemMessage(t *testing.T) {
 	})
 
 	t.Run("handles multiline system message", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		multiline := "System starting...\nConfiguration loaded\nReady"
 		err := adapter.DisplaySystemMessage(multiline)
@@ -384,9 +339,7 @@ func TestCLIAdapter_DisplaySystemMessage(t *testing.T) {
 	})
 
 	t.Run("handles system message with special characters", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		specialMsg := "System error occurred: !@#$%^&*()"
 		err := adapter.DisplaySystemMessage(specialMsg)
@@ -399,9 +352,7 @@ func TestCLIAdapter_DisplaySystemMessage(t *testing.T) {
 
 func TestCLIAdapter_SetPrompt(t *testing.T) {
 	t.Run("sets custom prompt", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "")
 
 		err := adapter.SetPrompt("MyPrompt> ")
 
@@ -410,9 +361,7 @@ func TestCLIAdapter_SetPrompt(t *testing.T) {
 	})
 
 	t.Run("handles empty prompt", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "")
 
 		err := adapter.SetPrompt("")
 
@@ -421,9 +370,7 @@ func TestCLIAdapter_SetPrompt(t *testing.T) {
 	})
 
 	t.Run("handles prompt with color codes", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "")
 
 		colorPrompt := "\x1b[94mClaude\x1b[0m: "
 		err := adapter.SetPrompt(colorPrompt)
@@ -433,9 +380,7 @@ func TestCLIAdapter_SetPrompt(t *testing.T) {
 	})
 
 	t.Run("handles very long prompt", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "")
 
 		longPrompt := strings.Repeat("VeryLongPrompt", 20)
 		err := adapter.SetPrompt(longPrompt)
@@ -445,9 +390,7 @@ func TestCLIAdapter_SetPrompt(t *testing.T) {
 	})
 
 	t.Run("handles prompt with special characters", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "")
 
 		specialPrompt := "Prompt! ~`!@#$%^&*()_-+={}|[]\\:;\"'<>?,./> "
 		err := adapter.SetPrompt(specialPrompt)
@@ -459,9 +402,7 @@ func TestCLIAdapter_SetPrompt(t *testing.T) {
 
 func TestCLIAdapter_ClearScreen(t *testing.T) {
 	t.Run("clears screen successfully", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.ClearScreen()
 
@@ -472,9 +413,7 @@ func TestCLIAdapter_ClearScreen(t *testing.T) {
 	})
 
 	t.Run("clears screen multiple times", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Clear multiple times
 		err1 := adapter.ClearScreen()
@@ -492,9 +431,7 @@ func TestCLIAdapter_ClearScreen(t *testing.T) {
 
 func TestCLIAdapter_SetColorScheme(t *testing.T) {
 	t.Run("sets valid color scheme", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		scheme := port.ColorScheme{
 			User:      "\x1b[95m", // Magenta (different from default)
@@ -514,9 +451,7 @@ func TestCLIAdapter_SetColorScheme(t *testing.T) {
 	})
 
 	t.Run("handles empty color codes", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "")
 
 		emptyScheme := port.ColorScheme{
 			User:      "",
@@ -533,9 +468,7 @@ func TestCLIAdapter_SetColorScheme(t *testing.T) {
 	})
 
 	t.Run("handles invalid color codes gracefully", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Invalid color codes are still accepted (no validation of format)
 		// The implementation allows any string as a color code
@@ -556,9 +489,7 @@ func TestCLIAdapter_SetColorScheme(t *testing.T) {
 	})
 
 	t.Run("handles partial color scheme", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Only set User color, others remain default
 		partialScheme := port.ColorScheme{
@@ -579,9 +510,7 @@ func TestCLIAdapter_SetColorScheme(t *testing.T) {
 	})
 
 	t.Run("validates color scheme format", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "")
 
 		// The implementation doesn't validate ANSI format, just that at least one is set
 		scheme := port.ColorScheme{
@@ -600,9 +529,7 @@ func TestCLIAdapter_SetColorScheme(t *testing.T) {
 
 func TestCLIAdapter_IntegrationScenarios(t *testing.T) {
 	t.Run("complete conversation flow", func(t *testing.T) {
-		input := strings.NewReader("Hello AI\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "Hello AI\n")
 
 		// Simulate a conversation flow
 		// 1. Get user input
@@ -635,9 +562,7 @@ func TestCLIAdapter_IntegrationScenarios(t *testing.T) {
 	})
 
 	t.Run("error handling in conversation", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Display an error
 		testErr := errors.New("connection failed")
@@ -657,9 +582,7 @@ func TestCLIAdapter_IntegrationScenarios(t *testing.T) {
 
 func TestCLIAdapter_EdgeCases(t *testing.T) {
 	t.Run("handles rapid successive calls", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Make 100 rapid calls
 		for i := range 100 {
@@ -699,9 +622,7 @@ func TestCLIAdapter_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("handles very large text efficiently", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		largeText := strings.Repeat("This is a large text block. ", 10000)
 		err := adapter.DisplayMessage(largeText, "user")
@@ -715,9 +636,7 @@ func TestCLIAdapter_EdgeCases(t *testing.T) {
 
 func TestCLIAdapter_ColorSchemeDefaults(t *testing.T) {
 	t.Run("uses default color scheme on creation", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Display messages with different roles to verify default colors
 		_ = adapter.DisplayMessage("user msg", "user")
@@ -734,9 +653,7 @@ func TestCLIAdapter_ColorSchemeDefaults(t *testing.T) {
 	})
 
 	t.Run("reset to default colors works", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Change colors
 		customScheme := port.ColorScheme{
@@ -774,9 +691,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	// These tests define the expected behavior before implementation.
 
 	t.Run("confirms execution when user types lowercase y", func(t *testing.T) {
-		input := strings.NewReader("y\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "y\n")
 
 		result := adapter.ConfirmBashCommand("echo hello", false, "", "")
 
@@ -784,9 +699,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("confirms execution when user types yes", func(t *testing.T) {
-		input := strings.NewReader("yes\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "yes\n")
 
 		result := adapter.ConfirmBashCommand("ls -la", false, "", "")
 
@@ -794,9 +707,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("confirms execution when user types uppercase Y", func(t *testing.T) {
-		input := strings.NewReader("Y\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "Y\n")
 
 		result := adapter.ConfirmBashCommand("pwd", false, "", "")
 
@@ -804,9 +715,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("confirms execution when user types uppercase YES", func(t *testing.T) {
-		input := strings.NewReader("YES\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "YES\n")
 
 		result := adapter.ConfirmBashCommand("cat file.txt", false, "", "")
 
@@ -814,9 +723,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("confirms execution when user types mixed case Yes", func(t *testing.T) {
-		input := strings.NewReader("Yes\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "Yes\n")
 
 		result := adapter.ConfirmBashCommand("grep pattern file", false, "", "")
 
@@ -824,9 +731,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("denies execution when user types n", func(t *testing.T) {
-		input := strings.NewReader("n\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "n\n")
 
 		result := adapter.ConfirmBashCommand("rm file.txt", true, "destructive rm command", "")
 
@@ -834,9 +739,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("denies execution when user types no", func(t *testing.T) {
-		input := strings.NewReader("no\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "no\n")
 
 		result := adapter.ConfirmBashCommand("rm -rf /", true, "destructive rm command", "")
 
@@ -844,9 +747,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("denies execution on empty input (default deny)", func(t *testing.T) {
-		input := strings.NewReader("\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "\n")
 
 		result := adapter.ConfirmBashCommand("echo test", false, "", "")
 
@@ -854,9 +755,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("denies execution on EOF", func(t *testing.T) {
-		input := strings.NewReader("") // Empty reader simulates EOF
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "") // Empty reader simulates EOF
 
 		result := adapter.ConfirmBashCommand("echo test", false, "", "")
 
@@ -864,9 +763,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("denies execution on unrecognized input", func(t *testing.T) {
-		input := strings.NewReader("maybe\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "maybe\n")
 
 		result := adapter.ConfirmBashCommand("echo test", false, "", "")
 
@@ -874,9 +771,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("denies execution on whitespace-only input", func(t *testing.T) {
-		input := strings.NewReader("   \n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "   \n")
 
 		result := adapter.ConfirmBashCommand("echo test", false, "", "")
 
@@ -884,9 +779,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("displays dangerous warning in red for dangerous commands", func(t *testing.T) {
-		input := strings.NewReader("n\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "n\n")
 
 		adapter.ConfirmBashCommand("rm -rf /home", true, "destructive rm command", "")
 
@@ -898,9 +791,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("displays standard prefix in cyan for non-dangerous commands", func(t *testing.T) {
-		input := strings.NewReader("n\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "n\n")
 
 		adapter.ConfirmBashCommand("ls -la", false, "", "")
 
@@ -911,9 +802,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("displays the command in green color", func(t *testing.T) {
-		input := strings.NewReader("n\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "n\n")
 
 		command := "echo 'hello world'"
 		adapter.ConfirmBashCommand(command, false, "", "")
@@ -925,9 +814,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("displays confirmation prompt", func(t *testing.T) {
-		input := strings.NewReader("y\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "y\n")
 
 		adapter.ConfirmBashCommand("echo test", false, "", "")
 
@@ -941,9 +828,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("handles multiline command display", func(t *testing.T) {
-		input := strings.NewReader("y\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "y\n")
 
 		multilineCmd := "echo line1 && \\\necho line2"
 		result := adapter.ConfirmBashCommand(multilineCmd, false, "", "")
@@ -954,9 +839,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("handles command with special characters", func(t *testing.T) {
-		input := strings.NewReader("y\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "y\n")
 
 		specialCmd := "echo 'test' | grep -E \"[a-z]+\" && ls $HOME"
 		result := adapter.ConfirmBashCommand(specialCmd, false, "", "")
@@ -967,9 +850,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("trims whitespace from user input before checking", func(t *testing.T) {
-		input := strings.NewReader("  y  \n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "  y  \n")
 
 		result := adapter.ConfirmBashCommand("echo test", false, "", "")
 
@@ -977,9 +858,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("dangerous command with empty reason still shows warning", func(t *testing.T) {
-		input := strings.NewReader("n\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "n\n")
 
 		adapter.ConfirmBashCommand("sudo rm -rf /", true, "", "")
 
@@ -993,9 +872,7 @@ func TestCLIAdapter_ConfirmBashCommand(t *testing.T) {
 	})
 
 	t.Run("resets color after output", func(t *testing.T) {
-		input := strings.NewReader("y\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "y\n")
 
 		adapter.ConfirmBashCommand("echo test", false, "", "")
 
@@ -1019,9 +896,7 @@ func TestCLIAdapter_DisplayToolResult_TruncatesLargeOutput(t *testing.T) {
 	// This test will fail because DisplayToolResult does not yet apply truncation
 
 	t.Run("truncates output exceeding threshold", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Generate 50 lines of output - should trigger truncation with default config (20 head + 10 tail = 30 threshold)
 		var lines []string
@@ -1054,9 +929,7 @@ func TestCLIAdapter_DisplayToolResult_TruncatesLargeOutput(t *testing.T) {
 	})
 
 	t.Run("truncates output at exactly threshold plus one", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Generate 31 lines - should truncate exactly 1 line
 		var lines []string
@@ -1081,9 +954,7 @@ func TestCLIAdapter_DisplayToolResult_PreservesSmallOutput(t *testing.T) {
 	// This test will fail because DisplayToolResult does not yet check truncation config
 
 	t.Run("preserves output under threshold unchanged", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Generate 25 lines - under 30 threshold, should NOT truncate
 		var lines []string
@@ -1109,9 +980,7 @@ func TestCLIAdapter_DisplayToolResult_PreservesSmallOutput(t *testing.T) {
 	})
 
 	t.Run("preserves output at exactly threshold", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Generate exactly 30 lines - at threshold, should NOT truncate
 		var lines []string
@@ -1134,9 +1003,7 @@ func TestCLIAdapter_DisplayToolResult_PreservesSmallOutput(t *testing.T) {
 	})
 
 	t.Run("preserves empty output", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplayToolResult("test_tool", "test_input", "")
 
@@ -1149,9 +1016,7 @@ func TestCLIAdapter_DisplayToolResult_PreservesSmallOutput(t *testing.T) {
 	})
 
 	t.Run("preserves single line output", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		singleLine := "just one line here"
 		err := adapter.DisplayToolResult("test_tool", "input", singleLine)
@@ -1169,9 +1034,7 @@ func TestCLIAdapter_DisplayToolResult_BashToolHandling(t *testing.T) {
 	// This test will fail because DisplayToolResult does not yet detect bash tool
 
 	t.Run("uses TruncateBashOutput for bash tool", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Create bash-style JSON with large stdout
 		var stdoutLines []string
@@ -1196,9 +1059,7 @@ func TestCLIAdapter_DisplayToolResult_BashToolHandling(t *testing.T) {
 	})
 
 	t.Run("truncates stderr in bash output independently", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Create bash-style JSON with large stderr
 		var stderrLines []string
@@ -1219,9 +1080,7 @@ func TestCLIAdapter_DisplayToolResult_BashToolHandling(t *testing.T) {
 	})
 
 	t.Run("falls back to regular truncation for invalid bash JSON", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Generate plain text output (not JSON) but use bash tool name
 		var lines []string
@@ -1241,9 +1100,7 @@ func TestCLIAdapter_DisplayToolResult_BashToolHandling(t *testing.T) {
 	})
 
 	t.Run("does not use bash truncation for non-bash tools", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Create output for a different tool (edit_file uses regular truncation)
 		var lines []string
@@ -1265,9 +1122,7 @@ func TestCLIAdapter_DisplayToolResult_BashToolHandling(t *testing.T) {
 
 func TestCLIAdapter_DisplayToolResult_CompactDisplay(t *testing.T) {
 	t.Run("read_file shows compact output with path only", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplayToolResult("read_file", `{"path": "src/main.go"}`, "file contents here...")
 
@@ -1278,9 +1133,7 @@ func TestCLIAdapter_DisplayToolResult_CompactDisplay(t *testing.T) {
 	})
 
 	t.Run("read_file shows compact output with line range", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplayToolResult(
 			"read_file",
@@ -1294,9 +1147,7 @@ func TestCLIAdapter_DisplayToolResult_CompactDisplay(t *testing.T) {
 	})
 
 	t.Run("read_file shows start line only when end_line missing", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplayToolResult("read_file", `{"path": "src/main.go", "start_line": 5}`, "from line 5...")
 
@@ -1306,9 +1157,7 @@ func TestCLIAdapter_DisplayToolResult_CompactDisplay(t *testing.T) {
 	})
 
 	t.Run("list_files shows compact output", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplayToolResult("list_files", `{"path": "src/"}`, "file1.go\nfile2.go\nfile3.go")
 
@@ -1319,9 +1168,7 @@ func TestCLIAdapter_DisplayToolResult_CompactDisplay(t *testing.T) {
 	})
 
 	t.Run("read_file handles invalid JSON gracefully", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplayToolResult("read_file", "not valid json", "file contents")
 
@@ -1331,9 +1178,7 @@ func TestCLIAdapter_DisplayToolResult_CompactDisplay(t *testing.T) {
 	})
 
 	t.Run("list_files handles invalid JSON gracefully", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplayToolResult("list_files", "not valid json", "file list")
 
@@ -1343,9 +1188,7 @@ func TestCLIAdapter_DisplayToolResult_CompactDisplay(t *testing.T) {
 	})
 
 	t.Run("other tools still show full output", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplayToolResult("edit_file", `{"path": "file.go"}`, "edit result content")
 
@@ -1361,9 +1204,7 @@ func TestCLIAdapter_SetTruncationConfig(t *testing.T) {
 	// This test will fail because SetTruncationConfig method does not exist
 
 	t.Run("sets custom truncation config", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Set custom config with 5 head lines and 3 tail lines
 		customConfig := ui.TruncationConfig{
@@ -1398,9 +1239,7 @@ func TestCLIAdapter_SetTruncationConfig(t *testing.T) {
 	})
 
 	t.Run("can disable truncation via config", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Disable truncation
 		disabledConfig := ui.TruncationConfig{
@@ -1432,9 +1271,7 @@ func TestCLIAdapter_SetTruncationConfig(t *testing.T) {
 	})
 
 	t.Run("setting config multiple times uses latest", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Set first config
 		adapter.SetTruncationConfig(ui.TruncationConfig{
@@ -1473,9 +1310,7 @@ func TestCLIAdapter_GetTruncationConfig(t *testing.T) {
 	// This test will fail because GetTruncationConfig method does not exist
 
 	t.Run("returns current truncation config", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "")
 
 		// Set custom config
 		customConfig := ui.TruncationConfig{
@@ -1497,9 +1332,7 @@ func TestCLIAdapter_GetTruncationConfig(t *testing.T) {
 	})
 
 	t.Run("returns default config when not explicitly set", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "")
 
 		// Get config without setting it first
 		config := adapter.GetTruncationConfig()
@@ -1515,9 +1348,7 @@ func TestCLIAdapter_GetTruncationConfig(t *testing.T) {
 	})
 
 	t.Run("returns copy not reference to internal state", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "")
 
 		// Get config
 		config1 := adapter.GetTruncationConfig()
@@ -1557,9 +1388,7 @@ func TestCLIAdapter_DefaultTruncationConfig(t *testing.T) {
 	})
 
 	t.Run("new adapter with custom IO has default truncation config", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "")
 
 		config := adapter.GetTruncationConfig()
 
@@ -1573,9 +1402,7 @@ func TestCLIAdapter_DefaultTruncationConfig(t *testing.T) {
 	})
 
 	t.Run("default config enables truncation on large output without explicit config", func(t *testing.T) {
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, output := newTestAdapter(t, "")
 
 		// Do NOT set any config - rely on defaults
 
@@ -1737,10 +1564,7 @@ func TestCLIAdapter_InteractiveMode(t *testing.T) {
 		// NewCLIAdapterWithIO is used for testing with custom io.Reader/Writer,
 		// and should always be non-interactive since test readers are not terminals.
 
-		input := strings.NewReader("test input\n")
-		output := &strings.Builder{}
-
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "test input\n")
 
 		result := adapter.IsInteractive()
 
@@ -1816,10 +1640,7 @@ func TestCLIAdapter_UseInteractiveFlag(t *testing.T) {
 		// 1. useInteractive field does not exist yet
 		// 2. IsInteractive() method does not exist yet
 
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "")
 
 		// The adapter should have an IsInteractive method
 		isInteractive := adapter.IsInteractive()
@@ -1833,10 +1654,7 @@ func TestCLIAdapter_UseInteractiveFlag(t *testing.T) {
 		// This test verifies that the existing bufio.Scanner behavior works
 		// when useInteractive is false.
 
-		input := strings.NewReader("hello world\n")
-		output := &strings.Builder{}
-
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "hello world\n")
 
 		// Verify non-interactive mode
 		assert.False(t, adapter.IsInteractive(),
@@ -1858,10 +1676,7 @@ func TestCLIAdapter_UseInteractiveFlag(t *testing.T) {
 		// This method allows forcing interactive or non-interactive mode,
 		// which is useful for testing.
 
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "")
 
 		// Initially non-interactive
 		assert.False(t, adapter.IsInteractive(), "should start non-interactive")
@@ -1879,10 +1694,7 @@ func TestCLIAdapter_UseInteractiveFlag(t *testing.T) {
 		// This test will fail because IsInteractive() does not exist yet.
 		// The interactive flag should not change during usage.
 
-		input := strings.NewReader("line1\nline2\nline3\n")
-		output := &strings.Builder{}
-
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "line1\nline2\nline3\n")
 
 		// Verify mode before first call
 		initialMode := adapter.IsInteractive()
@@ -1928,10 +1740,7 @@ func TestCLIAdapter_InteractiveModeWithContext(t *testing.T) {
 	t.Run("non-interactive mode respects context cancellation", func(t *testing.T) {
 		// This should work with existing implementation but tests the documented behavior
 
-		input := strings.NewReader("this should not be read\n")
-		output := &strings.Builder{}
-
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "this should not be read\n")
 
 		// Cancel context before reading
 		ctx, cancel := context.WithCancel(context.Background())
@@ -1983,10 +1792,7 @@ func TestCLIAdapter_InputModeString(t *testing.T) {
 	t.Run("returns 'non-interactive' for non-interactive mode", func(t *testing.T) {
 		// This test will fail because InputModeString() method does not exist yet
 
-		input := strings.NewReader("")
-		output := &strings.Builder{}
-
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "")
 
 		modeStr := adapter.InputModeString()
 
@@ -2033,10 +1839,7 @@ func TestCLIAdapter_GetUserInput_InteractiveMode(t *testing.T) {
 
 	t.Run("non-interactive mode continues to use bufio.Scanner", func(t *testing.T) {
 		// This test verifies that the existing non-interactive behavior is preserved.
-		input := strings.NewReader("test input line\n")
-		output := &strings.Builder{}
-
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "test input line\n")
 
 		assert.False(t, adapter.IsInteractive(),
 			"adapter created with custom IO should be non-interactive")
@@ -2055,9 +1858,7 @@ func TestCLIAdapter_GetUserInput_InteractiveMode(t *testing.T) {
 		// GetUserInput should return false since go-prompt requires real
 		// terminal file descriptors.
 
-		input := strings.NewReader("input\n")
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(input, output)
+		adapter, _ := newTestAdapter(t, "input\n")
 
 		// Force interactive mode on adapter with custom IO
 		adapter.SetInteractive(true)
@@ -2076,8 +1877,7 @@ func TestCLIAdapter_GetUserInput_InteractiveMode(t *testing.T) {
 
 func TestCLIAdapter_DisplayRCAFindings(t *testing.T) {
 	t.Run("successfully displays RCA findings", func(t *testing.T) {
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(strings.NewReader(""), output)
+		adapter, output := newTestAdapter(t, "")
 
 		findings := []entity.RCAFinding{
 			{
@@ -2117,8 +1917,7 @@ func TestCLIAdapter_DisplayRCAFindings(t *testing.T) {
 	})
 
 	t.Run("does nothing for empty findings", func(t *testing.T) {
-		output := &strings.Builder{}
-		adapter := ui.NewCLIAdapterWithIO(strings.NewReader(""), output)
+		adapter, output := newTestAdapter(t, "")
 
 		err := adapter.DisplayRCAFindings(nil)
 

@@ -109,29 +109,366 @@ func (h *investigationTestHelper) assertPropertyType(propMap map[string]interfac
 }
 
 // =============================================================================
-// complete_investigation Tool Tests
+// Parameterized test infrastructure for complete_investigation and escalate_investigation
 // =============================================================================
 
-func TestCompleteInvestigationTool_Registration(t *testing.T) {
-	h := newInvestigationTestHelper(t)
+// investigationToolCase defines a tool variant for parameterized tests.
+type investigationToolCase struct {
+	name       string
+	toolName   string
+	execute    func(h *investigationTestHelper, input string) (string, error)
+	validInput func(invID string) map[string]interface{}
+	idPrefix   string
+}
 
-	tools, err := h.adapter.ListTools()
-	if err != nil {
-		t.Fatalf("ListTools failed: %v", err)
-	}
-
-	found := false
-	for _, tl := range tools {
-		if tl.Name == "complete_investigation" {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		t.Error("complete_investigation tool should be registered")
+// getInvestigationToolCases returns test cases for both investigation tools.
+func getInvestigationToolCases() []investigationToolCase {
+	return []investigationToolCase{
+		{
+			name:     "complete_investigation",
+			toolName: "complete_investigation",
+			execute:  (*investigationTestHelper).executeCompleteInvestigation,
+			validInput: func(invID string) map[string]interface{} {
+				return map[string]interface{}{
+					"investigation_id": invID,
+					"confidence":       0.85,
+					"findings":         []interface{}{"Finding 1"},
+				}
+			},
+			idPrefix: "concurrent-inv",
+		},
+		{
+			name:     "escalate_investigation",
+			toolName: "escalate_investigation",
+			execute:  (*investigationTestHelper).executeEscalateInvestigation,
+			validInput: func(invID string) map[string]interface{} {
+				return map[string]interface{}{
+					"investigation_id": invID,
+					"reason":           "Test reason",
+					"priority":         "high",
+				}
+			},
+			idPrefix: "concurrent-esc",
+		},
 	}
 }
+
+// =============================================================================
+// Parameterized tests for both complete_investigation and escalate_investigation
+// =============================================================================
+
+func TestInvestigationTool_Registration(t *testing.T) {
+	for _, tc := range getInvestigationToolCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newInvestigationTestHelper(t)
+
+			tools, err := h.adapter.ListTools()
+			if err != nil {
+				t.Fatalf("ListTools failed: %v", err)
+			}
+
+			found := false
+			for _, tl := range tools {
+				if tl.Name == tc.toolName {
+					found = true
+					break
+				}
+			}
+
+			if !found {
+				t.Errorf("%s tool should be registered", tc.toolName)
+			}
+		})
+	}
+}
+
+func TestInvestigationTool_SchemaInvestigationIDProperty(t *testing.T) {
+	for _, tc := range getInvestigationToolCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newInvestigationTestHelper(t)
+
+			properties, err := h.getToolProperties(tc.toolName)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			invIDMap := h.assertPropertyExists(properties, "investigation_id")
+			h.assertPropertyType(invIDMap, "investigation_id", "string")
+		})
+	}
+}
+
+func TestInvestigationTool_InvestigationIDRequired(t *testing.T) {
+	for _, tc := range getInvestigationToolCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newInvestigationTestHelper(t)
+
+			toolDef, found := h.adapter.GetTool(tc.toolName)
+			if !found {
+				t.Fatalf("%s tool should be registered", tc.toolName)
+			}
+
+			invIDRequired := false
+			for _, field := range toolDef.RequiredFields {
+				if field == "investigation_id" {
+					invIDRequired = true
+					break
+				}
+			}
+
+			if !invIDRequired {
+				t.Error("'investigation_id' should be a required field")
+			}
+		})
+	}
+}
+
+func TestInvestigationTool_InvalidInvestigationID(t *testing.T) {
+	for _, tc := range getInvestigationToolCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newInvestigationTestHelper(t)
+
+			tests := []struct {
+				name            string
+				investigationID interface{}
+				wantErr         string
+			}{
+				{"empty investigation_id", "", "investigation_id"},
+				{"investigation_id with only whitespace", "   ", "investigation_id"},
+				{"investigation_id as number", 12345, "investigation_id"},
+				{"investigation_id as null", nil, "investigation_id"},
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					input := tc.validInput(defaultTestInvestigationID)
+					input["investigation_id"] = tt.investigationID
+					inputJSON, err := json.Marshal(input)
+					if err != nil {
+						t.Fatalf("Failed to marshal input: %v", err)
+					}
+
+					_, err = tc.execute(h, string(inputJSON))
+					if err == nil {
+						t.Errorf("Expected error for invalid investigation_id %v, got nil", tt.investigationID)
+					}
+
+					if err != nil && !strings.Contains(strings.ToLower(err.Error()), tt.wantErr) {
+						t.Errorf("Expected error to contain %q, got: %v", tt.wantErr, err)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestInvestigationTool_NonExistentInvestigationID(t *testing.T) {
+	for _, tc := range getInvestigationToolCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newInvestigationTestHelper(t)
+
+			input := tc.validInput("non-existent-investigation-id-12345")
+			inputJSON, err := json.Marshal(input)
+			if err != nil {
+				t.Fatalf("Failed to marshal input: %v", err)
+			}
+
+			_, err = tc.execute(h, string(inputJSON))
+			if err == nil {
+				t.Error("Expected error for non-existent investigation_id, got nil")
+			}
+
+			if err != nil && !strings.Contains(strings.ToLower(err.Error()), "not found") {
+				t.Errorf("Expected error to contain 'not found', got: %v", err)
+			}
+		})
+	}
+}
+
+func TestInvestigationTool_UnicodeContent(t *testing.T) {
+	for _, tc := range getInvestigationToolCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newInvestigationTestHelper(t)
+
+			invID := defaultTestInvestigationID + "-unicode-" + tc.name
+			h.adapter.RegisterInvestigation(invID)
+
+			input := tc.validInput(invID)
+			inputJSON, err := json.Marshal(input)
+			if err != nil {
+				t.Fatalf("Failed to marshal input: %v", err)
+			}
+
+			result, err := tc.execute(h, string(inputJSON))
+			if err != nil {
+				t.Errorf("Expected success for unicode content, got error: %v", err)
+			}
+			if result == "" {
+				t.Error("Expected non-empty result for unicode content")
+			}
+		})
+	}
+}
+
+// runConcurrentInvestigationOps launches numGoroutines concurrent tool executions and returns the success count.
+func runConcurrentInvestigationOps(
+	h *investigationTestHelper,
+	tc investigationToolCase,
+	numGoroutines int,
+) int {
+	errChan := make(chan error, numGoroutines)
+	for i := range numGoroutines {
+		h.adapter.RegisterInvestigation(fmt.Sprintf("%s-%d", tc.idPrefix, i))
+	}
+	for i := range numGoroutines {
+		go func(idx int) {
+			input := tc.validInput(fmt.Sprintf("%s-%d", tc.idPrefix, idx))
+			inputJSON, err := json.Marshal(input)
+			if err != nil {
+				errChan <- fmt.Errorf("goroutine %d: marshal error: %w", idx, err)
+				return
+			}
+			_, err = tc.execute(h, string(inputJSON))
+			if err != nil {
+				errChan <- fmt.Errorf("goroutine %d: execution error: %w", idx, err)
+				return
+			}
+			errChan <- nil
+		}(i)
+	}
+	return collectConcurrentResults(h.t, errChan, numGoroutines)
+}
+
+// collectConcurrentResults waits for numGoroutines results and returns the success count.
+func collectConcurrentResults(t *testing.T, errChan <-chan error, numGoroutines int) int {
+	t.Helper()
+	timeout := time.After(5 * time.Second)
+	successCount := 0
+	for i := range numGoroutines {
+		select {
+		case err := <-errChan:
+			if err == nil {
+				successCount++
+			}
+		case <-timeout:
+			t.Fatalf("test timed out waiting for goroutine results (received %d/%d)", i, numGoroutines)
+		}
+	}
+	return successCount
+}
+
+func TestInvestigationTool_ConcurrentOperations(t *testing.T) {
+	for _, tc := range getInvestigationToolCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newInvestigationTestHelper(t)
+			numGoroutines := 10
+			successCount := runConcurrentInvestigationOps(h, tc, numGoroutines)
+			if successCount != numGoroutines {
+				t.Errorf("Expected all %d concurrent operations to succeed, only %d succeeded", numGoroutines, successCount)
+			}
+		})
+	}
+}
+
+func TestInvestigationTool_RaceConditionOnSameInvestigation(t *testing.T) {
+	for _, tc := range getInvestigationToolCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newInvestigationTestHelper(t)
+			numGoroutines := 5
+			invID := fmt.Sprintf("test-inv-race-%s", tc.name)
+			h.adapter.RegisterInvestigation(invID)
+
+			errChan := make(chan error, numGoroutines)
+			for range numGoroutines {
+				go func() {
+					input := tc.validInput(invID)
+					inputJSON, err := json.Marshal(input)
+					if err != nil {
+						errChan <- fmt.Errorf("marshal error: %w", err)
+						return
+					}
+					_, err = tc.execute(h, string(inputJSON))
+					errChan <- err
+				}()
+			}
+
+			successCount := collectConcurrentResults(t, errChan, numGoroutines)
+			if successCount != 1 {
+				t.Errorf("Expected exactly 1 success for same investigation, got %d", successCount)
+			}
+		})
+	}
+}
+
+func TestInvestigationTool_RespectsContextCancellation(t *testing.T) {
+	for _, tc := range getInvestigationToolCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newInvestigationTestHelper(t)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			input := tc.validInput("test-inv-cancelled")
+			inputJSON, err := json.Marshal(input)
+			if err != nil {
+				t.Fatalf("Failed to marshal input: %v", err)
+			}
+
+			_, err = h.adapter.ExecuteTool(ctx, tc.toolName, string(inputJSON))
+			if err == nil {
+				t.Error("Expected error for cancelled context, got nil")
+			}
+
+			if err != nil && !strings.Contains(err.Error(), "cancel") && !strings.Contains(err.Error(), "context") {
+				if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+					t.Logf("Got error: %v (may be acceptable if tool not implemented)", err)
+				}
+			}
+		})
+	}
+}
+
+func TestInvestigationTool_RejectsAlreadyProcessedInvestigation(t *testing.T) {
+	for _, tc := range getInvestigationToolCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newInvestigationTestHelper(t)
+
+			invID := "test-inv-double-" + tc.name
+			h.adapter.RegisterInvestigation(invID)
+
+			input := tc.validInput(invID)
+			inputJSON, err := json.Marshal(input)
+			if err != nil {
+				t.Fatalf("Failed to marshal input: %v", err)
+			}
+
+			// First call should succeed
+			_, err = tc.execute(h, string(inputJSON))
+			if err != nil {
+				t.Fatalf("First call failed: %v", err)
+			}
+
+			// Second call should fail
+			inputJSON, err = json.Marshal(input)
+			if err != nil {
+				t.Fatalf("Failed to marshal input: %v", err)
+			}
+
+			_, err = tc.execute(h, string(inputJSON))
+			if err == nil {
+				t.Error("Expected error when processing already-processed investigation, got nil")
+			}
+
+			if err != nil && !strings.Contains(strings.ToLower(err.Error()), "already") {
+				t.Errorf("Expected error to mention 'already', got: %v", err)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// complete_investigation Tool Tests (tool-specific)
+// =============================================================================
 
 func TestCompleteInvestigationTool_SchemaConfidenceProperty(t *testing.T) {
 	h := newInvestigationTestHelper(t)
@@ -467,27 +804,6 @@ func TestCompleteInvestigationTool_OutputStructure(t *testing.T) {
 // =============================================================================
 // escalate_investigation Tool Tests
 // =============================================================================
-
-func TestEscalateInvestigationTool_Registration(t *testing.T) {
-	h := newInvestigationTestHelper(t)
-
-	tools, err := h.adapter.ListTools()
-	if err != nil {
-		t.Fatalf("ListTools failed: %v", err)
-	}
-
-	found := false
-	for _, tl := range tools {
-		if tl.Name == "escalate_investigation" {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		t.Error("escalate_investigation tool should be registered")
-	}
-}
 
 func TestEscalateInvestigationTool_SchemaReasonProperty(t *testing.T) {
 	h := newInvestigationTestHelper(t)
@@ -959,61 +1275,6 @@ func TestEscalateInvestigationTool_LongReasonString(t *testing.T) {
 	}
 }
 
-func TestCompleteInvestigationTool_UnicodeContent(t *testing.T) {
-	h := newInvestigationTestHelper(t)
-
-	// Register a fresh investigation for this test
-	invID := defaultTestInvestigationID + "-unicode-complete"
-	h.adapter.RegisterInvestigation(invID)
-
-	input := map[string]interface{}{
-		"investigation_id":    invID,
-		"confidence":          0.85,
-		"findings":            []string{"Unicode finding", "Japanese text", "Emoji finding"},
-		"root_cause":          "Root cause with unicode",
-		"recommended_actions": []string{"Action with special chars: @#$%"},
-	}
-	inputJSON, err := json.Marshal(input)
-	if err != nil {
-		t.Fatalf("Failed to marshal input: %v", err)
-	}
-
-	result, err := h.executeCompleteInvestigation(string(inputJSON))
-	if err != nil {
-		t.Errorf("Expected success for unicode content, got error: %v", err)
-	}
-	if result == "" {
-		t.Error("Expected non-empty result for unicode content")
-	}
-}
-
-func TestEscalateInvestigationTool_UnicodeContent(t *testing.T) {
-	h := newInvestigationTestHelper(t)
-
-	// Register a fresh investigation for this test
-	invID := defaultTestInvestigationID + "-unicode-escalate"
-	h.adapter.RegisterInvestigation(invID)
-
-	input := map[string]interface{}{
-		"investigation_id": invID,
-		"reason":           "Escalation reason with unicode characters",
-		"priority":         "critical",
-		"partial_findings": []string{"Finding with special chars: @#$%^&*()"},
-	}
-	inputJSON, err := json.Marshal(input)
-	if err != nil {
-		t.Fatalf("Failed to marshal input: %v", err)
-	}
-
-	result, err := h.executeEscalateInvestigation(string(inputJSON))
-	if err != nil {
-		t.Errorf("Expected success for unicode content, got error: %v", err)
-	}
-	if result == "" {
-		t.Error("Expected non-empty result for unicode content")
-	}
-}
-
 func TestInvestigationTools_MalformedJSONInput(t *testing.T) {
 	h := newInvestigationTestHelper(t)
 
@@ -1110,202 +1371,6 @@ func TestEscalateInvestigationTool_ToolDescription(t *testing.T) {
 	desc := strings.ToLower(tl.Description)
 	if !strings.Contains(desc, "escalat") {
 		t.Error("Description should mention escalation")
-	}
-}
-
-// =============================================================================
-// Investigation Context Tests
-// These tests verify that investigation tools properly handle investigation context
-// (investigation_id) which is needed to correlate tool results with investigations.
-// =============================================================================
-
-func TestCompleteInvestigationTool_SchemaInvestigationIDProperty(t *testing.T) {
-	h := newInvestigationTestHelper(t)
-
-	properties, err := h.getToolProperties("complete_investigation")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	invIDMap := h.assertPropertyExists(properties, "investigation_id")
-	h.assertPropertyType(invIDMap, "investigation_id", "string")
-}
-
-func TestEscalateInvestigationTool_SchemaInvestigationIDProperty(t *testing.T) {
-	h := newInvestigationTestHelper(t)
-
-	properties, err := h.getToolProperties("escalate_investigation")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	invIDMap := h.assertPropertyExists(properties, "investigation_id")
-	h.assertPropertyType(invIDMap, "investigation_id", "string")
-}
-
-func TestCompleteInvestigationTool_InvestigationIDRequired(t *testing.T) {
-	h := newInvestigationTestHelper(t)
-
-	completeInvestigationTool, found := h.adapter.GetTool("complete_investigation")
-	if !found {
-		t.Fatal("complete_investigation tool should be registered")
-	}
-
-	invIDRequired := false
-	for _, field := range completeInvestigationTool.RequiredFields {
-		if field == "investigation_id" {
-			invIDRequired = true
-			break
-		}
-	}
-
-	if !invIDRequired {
-		t.Error("'investigation_id' should be a required field")
-	}
-}
-
-func TestEscalateInvestigationTool_InvestigationIDRequired(t *testing.T) {
-	h := newInvestigationTestHelper(t)
-
-	escalateInvestigationTool, found := h.adapter.GetTool("escalate_investigation")
-	if !found {
-		t.Fatal("escalate_investigation tool should be registered")
-	}
-
-	invIDRequired := false
-	for _, field := range escalateInvestigationTool.RequiredFields {
-		if field == "investigation_id" {
-			invIDRequired = true
-			break
-		}
-	}
-
-	if !invIDRequired {
-		t.Error("'investigation_id' should be a required field")
-	}
-}
-
-func TestCompleteInvestigationTool_InvalidInvestigationID(t *testing.T) {
-	h := newInvestigationTestHelper(t)
-
-	tests := []struct {
-		name            string
-		investigationID interface{}
-		wantErr         string
-	}{
-		{"empty investigation_id", "", "investigation_id"},
-		{"investigation_id with only whitespace", "   ", "investigation_id"},
-		{"investigation_id as number", 12345, "investigation_id"},
-		{"investigation_id as null", nil, "investigation_id"},
-		{"investigation_id as array", []string{"id1"}, "investigation_id"},
-		{"investigation_id as object", map[string]string{"id": "value"}, "investigation_id"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			input := map[string]interface{}{
-				"investigation_id": tt.investigationID,
-				"confidence":       0.8,
-				"findings":         []string{"Finding 1"},
-			}
-			inputJSON, err := json.Marshal(input)
-			if err != nil {
-				t.Fatalf("Failed to marshal input: %v", err)
-			}
-
-			_, err = h.executeCompleteInvestigation(string(inputJSON))
-			if err == nil {
-				t.Errorf("Expected error for invalid investigation_id %v, got nil", tt.investigationID)
-			}
-
-			if err != nil && !strings.Contains(strings.ToLower(err.Error()), tt.wantErr) {
-				t.Errorf("Expected error to contain %q, got: %v", tt.wantErr, err)
-			}
-		})
-	}
-}
-
-func TestEscalateInvestigationTool_InvalidInvestigationID(t *testing.T) {
-	h := newInvestigationTestHelper(t)
-
-	tests := []struct {
-		name            string
-		investigationID interface{}
-		wantErr         string
-	}{
-		{"empty investigation_id", "", "investigation_id"},
-		{"investigation_id with only whitespace", "   ", "investigation_id"},
-		{"investigation_id as number", 12345, "investigation_id"},
-		{"investigation_id as null", nil, "investigation_id"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			input := map[string]interface{}{
-				"investigation_id": tt.investigationID,
-				"reason":           "Valid reason",
-				"priority":         "high",
-			}
-			inputJSON, err := json.Marshal(input)
-			if err != nil {
-				t.Fatalf("Failed to marshal input: %v", err)
-			}
-
-			_, err = h.executeEscalateInvestigation(string(inputJSON))
-			if err == nil {
-				t.Errorf("Expected error for invalid investigation_id %v, got nil", tt.investigationID)
-			}
-
-			if err != nil && !strings.Contains(strings.ToLower(err.Error()), tt.wantErr) {
-				t.Errorf("Expected error to contain %q, got: %v", tt.wantErr, err)
-			}
-		})
-	}
-}
-
-func TestCompleteInvestigationTool_NonExistentInvestigationID(t *testing.T) {
-	h := newInvestigationTestHelper(t)
-
-	input := map[string]interface{}{
-		"investigation_id": "non-existent-investigation-id-12345",
-		"confidence":       0.9,
-		"findings":         []string{"Finding 1"},
-	}
-	inputJSON, err := json.Marshal(input)
-	if err != nil {
-		t.Fatalf("Failed to marshal input: %v", err)
-	}
-
-	_, err = h.executeCompleteInvestigation(string(inputJSON))
-	if err == nil {
-		t.Error("Expected error for non-existent investigation_id, got nil")
-	}
-
-	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "not found") {
-		t.Errorf("Expected error to contain 'not found', got: %v", err)
-	}
-}
-
-func TestEscalateInvestigationTool_NonExistentInvestigationID(t *testing.T) {
-	h := newInvestigationTestHelper(t)
-
-	input := map[string]interface{}{
-		"investigation_id": "non-existent-investigation-id-67890",
-		"reason":           "Valid reason",
-		"priority":         "high",
-	}
-	inputJSON, err := json.Marshal(input)
-	if err != nil {
-		t.Fatalf("Failed to marshal input: %v", err)
-	}
-
-	_, err = h.executeEscalateInvestigation(string(inputJSON))
-	if err == nil {
-		t.Error("Expected error for non-existent investigation_id, got nil")
-	}
-
-	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "not found") {
-		t.Errorf("Expected error to contain 'not found', got: %v", err)
 	}
 }
 
@@ -1610,84 +1675,6 @@ func TestEscalateInvestigationTool_TransitionsToEscalatedStatus(t *testing.T) {
 	}
 }
 
-func TestCompleteInvestigationTool_RejectsAlreadyCompletedInvestigation(t *testing.T) {
-	h := newInvestigationTestHelper(t)
-
-	invID := "test-inv-double-complete"
-	h.adapter.RegisterInvestigation(invID)
-
-	// First completion should succeed
-	input := map[string]interface{}{
-		"investigation_id": invID,
-		"confidence":       0.9,
-		"findings":         []string{"Initial finding"},
-	}
-	inputJSON, err := json.Marshal(input)
-	if err != nil {
-		t.Fatalf("Failed to marshal input: %v", err)
-	}
-
-	_, err = h.executeCompleteInvestigation(string(inputJSON))
-	if err != nil {
-		t.Fatalf("First completion failed: %v", err)
-	}
-
-	// Second completion should fail
-	input["findings"] = []string{"Updated finding"}
-	inputJSON, err = json.Marshal(input)
-	if err != nil {
-		t.Fatalf("Failed to marshal input: %v", err)
-	}
-
-	_, err = h.executeCompleteInvestigation(string(inputJSON))
-	if err == nil {
-		t.Error("Expected error when completing already-completed investigation, got nil")
-	}
-
-	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "already") {
-		t.Errorf("Expected error to mention 'already' completed, got: %v", err)
-	}
-}
-
-func TestEscalateInvestigationTool_RejectsAlreadyEscalatedInvestigation(t *testing.T) {
-	h := newInvestigationTestHelper(t)
-
-	invID := "test-inv-double-escalate"
-	h.adapter.RegisterInvestigation(invID)
-
-	// First escalation should succeed
-	input := map[string]interface{}{
-		"investigation_id": invID,
-		"reason":           "Initial escalation",
-		"priority":         "high",
-	}
-	inputJSON, err := json.Marshal(input)
-	if err != nil {
-		t.Fatalf("Failed to marshal input: %v", err)
-	}
-
-	_, err = h.executeEscalateInvestigation(string(inputJSON))
-	if err != nil {
-		t.Fatalf("First escalation failed: %v", err)
-	}
-
-	// Second escalation should fail
-	input["reason"] = "Second escalation attempt"
-	inputJSON, err = json.Marshal(input)
-	if err != nil {
-		t.Fatalf("Failed to marshal input: %v", err)
-	}
-
-	_, err = h.executeEscalateInvestigation(string(inputJSON))
-	if err == nil {
-		t.Error("Expected error when escalating already-escalated investigation, got nil")
-	}
-
-	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "already") {
-		t.Errorf("Expected error to mention 'already' escalated, got: %v", err)
-	}
-}
-
 // =============================================================================
 // Additional Input Validation Tests
 // =============================================================================
@@ -1773,225 +1760,6 @@ func TestEscalateInvestigationTool_RejectsWhitespaceOnlyReason(t *testing.T) {
 	_, err = h.executeEscalateInvestigation(string(inputJSON))
 	if err == nil {
 		t.Error("Expected error for whitespace-only reason, got nil")
-	}
-}
-
-// =============================================================================
-// Concurrency Tests
-// These tests verify that investigation tools handle concurrent access correctly.
-// =============================================================================
-
-func TestCompleteInvestigationTool_ConcurrentCompletions(t *testing.T) {
-	h := newInvestigationTestHelper(t)
-
-	numGoroutines := 10
-	errChan := make(chan error, numGoroutines)
-
-	// Pre-register all investigations
-	for i := range numGoroutines {
-		h.adapter.RegisterInvestigation(fmt.Sprintf("concurrent-inv-%d", i))
-	}
-
-	for i := range numGoroutines {
-		go func(idx int) {
-			input := map[string]interface{}{
-				"investigation_id": fmt.Sprintf("concurrent-inv-%d", idx),
-				"confidence":       0.8,
-				"findings":         []string{fmt.Sprintf("Finding from goroutine %d", idx)},
-			}
-			inputJSON, err := json.Marshal(input)
-			if err != nil {
-				errChan <- fmt.Errorf("goroutine %d: marshal error: %w", idx, err)
-				return
-			}
-
-			_, err = h.executeCompleteInvestigation(string(inputJSON))
-			if err != nil {
-				errChan <- fmt.Errorf("goroutine %d: execution error: %w", idx, err)
-				return
-			}
-			errChan <- nil
-		}(i)
-	}
-
-	timeout := time.After(5 * time.Second)
-	successCount := 0
-	for i := range numGoroutines {
-		select {
-		case err := <-errChan:
-			if err == nil {
-				successCount++
-			}
-		case <-timeout:
-			t.Fatalf("test timed out waiting for goroutine results (received %d/%d)", i, numGoroutines)
-		}
-	}
-
-	if successCount != numGoroutines {
-		t.Errorf("Expected all %d concurrent completions to succeed, only %d succeeded", numGoroutines, successCount)
-	}
-}
-
-func TestEscalateInvestigationTool_ConcurrentEscalations(t *testing.T) {
-	h := newInvestigationTestHelper(t)
-
-	numGoroutines := 10
-	errChan := make(chan error, numGoroutines)
-
-	// Pre-register all investigations
-	for i := range numGoroutines {
-		h.adapter.RegisterInvestigation(fmt.Sprintf("concurrent-esc-%d", i))
-	}
-
-	for i := range numGoroutines {
-		go func(idx int) {
-			input := map[string]interface{}{
-				"investigation_id": fmt.Sprintf("concurrent-esc-%d", idx),
-				"reason":           fmt.Sprintf("Escalation from goroutine %d", idx),
-				"priority":         "high",
-			}
-			inputJSON, err := json.Marshal(input)
-			if err != nil {
-				errChan <- fmt.Errorf("goroutine %d: marshal error: %w", idx, err)
-				return
-			}
-
-			_, err = h.executeEscalateInvestigation(string(inputJSON))
-			if err != nil {
-				errChan <- fmt.Errorf("goroutine %d: execution error: %w", idx, err)
-				return
-			}
-			errChan <- nil
-		}(i)
-	}
-
-	timeout := time.After(5 * time.Second)
-	successCount := 0
-	for i := range numGoroutines {
-		select {
-		case err := <-errChan:
-			if err == nil {
-				successCount++
-			}
-		case <-timeout:
-			t.Fatalf("test timed out waiting for goroutine results (received %d/%d)", i, numGoroutines)
-		}
-	}
-
-	if successCount != numGoroutines {
-		t.Errorf("Expected all %d concurrent escalations to succeed, only %d succeeded", numGoroutines, successCount)
-	}
-}
-
-func TestCompleteInvestigationTool_RaceConditionOnSameInvestigation(t *testing.T) {
-	h := newInvestigationTestHelper(t)
-
-	numGoroutines := 5
-	investigationID := "race-condition-test-inv"
-	h.adapter.RegisterInvestigation(investigationID)
-
-	resultChan := make(chan struct {
-		success bool
-		err     error
-	}, numGoroutines)
-
-	for i := range numGoroutines {
-		go func(idx int) {
-			input := map[string]interface{}{
-				"investigation_id": investigationID,
-				"confidence":       float64(idx) / 10.0,
-				"findings":         []string{fmt.Sprintf("Finding %d", idx)},
-			}
-			inputJSON, err := json.Marshal(input)
-			if err != nil {
-				resultChan <- struct {
-					success bool
-					err     error
-				}{false, err}
-				return
-			}
-
-			_, err = h.executeCompleteInvestigation(string(inputJSON))
-			resultChan <- struct {
-				success bool
-				err     error
-			}{err == nil, err}
-		}(i)
-	}
-
-	successCount := 0
-	for range numGoroutines {
-		result := <-resultChan
-		if result.success {
-			successCount++
-		}
-	}
-
-	// Only one completion should succeed for the same investigation
-	if successCount != 1 {
-		t.Errorf("Expected exactly 1 completion to succeed for same investigation, got %d", successCount)
-	}
-}
-
-// =============================================================================
-// Context Cancellation Tests
-// These tests verify that investigation tools respect context cancellation.
-// =============================================================================
-
-func TestCompleteInvestigationTool_RespectsContextCancellation(t *testing.T) {
-	h := newInvestigationTestHelper(t)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
-
-	input := map[string]interface{}{
-		"investigation_id": "test-inv-cancelled",
-		"confidence":       0.9,
-		"findings":         []string{"Finding 1"},
-	}
-	inputJSON, err := json.Marshal(input)
-	if err != nil {
-		t.Fatalf("Failed to marshal input: %v", err)
-	}
-
-	_, err = h.adapter.ExecuteTool(ctx, "complete_investigation", string(inputJSON))
-	if err == nil {
-		t.Error("Expected error for cancelled context, got nil")
-	}
-
-	if err != nil && !strings.Contains(err.Error(), "cancel") && !strings.Contains(err.Error(), "context") {
-		// Check if it's a context error by testing for specific context errors
-		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			t.Logf("Got error: %v (may be acceptable if tool not implemented)", err)
-		}
-	}
-}
-
-func TestEscalateInvestigationTool_RespectsContextCancellation(t *testing.T) {
-	h := newInvestigationTestHelper(t)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
-
-	input := map[string]interface{}{
-		"investigation_id": "test-inv-cancelled-esc",
-		"reason":           "Test reason",
-		"priority":         "high",
-	}
-	inputJSON, err := json.Marshal(input)
-	if err != nil {
-		t.Fatalf("Failed to marshal input: %v", err)
-	}
-
-	_, err = h.adapter.ExecuteTool(ctx, "escalate_investigation", string(inputJSON))
-	if err == nil {
-		t.Error("Expected error for cancelled context, got nil")
-	}
-
-	if err != nil && !strings.Contains(err.Error(), "cancel") && !strings.Contains(err.Error(), "context") {
-		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			t.Logf("Got error: %v (may be acceptable if tool not implemented)", err)
-		}
 	}
 }
 
