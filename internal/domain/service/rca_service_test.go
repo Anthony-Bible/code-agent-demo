@@ -8,6 +8,7 @@ import (
 	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 	"github.com/anthony-bible/code-agent-demo/internal/domain/service"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -192,7 +193,7 @@ func TestRCAService_Correlate(t *testing.T) {
 			if tt.mockSetup != nil {
 				tt.mockSetup(mockAI)
 			}
-			rcaService := service.NewRCAService(mockAI)
+			rcaService := service.NewRCAService(mockAI, logger.NewNop())
 
 			rcaFindings, err := rcaService.Correlate(ctx, tt.findings)
 

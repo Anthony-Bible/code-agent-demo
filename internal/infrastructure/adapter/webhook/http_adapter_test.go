@@ -13,12 +13,13 @@ import (
 	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 	"github.com/anthony-bible/code-agent-demo/internal/domain/port/porttest"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
 func TestHTTPAdapter_HealthEndpoint(t *testing.T) {
 	t.Run("returns 200 OK", func(t *testing.T) {
 		manager := &porttest.MockAlertSourceManager{}
-		adapter := NewHTTPAdapter(manager, DefaultConfig())
+		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
 
 		req := httptest.NewRequest(http.MethodGet, "/health", nil)
 		rec := httptest.NewRecorder()
@@ -42,7 +43,7 @@ func TestHTTPAdapter_HealthEndpoint(t *testing.T) {
 func TestHTTPAdapter_ReadyEndpoint(t *testing.T) {
 	t.Run("returns 503 when no sources", func(t *testing.T) {
 		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{}}
-		adapter := NewHTTPAdapter(manager, DefaultConfig())
+		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
 
 		req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 		rec := httptest.NewRecorder()
@@ -60,7 +61,7 @@ func TestHTTPAdapter_ReadyEndpoint(t *testing.T) {
 				&porttest.MockAlertSource{NameVal: "test", SourceTypeVal: port.SourceTypeWebhook},
 			},
 		}
-		adapter := NewHTTPAdapter(manager, DefaultConfig())
+		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
 
 		req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 		rec := httptest.NewRecorder()
@@ -94,7 +95,7 @@ func TestHTTPAdapter_WebhookRouting(t *testing.T) {
 			},
 		}
 		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
-		adapter := NewHTTPAdapter(manager, DefaultConfig())
+		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
 
 		payload := `{"alerts":[]}`
 		req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString(payload))
@@ -122,7 +123,7 @@ func TestHTTPAdapter_WebhookRouting(t *testing.T) {
 
 	t.Run("returns 404 for unknown path", func(t *testing.T) {
 		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{}}
-		adapter := NewHTTPAdapter(manager, DefaultConfig())
+		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
 
 		req := httptest.NewRequest(http.MethodPost, "/alerts/unknown", bytes.NewBufferString("{}"))
 		rec := httptest.NewRecorder()
@@ -140,7 +141,7 @@ func TestHTTPAdapter_WebhookRouting(t *testing.T) {
 			PathVal:         "/alerts/prometheus",
 		}
 		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
-		adapter := NewHTTPAdapter(manager, DefaultConfig())
+		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
 
 		req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus/extra", bytes.NewBufferString("{}"))
 		rec := httptest.NewRecorder()
@@ -161,7 +162,7 @@ func TestHTTPAdapter_WebhookRouting(t *testing.T) {
 			},
 		}
 		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
-		adapter := NewHTTPAdapter(manager, DefaultConfig())
+		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
 
 		req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus/staging", bytes.NewBufferString("{}"))
 		rec := httptest.NewRecorder()
@@ -181,7 +182,7 @@ func TestHTTPAdapter_MethodRouting(t *testing.T) {
 			PathVal:         "/alerts/prometheus",
 		}
 		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
-		adapter := NewHTTPAdapter(manager, DefaultConfig())
+		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
 
 		req := httptest.NewRequest(http.MethodGet, "/alerts/prometheus", nil)
 		rec := httptest.NewRecorder()
@@ -196,7 +197,7 @@ func TestHTTPAdapter_MethodRouting(t *testing.T) {
 
 	t.Run("POST on health endpoint returns 405", func(t *testing.T) {
 		manager := &porttest.MockAlertSourceManager{}
-		adapter := NewHTTPAdapter(manager, DefaultConfig())
+		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
 
 		req := httptest.NewRequest(http.MethodPost, "/health", nil)
 		rec := httptest.NewRecorder()
@@ -222,7 +223,7 @@ func TestHTTPAdapter_AlertHandlerIntegration(t *testing.T) {
 			},
 		}
 		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
-		adapter := NewHTTPAdapter(manager, DefaultConfig())
+		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
 		adapter.SetAlertHandler(func(_ context.Context, alert *entity.Alert) error {
 			handledAlerts = append(handledAlerts, alert)
 			return nil
@@ -252,7 +253,7 @@ func TestHTTPAdapter_AlertHandlerIntegration(t *testing.T) {
 			},
 		}
 		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
-		adapter := NewHTTPAdapter(manager, DefaultConfig())
+		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
 		adapter.SetAlertHandler(func(_ context.Context, _ *entity.Alert) error {
 			return context.DeadlineExceeded // Simulate error
 		})
@@ -286,7 +287,7 @@ func TestHTTPAdapter_ErrorHandling(t *testing.T) {
 			},
 		}
 		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
-		adapter := NewHTTPAdapter(manager, DefaultConfig())
+		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
 
 		req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString("invalid"))
 		rec := httptest.NewRecorder()
@@ -303,7 +304,7 @@ func TestHTTPAdapter_Config(t *testing.T) {
 	t.Run("Addr returns configured address", func(t *testing.T) {
 		config := HTTPAdapterConfig{Addr: ":9090"}
 		manager := &porttest.MockAlertSourceManager{}
-		adapter := NewHTTPAdapter(manager, config)
+		adapter := NewHTTPAdapter(manager, config, logger.NewNop())
 
 		if adapter.Addr() != ":9090" {
 			t.Errorf("expected :9090, got %s", adapter.Addr())
@@ -338,7 +339,7 @@ func TestHTTPAdapter_AsyncHandler_Returns202(t *testing.T) {
 		},
 	}
 	manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
-	adapter := NewHTTPAdapter(manager, DefaultConfig())
+	adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
 
 	var runnerCalled bool
 	var runnerWg sync.WaitGroup
@@ -391,7 +392,7 @@ func TestHTTPAdapter_AsyncHandler_FilteredAlerts(t *testing.T) {
 		},
 	}
 	manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
-	adapter := NewHTTPAdapter(manager, DefaultConfig())
+	adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
 
 	adapter.SetAsyncAlertHandler(
 		func(_ context.Context, _ *entity.Alert) (string, error) {
@@ -431,7 +432,7 @@ func TestHTTPAdapter_AsyncHandler_StartError(t *testing.T) {
 		},
 	}
 	manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
-	adapter := NewHTTPAdapter(manager, DefaultConfig())
+	adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
 
 	adapter.SetAsyncAlertHandler(
 		func(_ context.Context, _ *entity.Alert) (string, error) {
@@ -463,7 +464,7 @@ func TestHTTPAdapter_AsyncHandler_ShutdownWaits(t *testing.T) {
 		},
 	}
 	manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
-	adapter := NewHTTPAdapter(manager, DefaultConfig())
+	adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
 
 	runnerStarted := make(chan struct{})
 	runnerComplete := make(chan struct{})
@@ -523,7 +524,7 @@ func TestHTTPAdapter_AsyncAndSyncHandlerPrecedence(t *testing.T) {
 			},
 		}
 		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{webhookSource}}
-		adapter := NewHTTPAdapter(manager, DefaultConfig())
+		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
 
 		// Set both sync and async handlers
 		syncCalled := false

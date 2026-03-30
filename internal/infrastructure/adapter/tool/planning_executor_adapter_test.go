@@ -9,13 +9,14 @@ import (
 
 	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
 func TestPlanningExecutorAdapter_EditFileBlockedInPlanMode(t *testing.T) {
 	tempDir := t.TempDir()
 
 	fileManager := file.NewLocalFileManager(tempDir)
-	baseExecutor := NewExecutorAdapter(fileManager)
+	baseExecutor := NewExecutorAdapter(fileManager, logger.NewNop())
 	planningExecutor := NewPlanningExecutorAdapter(baseExecutor, fileManager, tempDir)
 
 	// Create a test file
@@ -65,7 +66,7 @@ func TestPlanningExecutorAdapter_PlanFileAllowedInPlanMode(t *testing.T) {
 	tempDir := t.TempDir()
 
 	fileManager := file.NewLocalFileManager(tempDir)
-	baseExecutor := NewExecutorAdapter(fileManager)
+	baseExecutor := NewExecutorAdapter(fileManager, logger.NewNop())
 	planningExecutor := NewPlanningExecutorAdapter(baseExecutor, fileManager, tempDir)
 
 	sessionID := "test-session-456"
@@ -110,7 +111,7 @@ func TestPlanningExecutorAdapter_EditFileWithoutPlanMode(t *testing.T) {
 	tempDir := t.TempDir()
 
 	fileManager := file.NewLocalFileManager(tempDir)
-	baseExecutor := NewExecutorAdapter(fileManager)
+	baseExecutor := NewExecutorAdapter(fileManager, logger.NewNop())
 	planningExecutor := NewPlanningExecutorAdapter(baseExecutor, fileManager, tempDir)
 
 	// Create a test file
@@ -152,7 +153,7 @@ func TestPlanningExecutorAdapter_ReadFileAllowedInPlanMode(t *testing.T) {
 	tempDir := t.TempDir()
 
 	fileManager := file.NewLocalFileManager(tempDir)
-	baseExecutor := NewExecutorAdapter(fileManager)
+	baseExecutor := NewExecutorAdapter(fileManager, logger.NewNop())
 	planningExecutor := NewPlanningExecutorAdapter(baseExecutor, fileManager, tempDir)
 
 	// Create a test file
@@ -190,7 +191,7 @@ func TestPlanningExecutorAdapter_SetPlanModeCreatesDirectory(t *testing.T) {
 	tempDir := t.TempDir()
 
 	fileManager := file.NewLocalFileManager(tempDir)
-	baseExecutor := NewExecutorAdapter(fileManager)
+	baseExecutor := NewExecutorAdapter(fileManager, logger.NewNop())
 	planningExecutor := NewPlanningExecutorAdapter(baseExecutor, fileManager, tempDir)
 
 	sessionID := "test-session-dir"

@@ -11,6 +11,7 @@ import (
 	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 	"github.com/anthony-bible/code-agent-demo/internal/domain/service"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/ui"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -91,13 +92,13 @@ func TestEndToEndRCALogic(t *testing.T) {
 	uiAdapter := ui.NewCLIAdapterWithIO(strings.NewReader(""), output)
 
 	// RCA Service
-	rcaService := service.NewRCAService(mockAI)
+	rcaService := service.NewRCAService(mockAI, logger.NewNop())
 
 	// Investigation Use Case
 	invConfig := usecase.AlertInvestigationUseCaseConfig{
 		MaxConcurrent: 5,
 	}
-	invUseCase := usecase.NewAlertInvestigationUseCaseWithConfig(invConfig)
+	invUseCase := usecase.NewAlertInvestigationUseCaseWithConfig(invConfig, logger.NewNop())
 
 	// Use reflection to set private fields for the integration test
 	var promptRegistry usecase.PromptBuilderRegistry = &mockPromptBuilderRegistryForRCA{}
@@ -174,7 +175,7 @@ func TestEndToEndRCALogic(t *testing.T) {
 	handlerConfig := usecase.AlertHandlerConfig{
 		AutoInvestigateCritical: true,
 	}
-	handler := usecase.NewAlertHandler(invUseCase, handlerConfig)
+	handler := usecase.NewAlertHandler(invUseCase, handlerConfig, logger.NewNop())
 
 	alert, err := entity.NewAlert("alert-123", "prometheus", entity.SeverityCritical, "High CPU Usage")
 	require.NoError(t, err)

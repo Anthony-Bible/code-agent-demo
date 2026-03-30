@@ -20,6 +20,9 @@ type Logger interface {
 	Warn(msg string, args ...any)
 	// Error logs a message at error level with optional key-value pairs.
 	Error(msg string, args ...any)
+	// Log logs a message at the specified level with optional key-value pairs.
+	// The level string is interpreted by the underlying implementation (e.g., "debug", "info", "warn", "error").
+	Log(level string, msg string, args ...any)
 	// With returns a new Logger with the given key-value pairs added to every
 	// subsequent log message. Use this to attach contextual fields such as
 	// investigation_id or session_id.
@@ -32,23 +35,14 @@ type Logger interface {
 // logger yet.
 type NopLogger struct{}
 
-func (NopLogger) Debug(_ string, _ ...any) {}
-func (NopLogger) Info(_ string, _ ...any)  {}
-func (NopLogger) Warn(_ string, _ ...any)  {}
-func (NopLogger) Error(_ string, _ ...any) {}
+func (NopLogger) Debug(_ string, _ ...any)         {}
+func (NopLogger) Info(_ string, _ ...any)          {}
+func (NopLogger) Warn(_ string, _ ...any)          {}
+func (NopLogger) Error(_ string, _ ...any)         {}
+func (NopLogger) Log(_ string, _ string, _ ...any) {}
 
-// With returns the same NopLogger since it has no state.
-func (NopLogger) With(_ ...any) Logger { return NopLogger{} }
+var nopLoggerInstance = &NopLogger{}
 
-// FirstOrNop returns the first non-nil Logger from the variadic argument list,
-// or a NopLogger if none is provided. This pattern enables backward-compatible
-// constructor signatures: callers that do not yet inject a logger simply omit the
-// argument and receive silent (no-op) logging.
-func FirstOrNop(loggers ...Logger) Logger {
-	for _, l := range loggers {
-		if l != nil {
-			return l
-		}
-	}
-	return NopLogger{}
-}
+// With returns the same NopLogger instance since it has no state.
+// This returns a singleton to avoid unnecessary allocations on each call.
+func (NopLogger) With(_ ...any) Logger { return nopLoggerInstance }

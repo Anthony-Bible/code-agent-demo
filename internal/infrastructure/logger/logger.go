@@ -49,6 +49,20 @@ func (s *slogLogger) Debug(msg string, args ...any) { s.l.Debug(msg, args...) }
 func (s *slogLogger) Info(msg string, args ...any)  { s.l.Info(msg, args...) }
 func (s *slogLogger) Warn(msg string, args ...any)  { s.l.Warn(msg, args...) }
 func (s *slogLogger) Error(msg string, args ...any) { s.l.Error(msg, args...) }
+func (s *slogLogger) Log(level string, msg string, args ...any) {
+	switch level {
+	case "debug":
+		s.l.Debug(msg, args...)
+	case "info":
+		s.l.Info(msg, args...)
+	case "warn", "warning":
+		s.l.Warn(msg, args...)
+	case "error":
+		s.l.Error(msg, args...)
+	default:
+		s.l.Info(msg, args...)
+	}
+}
 
 // With returns a new Logger that includes the given key-value pairs in every
 // subsequent log record.

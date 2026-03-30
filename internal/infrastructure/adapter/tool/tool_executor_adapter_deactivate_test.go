@@ -8,10 +8,11 @@ import (
 
 	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
 func TestDeactivateSkill_WithCallback(t *testing.T) {
-	adapter := NewExecutorAdapter(file.NewLocalFileManager(t.TempDir()))
+	adapter := NewExecutorAdapter(file.NewLocalFileManager(t.TempDir()), logger.NewNop())
 	var calledSession, calledSkill string
 	adapter.SetSkillDeactivationCallback(func(sessionID, skillName string) error {
 		calledSession = sessionID
@@ -33,7 +34,7 @@ func TestDeactivateSkill_WithCallback(t *testing.T) {
 }
 
 func TestDeactivateSkill_WithoutCallback(t *testing.T) {
-	adapter := NewExecutorAdapter(file.NewLocalFileManager(t.TempDir()))
+	adapter := NewExecutorAdapter(file.NewLocalFileManager(t.TempDir()), logger.NewNop())
 
 	ctx := port.WithSessionID(context.Background(), "sess-1")
 	result, err := adapter.ExecuteTool(ctx, "deactivate_skill", `{"skill_name":"my-skill"}`)
@@ -46,7 +47,7 @@ func TestDeactivateSkill_WithoutCallback(t *testing.T) {
 }
 
 func TestDeactivateSkill_CallbackError(t *testing.T) {
-	adapter := NewExecutorAdapter(file.NewLocalFileManager(t.TempDir()))
+	adapter := NewExecutorAdapter(file.NewLocalFileManager(t.TempDir()), logger.NewNop())
 	adapter.SetSkillDeactivationCallback(func(_, _ string) error {
 		return errors.New("storage failure")
 	})
@@ -62,7 +63,7 @@ func TestDeactivateSkill_CallbackError(t *testing.T) {
 }
 
 func TestDeactivateSkill_EmptySkillName(t *testing.T) {
-	adapter := NewExecutorAdapter(file.NewLocalFileManager(t.TempDir()))
+	adapter := NewExecutorAdapter(file.NewLocalFileManager(t.TempDir()), logger.NewNop())
 
 	ctx := port.WithSessionID(context.Background(), "sess-1")
 	_, err := adapter.ExecuteTool(ctx, "deactivate_skill", `{"skill_name":""}`)
@@ -75,7 +76,7 @@ func TestDeactivateSkill_EmptySkillName(t *testing.T) {
 }
 
 func TestDeactivateSkill_MissingSessionID(t *testing.T) {
-	adapter := NewExecutorAdapter(file.NewLocalFileManager(t.TempDir()))
+	adapter := NewExecutorAdapter(file.NewLocalFileManager(t.TempDir()), logger.NewNop())
 
 	_, err := adapter.ExecuteTool(context.Background(), "deactivate_skill", `{"skill_name":"my-skill"}`)
 	if err == nil {

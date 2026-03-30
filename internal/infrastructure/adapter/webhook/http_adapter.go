@@ -63,7 +63,7 @@ type HTTPAdapter struct {
 func NewHTTPAdapter(
 	sourceManager port.AlertSourceManager,
 	config HTTPAdapterConfig,
-	logger ...port.Logger,
+	logger port.Logger,
 ) *HTTPAdapter {
 	invCtx, invCancel := context.WithCancel(context.Background())
 	adapter := &HTTPAdapter{
@@ -72,7 +72,7 @@ func NewHTTPAdapter(
 		mux:           http.NewServeMux(),
 		invCtx:        invCtx,
 		invCancel:     invCancel,
-		logger:        port.FirstOrNop(logger...),
+		logger:        logger,
 	}
 	adapter.registerRoutes()
 	return adapter

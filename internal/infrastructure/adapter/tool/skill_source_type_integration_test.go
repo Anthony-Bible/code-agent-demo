@@ -10,6 +10,7 @@ import (
 	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/skill"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
 // TestSkillActivationShowsCorrectSourceType verifies that skills from different
@@ -96,7 +97,7 @@ This skill is from ~/.claude/skills directory.
 	fileManager := file.NewLocalFileManager(".")
 
 	// Create tool executor
-	toolExecutor := NewExecutorAdapter(fileManager)
+	toolExecutor := NewExecutorAdapter(fileManager, logger.NewNop())
 	toolExecutor.SetSkillManager(skillManager)
 
 	// Test each skill type
@@ -218,7 +219,7 @@ description: User skill
 	fileManager := file.NewLocalFileManager(".")
 
 	// Create tool executor
-	toolExecutor := NewExecutorAdapter(fileManager)
+	toolExecutor := NewExecutorAdapter(fileManager, logger.NewNop())
 	toolExecutor.SetSkillManager(skillManager)
 
 	// Get activate_skill tool

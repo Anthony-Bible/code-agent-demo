@@ -51,12 +51,10 @@ type RCAService struct {
 }
 
 // NewRCAService creates a new RCAService.
-//
-// An optional logger can be provided; if omitted a no-op logger is used.
-func NewRCAService(aiProvider port.AIProvider, loggers ...port.Logger) *RCAService {
+func NewRCAService(aiProvider port.AIProvider, logger port.Logger) *RCAService {
 	return &RCAService{
 		aiProvider: aiProvider,
-		logger:     port.FirstOrNop(loggers...),
+		logger:     logger,
 	}
 }
 

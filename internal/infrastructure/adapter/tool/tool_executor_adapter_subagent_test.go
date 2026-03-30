@@ -8,6 +8,7 @@ import (
 
 	"github.com/anthony-bible/code-agent-demo/internal/application/usecase"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
 // =============================================================================
@@ -88,7 +89,7 @@ func (m *MockSubagentUseCaseWithConfig) SpawnDynamicSubagent(
 func TestTaskTool_PropagatesParametersCorrectly(t *testing.T) {
 	// Arrange
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	mockUseCase := &MockSubagentUseCaseWithConfig{}
 	adapter.SetSubagentUseCase(mockUseCase)
@@ -119,7 +120,7 @@ func TestTaskTool_PropagatesParametersCorrectly(t *testing.T) {
 func TestDelegateTool_PropagatesParametersCorrectly(t *testing.T) {
 	// Arrange
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	mockUseCase := &MockSubagentUseCaseWithConfig{}
 	adapter.SetSubagentUseCase(mockUseCase)

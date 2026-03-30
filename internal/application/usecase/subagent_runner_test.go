@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
+
 	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 )
@@ -436,7 +438,7 @@ func (h *subagentRunnerTestHarness) build() *SubagentRunner {
 	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
 		return convService, nil
 	}
-	return NewSubagentRunner(h.convService, h.toolExecutor, h.aiProvider, nil, h.config, factory)
+	return NewSubagentRunner(h.convService, h.toolExecutor, h.aiProvider, nil, h.config, factory, logger.NewNop())
 }
 
 func (h *subagentRunnerTestHarness) run(agent *entity.Subagent, prompt, id string) (*SubagentResult, error) {
@@ -487,7 +489,7 @@ func TestNewSubagentRunner_PanicsOnNilDependency(t *testing.T) {
 					t.Error("expected panic")
 				}
 			}()
-			NewSubagentRunner(tt.convService, tt.toolExecutor, tt.aiProvider, nil, SubagentConfig{}, tt.convFactory)
+			NewSubagentRunner(tt.convService, tt.toolExecutor, tt.aiProvider, nil, SubagentConfig{}, tt.convFactory, logger.NewNop())
 		})
 	}
 }

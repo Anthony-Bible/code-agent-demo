@@ -10,6 +10,7 @@ import (
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/subagent"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/tool"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
 func TestTaskToolIncludesAvailableAgents(t *testing.T) {
@@ -36,7 +37,7 @@ Test agent system prompt.`
 
 	// Create file manager and tool executor
 	fileManager := file.NewLocalFileManager(tmpDir)
-	toolExecutor := tool.NewExecutorAdapter(fileManager)
+	toolExecutor := tool.NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Create and set subagent manager
 	subagentManager := subagent.NewLocalSubagentManagerWithDirs([]subagent.DirConfig{

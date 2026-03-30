@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
 // =============================================================================
@@ -16,7 +17,7 @@ import (
 
 func TestBatchTool_Registration(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	tools, err := adapter.ListTools()
 	if err != nil {
@@ -53,7 +54,7 @@ func TestBatchTool_Registration(t *testing.T) {
 
 func TestBatchTool_BasicSequentialExecution(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Create test files
 	if err := fileManager.WriteFile("test1.txt", "content1"); err != nil {
@@ -147,7 +148,7 @@ func TestBatchTool_BasicSequentialExecution(t *testing.T) {
 
 func TestBatchTool_EmptyInvocations(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	input := `{"invocations": []}`
 	_, err := adapter.ExecuteTool(context.Background(), "batch_tool", input)
@@ -162,7 +163,7 @@ func TestBatchTool_EmptyInvocations(t *testing.T) {
 
 func TestBatchTool_MixedSuccessAndFailure(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Create one test file
 	if err := fileManager.WriteFile("exists.txt", "content"); err != nil {
@@ -227,7 +228,7 @@ func TestBatchTool_MixedSuccessAndFailure(t *testing.T) {
 
 func TestBatchTool_MultipleToolTypes(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Create test file
 	if err := fileManager.WriteFile("test.txt", "test content"); err != nil {
@@ -285,7 +286,7 @@ func TestBatchTool_MultipleToolTypes(t *testing.T) {
 
 func TestBatchTool_MalformedInput(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	testCases := []struct {
 		name  string
@@ -321,7 +322,7 @@ func TestBatchTool_MalformedInput(t *testing.T) {
 
 func TestBatchTool_InvalidArgumentsForTool(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// read_file requires 'path' argument
 	input := `{
@@ -354,7 +355,7 @@ func TestBatchTool_InvalidArgumentsForTool(t *testing.T) {
 
 func TestBatchTool_SequentialExecutionOrder(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Test that batch executes sequentially by creating a file, then reading it
 	input := `{
@@ -398,7 +399,7 @@ func TestBatchTool_SequentialExecutionOrder(t *testing.T) {
 
 func TestBatchTool_ContextCancellation(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Create a context that will be cancelled immediately
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
@@ -428,7 +429,7 @@ func TestBatchTool_ContextCancellation(t *testing.T) {
 
 func TestBatchTool_DurationTracking(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Create test file
 	if err := fileManager.WriteFile("duration_test.txt", "content"); err != nil {
@@ -468,7 +469,7 @@ func TestBatchTool_DurationTracking(t *testing.T) {
 
 func TestBatchTool_LargeNumberOfInvocations(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Create test file
 	if err := fileManager.WriteFile("large_batch.txt", "content"); err != nil {
@@ -522,7 +523,7 @@ func TestBatchTool_LargeNumberOfInvocations(t *testing.T) {
 
 func TestBatchTool_NestedBatchNotAllowed(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Attempt to call batch_tool from within batch_tool
 	input := `{
@@ -562,7 +563,7 @@ func TestBatchTool_NestedBatchNotAllowed(t *testing.T) {
 
 func TestBatchTool_AllFailures(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// All invocations fail
 	input := `{
@@ -612,7 +613,7 @@ func TestBatchTool_AllFailures(t *testing.T) {
 
 func TestBatchTool_MaxInvocationsLimit_ExceedsLimit(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	if err := fileManager.WriteFile("limit_test.txt", "content"); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
@@ -642,7 +643,7 @@ func TestBatchTool_MaxInvocationsLimit_ExceedsLimit(t *testing.T) {
 
 func TestBatchTool_MaxInvocationsLimit_ExactlyAtLimit(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	if err := fileManager.WriteFile("limit_test.txt", "content"); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
@@ -678,7 +679,7 @@ func TestBatchTool_MaxInvocationsLimit_ExactlyAtLimit(t *testing.T) {
 
 func TestBatchTool_ValidationErrors_TableDriven(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	tests := []struct {
 		name           string
@@ -740,7 +741,7 @@ func TestBatchTool_ValidationErrors_TableDriven(t *testing.T) {
 
 func TestBatchTool_RecursionPrevention_DirectNesting(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	input := `{
 		"invocations": [{
@@ -773,7 +774,7 @@ func TestBatchTool_RecursionPrevention_DirectNesting(t *testing.T) {
 
 func TestBatchTool_RecursionPrevention_MultipleBatchCalls(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	input := `{
 		"invocations": [
@@ -816,7 +817,7 @@ func TestBatchTool_RecursionPrevention_MultipleBatchCalls(t *testing.T) {
 
 func TestBatchTool_StopOnError_True(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	if err := fileManager.WriteFile("success.txt", "content"); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
@@ -903,7 +904,7 @@ func TestBatchTool_StopOnError_ContinuesModes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fileManager := file.NewLocalFileManager(".")
-			adapter := NewExecutorAdapter(fileManager)
+			adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 			if err := fileManager.WriteFile(tt.testFile, "content"); err != nil {
 				t.Fatalf("Failed to create test file: %v", err)
@@ -935,7 +936,7 @@ func TestBatchTool_StopOnError_ContinuesModes(t *testing.T) {
 
 func TestBatchTool_StoppedEarlyFlag(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Create test file
 	if err := fileManager.WriteFile("flag_test.txt", "content"); err != nil {
@@ -1088,7 +1089,7 @@ func TestBatchTool_StoppedEarlyFlag(t *testing.T) {
 
 func TestBatchTool_ParallelExecution_Basic(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Test parallel execution with sleep commands
 	// If executed sequentially: total time = 0.3 + 0.3 + 0.3 + 0.3 = 1.2 seconds
@@ -1158,7 +1159,7 @@ func TestBatchTool_ParallelExecution_Basic(t *testing.T) {
 
 func TestBatchTool_ParallelExecution_MaintainsOrder(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Create test files
 	testFiles := []string{"parallel_order1.txt", "parallel_order2.txt", "parallel_order3.txt"}
@@ -1238,7 +1239,7 @@ func TestBatchTool_ParallelExecution_MaintainsOrder(t *testing.T) {
 
 func TestBatchTool_ParallelExecution_WithFailures(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Create one test file for successes
 	if err := fileManager.WriteFile("parallel_success.txt", "success content"); err != nil {
@@ -1316,7 +1317,7 @@ func TestBatchTool_ParallelExecution_WithFailures(t *testing.T) {
 
 func TestBatchTool_ParallelExecution_ContextCancellation(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Create a context that will be cancelled after a short time
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -1369,7 +1370,7 @@ func TestBatchTool_ParallelMode_Defaults(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fileManager := file.NewLocalFileManager(".")
-			adapter := NewExecutorAdapter(fileManager)
+			adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 			input := `{
 				"invocations": [
@@ -1409,7 +1410,7 @@ func TestBatchTool_ParallelMode_Defaults(t *testing.T) {
 
 func TestBatchTool_ParallelWithStopOnError_IgnoresStopOnError(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	if err := fileManager.WriteFile("parallel_stop_test.txt", "content"); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)

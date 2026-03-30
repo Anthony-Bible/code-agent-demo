@@ -9,6 +9,7 @@ import (
 
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/skill"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
 // TestSkillsInToolDescription verifies that skills are included in the activate_skill tool description.
@@ -31,7 +32,7 @@ func TestSkillsInToolDescription(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
 
 	// Create tool executor
-	toolExecutor := NewExecutorAdapter(fileManager)
+	toolExecutor := NewExecutorAdapter(fileManager, logger.NewNop())
 	toolExecutor.SetSkillManager(skillManager)
 
 	// Get activate_skill tool
@@ -117,7 +118,7 @@ func TestActivateSkillIncludesSourceType(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
 
 	// Create tool executor
-	toolExecutor := NewExecutorAdapter(fileManager)
+	toolExecutor := NewExecutorAdapter(fileManager, logger.NewNop())
 	toolExecutor.SetSkillManager(skillManager)
 
 	// Activate test-skill

@@ -51,7 +51,7 @@ type InvestigationRunner struct {
 //   - rcaService: Service for Root Cause Analysis correlation (optional, can be nil)
 //   - uiAdapter: User interface for displaying thinking and messages (optional, can be nil)
 //   - config: Configuration for investigation limits and behavior
-//   - loggers: Optional structured logger; a no-op logger is used when omitted
+//   - logger: Structured logger for logging investigation events
 //
 // Panics if required dependencies (convService, toolExecutor, promptBuilder) are nil.
 func NewInvestigationRunner(
@@ -63,7 +63,7 @@ func NewInvestigationRunner(
 	rcaService RCAServiceInterface,
 	uiAdapter port.UserInterface,
 	config AlertInvestigationUseCaseConfig,
-	loggers ...port.Logger,
+	logger port.Logger,
 ) *InvestigationRunner {
 	if convService == nil {
 		panic("convService cannot be nil")
@@ -76,9 +76,8 @@ func NewInvestigationRunner(
 	}
 	// safetyEnforcer, skillManager, rcaService, and uiAdapter are optional and can be nil
 
-	log := port.FirstOrNop(loggers...)
 	return &InvestigationRunner{
-		BaseRunner:     newBaseRunner(convService, toolExecutor, newSafetyPermissionChecker(safetyEnforcer), log),
+		BaseRunner:     newBaseRunner(convService, toolExecutor, newSafetyPermissionChecker(safetyEnforcer), logger),
 		safetyEnforcer: safetyEnforcer,
 		promptBuilder:  promptBuilder,
 		skillManager:   skillManager,
@@ -100,7 +99,7 @@ func NewInvestigationRunner(
 //   - uiAdapter: User interface for displaying thinking and messages (optional, can be nil)
 //   - store: Store for persisting investigation state
 //   - config: Configuration for investigation limits and behavior
-//   - loggers: Optional structured logger; a no-op logger is used when omitted
+//   - logger: Structured logger for logging investigation events
 //
 // Panics if required dependencies (convService, toolExecutor, promptBuilder) are nil.
 func NewInvestigationRunnerWithStore(
@@ -113,7 +112,7 @@ func NewInvestigationRunnerWithStore(
 	uiAdapter port.UserInterface,
 	store InvestigationStoreWriter,
 	config AlertInvestigationUseCaseConfig,
-	loggers ...port.Logger,
+	logger port.Logger,
 ) *InvestigationRunner {
 	if convService == nil {
 		panic("convService cannot be nil")
@@ -126,9 +125,8 @@ func NewInvestigationRunnerWithStore(
 	}
 	// safetyEnforcer, skillManager, rcaService, and uiAdapter are optional and can be nil
 
-	log := port.FirstOrNop(loggers...)
 	return &InvestigationRunner{
-		BaseRunner:     newBaseRunner(convService, toolExecutor, newSafetyPermissionChecker(safetyEnforcer), log),
+		BaseRunner:     newBaseRunner(convService, toolExecutor, newSafetyPermissionChecker(safetyEnforcer), logger),
 		safetyEnforcer: safetyEnforcer,
 		promptBuilder:  promptBuilder,
 		skillManager:   skillManager,
@@ -284,7 +282,7 @@ func (r *InvestigationRunner) Run(
 
 	// Perform Root Cause Analysis if findings were gathered and RCA service is available
 	if result != nil && (result.Status == "completed" || result.Status == "escalated") && len(result.Findings) > 0 && r.rcaService != nil {
-		r.log().Info("findings gathered, triggering RCA correlation",
+		r.logger.Info("findings gathered, triggering RCA correlation",
 			"investigation_id", result.InvestigationID,
 			"findings_count", len(result.Findings))
 
@@ -303,12 +301,12 @@ func (r *InvestigationRunner) Run(
 
 		rcaFindings, rcaErr := r.rcaService.Correlate(ctx, invFindings)
 		if rcaErr != nil {
-			r.log().Error("RCA correlation failed",
+			r.logger.Error("RCA correlation failed",
 				"investigation_id", result.InvestigationID,
 				"error", rcaErr)
 		} else {
 			result.RCAFindings = rcaFindings
-			r.log().Info("RCA correlation successful",
+			r.logger.Info("RCA correlation successful",
 				"investigation_id", result.InvestigationID,
 				"rca_findings_count", len(rcaFindings))
 		}
@@ -331,7 +329,7 @@ func (r *InvestigationRunner) Run(
 			escalateReason: result.EscalateReason,
 		}
 		if err := r.store.Store(ctx, stub); err != nil {
-			r.log().Error("failed to store result",
+			r.logger.Error("failed to store result",
 				"investigation_id", result.InvestigationID,
 				"error", err)
 		}
@@ -588,12 +586,12 @@ func (r *InvestigationRunner) runInvestigationLoop(rc *runContext) (*Investigati
 
 		if rc.ActionsTaken >= rc.MaxActions {
 			if err := r.handleMaxActionsReached(rc); err != nil {
-				r.log().Error("error handling max actions", "error", err)
+				r.logger.Error("error handling max actions", "error", err)
 			}
 			break
 		}
 	}
-	r.log().Info("investigation loop ended naturally", "investigation_id", rc.investigationID)
+	r.logger.Info("investigation loop ended naturally", "investigation_id", rc.investigationID)
 	return rc.completedResult(), nil
 }
 
@@ -613,7 +611,7 @@ func (r *InvestigationRunner) handleNoToolCalls(rc *runContext, msg *entity.Mess
 			msgContent = msgContent[:200] + "..."
 		}
 	}
-	r.log().Info("AI responded without tool calls", "message_preview", msgContent)
+	r.logger.Info("AI responded without tool calls", "message_preview", msgContent)
 
 	// End loop naturally and return completed result
 	return rc.completedResult(), nil
@@ -622,19 +620,19 @@ func (r *InvestigationRunner) handleNoToolCalls(rc *runContext, msg *entity.Mess
 // handleMaxActionsReached handles the scenario where max actions limit is reached.
 // Sends a summary request and allows one final AI response.
 func (r *InvestigationRunner) handleMaxActionsReached(rc *runContext) error {
-	r.log().Info("max actions limit reached, requesting summary",
+	r.logger.Info("max actions limit reached, requesting summary",
 		"actions_taken", rc.ActionsTaken,
 		"max_actions", rc.MaxActions)
 
 	summaryMsg := "TURN LIMIT REACHED: You have reached the maximum number of allowed turns for this investigation. Please provide a summary of your findings and conclusions based on the investigation performed so far."
 	if _, err := r.ConvService.AddUserMessage(rc.Ctx, rc.SessionID, summaryMsg); err != nil {
-		r.log().Error("failed to add summary request", "error", err)
+		r.logger.Error("failed to add summary request", "error", err)
 		return err
 	}
 
 	_, _, err := r.ConvService.ProcessAssistantResponse(rc.Ctx, rc.SessionID)
 	if err != nil {
-		r.log().Error("error processing final summary response", "error", err)
+		r.logger.Error("error processing final summary response", "error", err)
 		return err
 	}
 
@@ -651,7 +649,7 @@ func (r *InvestigationRunner) displayThinkingContent(content string) {
 		return
 	}
 	// Fallback to slog if no UI adapter - log ONLY the length for security
-	r.log().Debug("THINKING_CONTENT_RECEIVED", "length", len(content))
+	r.logger.Debug("THINKING_CONTENT_RECEIVED", "length", len(content))
 }
 
 // getNextToolCalls retrieves and limits the next batch of tool calls.
@@ -703,7 +701,7 @@ func (r *InvestigationRunner) processLoopIteration(
 		if len(inputPreview) > 200 {
 			inputPreview = inputPreview[:200] + "..."
 		}
-		r.log().Info("complete_investigation called", "input_preview", inputPreview)
+		r.logger.Info("complete_investigation called", "input_preview", inputPreview)
 
 		return rc.buildCompletionResult(separated.completion.Input), true, nil
 	}

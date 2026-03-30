@@ -8,11 +8,12 @@ import (
 
 	"github.com/anthony-bible/code-agent-demo/internal/domain/safety"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
 func TestWhitelistMode_AllowsWhitelistedCommands(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Configure whitelist mode
 	whitelist := safety.NewCommandWhitelist(safety.DefaultWhitelistPatterns())
@@ -40,7 +41,7 @@ func TestWhitelistMode_AllowsWhitelistedCommands(t *testing.T) {
 
 func TestWhitelistMode_BlocksNonWhitelistedCommands(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Configure whitelist mode with askLLMOnUnknown=false (strict mode)
 	whitelist := safety.NewCommandWhitelist(safety.DefaultWhitelistPatterns())
@@ -60,7 +61,7 @@ func TestWhitelistMode_BlocksNonWhitelistedCommands(t *testing.T) {
 
 func TestWhitelistMode_AskLLMOnUnknownTriggersCallback(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Configure whitelist mode with askLLMOnUnknown=true
 	whitelist := safety.NewCommandWhitelist(safety.DefaultWhitelistPatterns())
@@ -94,7 +95,7 @@ func TestWhitelistMode_AskLLMOnUnknownTriggersCallback(t *testing.T) {
 
 func TestWhitelistMode_CallbackDenialBlocksCommand(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Configure whitelist mode with askLLMOnUnknown=true
 	whitelist := safety.NewCommandWhitelist(safety.DefaultWhitelistPatterns())
@@ -120,7 +121,7 @@ func TestWhitelistMode_CallbackDenialBlocksCommand(t *testing.T) {
 
 func TestWhitelistMode_PipedCommandsAllowed(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Configure whitelist mode
 	whitelist := safety.NewCommandWhitelist(safety.DefaultWhitelistPatterns())
@@ -146,7 +147,7 @@ func TestWhitelistMode_PipedCommandsAllowed(t *testing.T) {
 
 func TestWhitelistMode_PipedCommandsBlockedIfAnyPartNotWhitelisted(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Configure whitelist mode with askLLMOnUnknown=false
 	whitelist := safety.NewCommandWhitelist(safety.DefaultWhitelistPatterns())
@@ -167,7 +168,7 @@ func TestWhitelistMode_PipedCommandsBlockedIfAnyPartNotWhitelisted(t *testing.T)
 
 func TestWhitelistMode_CustomPatternsWork(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Create whitelist with custom patterns
 	customPatterns := []safety.WhitelistPattern{
@@ -197,7 +198,7 @@ func TestWhitelistMode_CustomPatternsWork(t *testing.T) {
 
 func TestBlacklistMode_StillWorks(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Explicitly set blacklist mode (default)
 	adapter.SetValidationMode(safety.ModeBlacklist, nil, false)
@@ -232,7 +233,7 @@ func TestBlacklistMode_StillWorks(t *testing.T) {
 
 func TestValidationMode_DefaultsToBlacklist(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Don't set any validation mode - should default to blacklist behavior
 
@@ -261,7 +262,7 @@ func TestWhitelistMode_ConcurrentAccess(t *testing.T) {
 	t.Parallel() // Allow parallel execution with other tests
 
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Create a whitelist
 	whitelist := safety.NewCommandWhitelist(safety.DefaultWhitelistPatterns())
@@ -318,7 +319,7 @@ func TestCallbackSetters_ConcurrentAccess(t *testing.T) {
 	t.Parallel()
 
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Configure whitelist mode to exercise both callback paths
 	whitelist := safety.NewCommandWhitelist(safety.DefaultWhitelistPatterns())
@@ -419,7 +420,7 @@ func TestWhitelistMode_SubstitutionBlocking(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fileManager := file.NewLocalFileManager(".")
-			adapter := NewExecutorAdapter(fileManager)
+			adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 			whitelist := safety.NewCommandWhitelist(safety.DefaultWhitelistPatterns())
 			adapter.SetValidationMode(safety.ModeWhitelist, whitelist, false)
@@ -445,7 +446,7 @@ func TestWhitelistMode_SubstitutionBlocking(t *testing.T) {
 // whitelisted and matches dangerous patterns. This tests precedence of whitelist over blacklist.
 func TestWhitelistMode_DangerousButWhitelisted(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Create a custom whitelist that includes a normally-dangerous command
 	// Note: This is intentionally testing an unusual configuration
@@ -478,7 +479,7 @@ func TestWhitelistMode_DangerousButWhitelisted(t *testing.T) {
 // only custom patterns are active (simulating AGENT_COMMAND_WHITELIST_OVERRIDE=true).
 func TestWhitelistMode_OverrideReplacesDefaults(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Custom-only whitelist (simulating override=true with custom patterns)
 	customPatterns := []safety.WhitelistPattern{
@@ -508,7 +509,7 @@ func TestWhitelistMode_OverrideReplacesDefaults(t *testing.T) {
 // blocks all commands.
 func TestWhitelistMode_EmptyWhitelistBlocksAll(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Empty whitelist (override=true with no custom JSON)
 	whitelist := safety.NewCommandWhitelist([]safety.WhitelistPattern{})
@@ -536,7 +537,7 @@ func TestWhitelistMode_EmptyWhitelistBlocksAll(t *testing.T) {
 // with custom patterns only allows those specific patterns.
 func TestWhitelistMode_OverrideWithCustomAllowsOnlyCustom(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Custom whitelist with specific patterns
 	customPatterns := []safety.WhitelistPattern{

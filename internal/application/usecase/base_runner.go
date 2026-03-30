@@ -46,6 +46,10 @@ type BaseRunner struct {
 
 // newBaseRunner creates a BaseRunner with the given dependencies.
 func newBaseRunner(convService ConversationServiceInterface, toolExecutor port.ToolExecutor, permChecker ToolPermissionChecker, logger port.Logger) BaseRunner {
+	// Ensure logger is never nil - for tests that create BaseRunner via struct literals
+	if logger == nil {
+		logger = port.NopLogger{}
+	}
 	return BaseRunner{
 		ConvService:       convService,
 		ToolExecutor:      toolExecutor,
@@ -63,19 +67,13 @@ func newSafetyPermissionChecker(enforcer SafetyEnforcer) ToolPermissionChecker {
 	return &SafetyEnforcerPermissionChecker{Enforcer: enforcer}
 }
 
-// log returns the injected logger, or a NopLogger if none was provided.
-// This protects against tests that create BaseRunner via struct literals.
-func (b *BaseRunner) log() port.Logger {
-	return port.FirstOrNop(b.logger)
-}
-
 // CleanupConversation ends a conversation using a background context
 // so cleanup succeeds even if the parent context was cancelled.
 func (b *BaseRunner) CleanupConversation(sessionID, entityID, entityLabel string) {
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), conversationCleanupTimeout)
 	defer cancel()
 	if err := b.ConvService.EndConversation(cleanupCtx, sessionID); err != nil {
-		b.log().Error("failed to end conversation",
+		b.logger.Error("failed to end conversation",
 			"session_id", sessionID,
 			entityLabel, entityID,
 			"error", err,
@@ -127,7 +125,7 @@ func (b *BaseRunner) InjectTurnWarningIfNeeded(rc *BaseRunContext, cfg TurnWarni
 	warningMsg := BuildTurnWarningMessage(remaining, cfg)
 	if warningMsg != "" {
 		if _, err := b.ConvService.AddUserMessage(rc.Ctx, rc.SessionID, warningMsg); err != nil {
-			b.log().Error("failed to add warning message", "error", err)
+			b.logger.Error("failed to add warning message", "error", err)
 		}
 	}
 }

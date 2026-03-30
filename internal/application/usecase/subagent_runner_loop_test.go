@@ -7,6 +7,7 @@ import (
 
 	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
 // =============================================================================
@@ -72,7 +73,7 @@ func TestSubagentRunner_Loop_TriggersThinkingStatus(t *testing.T) {
 	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
 		return convServiceMock, nil
 	}
-	runner := NewSubagentRunner(convServiceMock, toolExecutorMock, aiProviderMock, nil, config, factory)
+	runner := NewSubagentRunner(convServiceMock, toolExecutorMock, aiProviderMock, nil, config, factory, logger.NewNop())
 
 	// Execute: Run a subagent task
 	agent := &entity.Subagent{
@@ -126,7 +127,7 @@ func TestSubagentRunner_Loop_RespectsMaxActions(t *testing.T) {
 	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
 		return convServiceMock, nil
 	}
-	runner := NewSubagentRunner(convServiceMock, toolExecutorMock, aiProviderMock, nil, config, factory)
+	runner := NewSubagentRunner(convServiceMock, toolExecutorMock, aiProviderMock, nil, config, factory, logger.NewNop())
 
 	// Execute
 	agent := &entity.Subagent{Name: "test-agent"}

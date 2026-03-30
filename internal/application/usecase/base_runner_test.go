@@ -8,6 +8,7 @@ import (
 
 	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
 // =============================================================================
@@ -110,7 +111,7 @@ func (m *mockSafetyEnforcer) GetMaxActions() int                   { return 50 }
 
 func TestBaseRunner_CleanupConversation(t *testing.T) {
 	mock := &baseRunnerConvServiceMock{}
-	b := &BaseRunner{ConvService: mock}
+	b := &BaseRunner{ConvService: mock, logger: logger.NewNop()}
 
 	b.CleanupConversation("session-1", "entity-1", "entity_label")
 
@@ -121,7 +122,7 @@ func TestBaseRunner_CleanupConversation(t *testing.T) {
 
 func TestBaseRunner_CleanupConversation_Error(t *testing.T) {
 	mock := &baseRunnerConvServiceMock{endConversationError: errors.New("cleanup failed")}
-	b := &BaseRunner{ConvService: mock}
+	b := &BaseRunner{ConvService: mock, logger: logger.NewNop()}
 
 	// Should not panic on error
 	b.CleanupConversation("session-1", "entity-1", "entity_label")
@@ -158,7 +159,7 @@ func TestBaseRunner_ExecuteToolCall(t *testing.T) {
 				executeResult: tt.execResult,
 				executeError:  tt.execError,
 			}
-			b := &BaseRunner{ToolExecutor: executor}
+			b := &BaseRunner{ToolExecutor: executor, logger: logger.NewNop()}
 
 			tc := port.ToolCallInfo{ToolID: "id-1", ToolName: "bash", Input: map[string]any{"command": "ls"}}
 			result := b.ExecuteToolCall(context.Background(), tc)
@@ -242,6 +243,7 @@ func TestBaseRunner_ProcessToolCalls(t *testing.T) {
 				ConvService:       convMock,
 				ToolExecutor:      execMock,
 				PermissionChecker: tt.permChecker,
+				logger:            logger.NewNop(),
 			}
 
 			rc := &BaseRunContext{
@@ -307,7 +309,7 @@ func TestBaseRunner_InjectTurnWarningIfNeeded(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			convMock := &baseRunnerConvServiceMock{}
-			b := &BaseRunner{ConvService: convMock}
+			b := &BaseRunner{ConvService: convMock, logger: logger.NewNop()}
 			rc := &BaseRunContext{
 				Ctx:          context.Background(),
 				SessionID:    "session-1",
@@ -328,7 +330,7 @@ func TestBaseRunner_InjectTurnWarningIfNeeded(t *testing.T) {
 }
 
 func TestBaseRunner_LimitToolCalls(t *testing.T) {
-	b := &BaseRunner{}
+	b := &BaseRunner{logger: logger.NewNop()}
 
 	tests := []struct {
 		name         string

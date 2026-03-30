@@ -8,6 +8,7 @@ import (
 
 	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
 // =============================================================================
@@ -19,9 +20,9 @@ import (
 // with mock ConversationService, ToolExecutor, and PromptBuilderRegistry.
 func setupAlertInvestigationTest(t *testing.T) *AlertInvestigationUseCase {
 	t.Helper()
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Fatal("NewAlertInvestigationUseCase() returned nil")
+		t.Fatal("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 	uc.SetConversationService(newInvestigationRunnerConvServiceMock())
 	uc.SetToolExecutor(newInvestigationRunnerToolExecutorMock())
@@ -34,9 +35,9 @@ func setupAlertInvestigationTest(t *testing.T) *AlertInvestigationUseCase {
 // =============================================================================
 
 func TestNewAlertInvestigationUseCase_NotNil(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Error("NewAlertInvestigationUseCase() should not return nil")
+		t.Error("NewAlertInvestigationUseCase(logger.NewNop()) should not return nil")
 	}
 }
 
@@ -45,16 +46,16 @@ func TestNewAlertInvestigationUseCaseWithConfig_NotNil(t *testing.T) {
 		MaxConcurrent: 5,
 	}
 
-	uc := NewAlertInvestigationUseCaseWithConfig(config)
+	uc := NewAlertInvestigationUseCaseWithConfig(config, logger.NewNop())
 	if uc == nil {
-		t.Error("NewAlertInvestigationUseCaseWithConfig() should not return nil")
+		t.Error("NewAlertInvestigationUseCaseWithConfig(, logger.NewNop()) should not return nil")
 	}
 }
 
 func TestNewAlertInvestigationUseCase_InitialActiveCountZero(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 	if uc.GetActiveCount() != 0 {
 		t.Errorf("GetActiveCount() = %v, want 0", uc.GetActiveCount())
@@ -86,9 +87,9 @@ func TestAlertInvestigationUseCase_HandleAlert_Success(t *testing.T) {
 }
 
 func TestAlertInvestigationUseCase_HandleAlert_NilAlert(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	_, err := uc.HandleAlert(context.Background(), nil)
@@ -98,9 +99,9 @@ func TestAlertInvestigationUseCase_HandleAlert_NilAlert(t *testing.T) {
 }
 
 func TestAlertInvestigationUseCase_HandleAlert_CancelledContext(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -125,9 +126,9 @@ func TestAlertInvestigationUseCase_HandleAlert_Timeout(t *testing.T) {
 		MaxConcurrent: 1,
 	}
 
-	uc := NewAlertInvestigationUseCaseWithConfig(config)
+	uc := NewAlertInvestigationUseCaseWithConfig(config, logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
+		t.Skip("NewAlertInvestigationUseCaseWithConfig(, logger.NewNop()) returned nil")
 	}
 
 	alert := &AlertForInvestigation{
@@ -197,9 +198,9 @@ func TestAlertInvestigationUseCase_HandleAlert_ReturnsInvestigationID(t *testing
 // =============================================================================
 
 func TestAlertInvestigationUseCase_StartInvestigation_Success(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	alert := &AlertForInvestigation{
@@ -219,9 +220,9 @@ func TestAlertInvestigationUseCase_StartInvestigation_Success(t *testing.T) {
 }
 
 func TestAlertInvestigationUseCase_StartInvestigation_IncrementsActiveCount(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	if uc.GetActiveCount() != 0 {
@@ -250,9 +251,9 @@ func TestAlertInvestigationUseCase_StartInvestigation_MaxConcurrent(t *testing.T
 		MaxConcurrent: 2,
 	}
 
-	uc := NewAlertInvestigationUseCaseWithConfig(config)
+	uc := NewAlertInvestigationUseCaseWithConfig(config, logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
+		t.Skip("NewAlertInvestigationUseCaseWithConfig(, logger.NewNop()) returned nil")
 	}
 
 	// Start max concurrent investigations
@@ -283,9 +284,9 @@ func TestAlertInvestigationUseCase_StartInvestigation_MaxConcurrent(t *testing.T
 }
 
 func TestAlertInvestigationUseCase_StartInvestigation_DuplicateAlert(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	alert := &AlertForInvestigation{
@@ -312,9 +313,9 @@ func TestAlertInvestigationUseCase_StartInvestigation_DuplicateAlert(t *testing.
 // =============================================================================
 
 func TestAlertInvestigationUseCase_StopInvestigation_Success(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	alert := &AlertForInvestigation{
@@ -336,9 +337,9 @@ func TestAlertInvestigationUseCase_StopInvestigation_Success(t *testing.T) {
 }
 
 func TestAlertInvestigationUseCase_StopInvestigation_DecrementsActiveCount(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	alert := &AlertForInvestigation{
@@ -362,9 +363,9 @@ func TestAlertInvestigationUseCase_StopInvestigation_DecrementsActiveCount(t *te
 }
 
 func TestAlertInvestigationUseCase_StopInvestigation_NotFound(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	err := uc.StopInvestigation(context.Background(), "nonexistent")
@@ -378,9 +379,9 @@ func TestAlertInvestigationUseCase_StopInvestigation_NotFound(t *testing.T) {
 // =============================================================================
 
 func TestAlertInvestigationUseCase_GetInvestigationStatus_Exists(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	alert := &AlertForInvestigation{
@@ -405,9 +406,9 @@ func TestAlertInvestigationUseCase_GetInvestigationStatus_Exists(t *testing.T) {
 }
 
 func TestAlertInvestigationUseCase_GetInvestigationStatus_NotFound(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	_, err := uc.GetInvestigationStatus(context.Background(), "nonexistent")
@@ -421,9 +422,9 @@ func TestAlertInvestigationUseCase_GetInvestigationStatus_NotFound(t *testing.T)
 // =============================================================================
 
 func TestAlertInvestigationUseCase_ListActiveInvestigations_Empty(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	list, err := uc.ListActiveInvestigations(context.Background())
@@ -439,9 +440,9 @@ func TestAlertInvestigationUseCase_ListActiveInvestigations_Empty(t *testing.T) 
 }
 
 func TestAlertInvestigationUseCase_ListActiveInvestigations_WithActive(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	for i := range 3 {
@@ -468,9 +469,9 @@ func TestAlertInvestigationUseCase_ListActiveInvestigations_WithActive(t *testin
 // =============================================================================
 
 func TestAlertInvestigationUseCase_IsToolAllowed_WithEnforcer(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	// Create mock enforcer that allows bash and read_file
@@ -486,9 +487,9 @@ func TestAlertInvestigationUseCase_IsToolAllowed_WithEnforcer(t *testing.T) {
 }
 
 func TestAlertInvestigationUseCase_IsToolAllowed_NotAllowedByEnforcer(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	// Create mock enforcer that only allows bash and read_file
@@ -504,9 +505,9 @@ func TestAlertInvestigationUseCase_IsToolAllowed_NotAllowedByEnforcer(t *testing
 }
 
 func TestAlertInvestigationUseCase_IsToolAllowed_NoEnforcer(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	// Without an enforcer, all tools should be allowed (permissive default)
@@ -516,9 +517,9 @@ func TestAlertInvestigationUseCase_IsToolAllowed_NoEnforcer(t *testing.T) {
 }
 
 func TestAlertInvestigationUseCase_IsCommandBlocked_WithEnforcer(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	// Create mock enforcer that blocks dangerous commands
@@ -534,9 +535,9 @@ func TestAlertInvestigationUseCase_IsCommandBlocked_WithEnforcer(t *testing.T) {
 }
 
 func TestAlertInvestigationUseCase_IsCommandBlocked_SafeCommands(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	// Create mock enforcer that blocks specific patterns
@@ -552,9 +553,9 @@ func TestAlertInvestigationUseCase_IsCommandBlocked_SafeCommands(t *testing.T) {
 }
 
 func TestAlertInvestigationUseCase_IsCommandBlocked_NoEnforcer(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	// Without an enforcer, no commands should be blocked (permissive default)
@@ -568,9 +569,9 @@ func TestAlertInvestigationUseCase_IsCommandBlocked_NoEnforcer(t *testing.T) {
 // =============================================================================
 
 func TestAlertInvestigationUseCase_SetEscalationHandler(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	handler := NewLogEscalationHandler()
@@ -583,9 +584,9 @@ func TestAlertInvestigationUseCase_SetEscalationHandler(t *testing.T) {
 }
 
 func TestAlertInvestigationUseCase_SetPromptBuilderRegistry(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	registry := NewPromptBuilderRegistry()
@@ -602,9 +603,9 @@ func TestAlertInvestigationUseCase_SetPromptBuilderRegistry(t *testing.T) {
 // =============================================================================
 
 func TestAlertInvestigationUseCase_Shutdown_Success(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	err := uc.Shutdown(context.Background())
@@ -614,9 +615,9 @@ func TestAlertInvestigationUseCase_Shutdown_Success(t *testing.T) {
 }
 
 func TestAlertInvestigationUseCase_Shutdown_StopsActiveInvestigations(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	// Start some investigations
@@ -641,9 +642,9 @@ func TestAlertInvestigationUseCase_Shutdown_StopsActiveInvestigations(t *testing
 }
 
 func TestAlertInvestigationUseCase_Shutdown_WithTimeout(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -808,9 +809,9 @@ func TestAlertInvestigationErrors_HaveMessages(t *testing.T) {
 // =============================================================================
 
 func TestAlertInvestigationUseCase_SetSafetyEnforcer(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	enforcer := NewMockSafetyEnforcer()
@@ -823,9 +824,9 @@ func TestAlertInvestigationUseCase_SetSafetyEnforcer(t *testing.T) {
 }
 
 func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_BlockedTool(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	// Create a mock enforcer that blocks all tools
@@ -853,9 +854,9 @@ func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_BlockedTool(t 
 }
 
 func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_BlockedCommand(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	// Create a mock enforcer that blocks dangerous commands
@@ -889,9 +890,9 @@ func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_ActionBudgetEx
 		MaxConcurrent: 5,
 	}
 
-	uc := NewAlertInvestigationUseCaseWithConfig(config)
+	uc := NewAlertInvestigationUseCaseWithConfig(config, logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
+		t.Skip("NewAlertInvestigationUseCaseWithConfig(, logger.NewNop()) returned nil")
 	}
 
 	// Create a mock enforcer with low action budget (safety limits are now in SafetyEnforcer)
@@ -923,9 +924,9 @@ func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_Timeout(t *tes
 		MaxConcurrent: 5,
 	}
 
-	uc := NewAlertInvestigationUseCaseWithConfig(config)
+	uc := NewAlertInvestigationUseCaseWithConfig(config, logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
+		t.Skip("NewAlertInvestigationUseCaseWithConfig(, logger.NewNop()) returned nil")
 	}
 
 	// Create a mock enforcer that triggers timeout (timeout is now enforced by SafetyEnforcer)
@@ -961,9 +962,9 @@ func TestAlertInvestigationUseCase_HandleAlert_WithSafetyEnforcer_Timeout(t *tes
 // =============================================================================
 
 func TestAlertInvestigationUseCase_SetInvestigationStore(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	store := NewMockInvestigationStore()
@@ -1043,9 +1044,9 @@ func TestAlertInvestigationUseCase_HandleAlert_WithStore_UpdatesStatus(t *testin
 }
 
 func TestAlertInvestigationUseCase_StartInvestigation_WithStore_PersistsInitialState(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	store := NewMockInvestigationStore()
@@ -1083,9 +1084,9 @@ func TestAlertInvestigationUseCase_StartInvestigation_WithStore_PersistsInitialS
 }
 
 func TestAlertInvestigationUseCase_StopInvestigation_WithStore_UpdatesStatus(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	store := NewMockInvestigationStore()
@@ -1134,9 +1135,9 @@ func TestAlertInvestigationUseCase_StopInvestigation_WithStore_UpdatesStatus(t *
 // =============================================================================
 
 func TestAlertInvestigationUseCase_RunInvestigation_CleansUpTrackingOnSuccess(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	alert := &AlertForInvestigation{
@@ -1173,9 +1174,9 @@ func TestAlertInvestigationUseCase_RunInvestigation_CleansUpTrackingOnSuccess(t 
 }
 
 func TestAlertInvestigationUseCase_RunInvestigation_AllowsNewInvestigationAfterCompletion(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	alert := &AlertForInvestigation{
@@ -1213,9 +1214,9 @@ func TestAlertInvestigationUseCase_RunInvestigation_AllowsNewInvestigationAfterC
 }
 
 func TestAlertInvestigationUseCase_RunInvestigation_CleansUpTrackingOnError(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	// Create a mock safety enforcer that blocks all tools to force failure/escalation
@@ -1265,9 +1266,9 @@ func TestAlertInvestigationUseCase_RunInvestigation_CleansUpTrackingOnTimeout(t 
 		MaxConcurrent: 5,
 	}
 
-	uc := NewAlertInvestigationUseCaseWithConfig(config)
+	uc := NewAlertInvestigationUseCaseWithConfig(config, logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCaseWithConfig() returned nil")
+		t.Skip("NewAlertInvestigationUseCaseWithConfig(, logger.NewNop()) returned nil")
 	}
 
 	alert := &AlertForInvestigation{
@@ -1310,9 +1311,9 @@ func TestAlertInvestigationUseCase_RunInvestigation_CleansUpTrackingOnTimeout(t 
 }
 
 func TestAlertInvestigationUseCase_HandleAlert_CleansUpTrackingOnCompletion(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	alert := &AlertForInvestigation{
@@ -1338,9 +1339,9 @@ func TestAlertInvestigationUseCase_HandleAlert_CleansUpTrackingOnCompletion(t *t
 }
 
 func TestAlertInvestigationUseCase_HandleAlert_AllowsConsecutiveInvestigations(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	alert := &AlertForInvestigation{
@@ -1372,9 +1373,9 @@ func TestAlertInvestigationUseCase_HandleAlert_AllowsConsecutiveInvestigations(t
 }
 
 func TestAlertInvestigationUseCase_RunInvestigation_RemovesAlertFromTracking(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	alert := &AlertForInvestigation{
@@ -1427,9 +1428,9 @@ func TestAlertInvestigationUseCase_RunInvestigation_RemovesAlertFromTracking(t *
 // =============================================================================
 
 func TestAlertInvestigationUseCase_WithEnforcerAndStore_Integration(t *testing.T) {
-	uc := NewAlertInvestigationUseCase()
+	uc := NewAlertInvestigationUseCase(logger.NewNop())
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase() returned nil")
+		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
 	}
 
 	store := NewMockInvestigationStore()

@@ -128,16 +128,14 @@ func (a *ExecutorAdapter) wrapFileOperationError(operation string, err error) er
 // SkillManager can be provided via SetSkillManager for skill-related functionality.
 // SubagentManager can be provided via SetSubagentManager for subagent-related functionality.
 // It also registers the default tools (read_file, list_files, edit_file, bash, fetch, activate_skill).
-//
-// An optional logger can be provided; if omitted a no-op logger is used.
-func NewExecutorAdapter(fileManager port.FileManager, loggers ...port.Logger) *ExecutorAdapter {
+func NewExecutorAdapter(fileManager port.FileManager, logger port.Logger) *ExecutorAdapter {
 	adapter := &ExecutorAdapter{
 		fileManager:         fileManager,
 		skillManager:        nil,
 		subagentManager:     nil,
 		tools:               make(map[string]entity.Tool),
 		investigationStates: make(map[string]string),
-		logger:              port.FirstOrNop(loggers...),
+		logger:              logger,
 	}
 
 	// Register default tools

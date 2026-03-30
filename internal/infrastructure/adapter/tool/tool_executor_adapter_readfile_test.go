@@ -10,6 +10,7 @@ import (
 
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/tool"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
 // =============================================================================
@@ -31,7 +32,7 @@ func newTestHelper(t *testing.T) *testHelper {
 	t.Helper()
 	tempDir := t.TempDir()
 	fileManager := file.NewLocalFileManager(tempDir)
-	adapter := tool.NewExecutorAdapter(fileManager)
+	adapter := tool.NewExecutorAdapter(fileManager, logger.NewNop())
 	return &testHelper{
 		t:       t,
 		tempDir: tempDir,
