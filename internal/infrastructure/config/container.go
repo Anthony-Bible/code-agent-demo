@@ -102,9 +102,10 @@ func NewContainer(cfg *Config) (*Container, error) {
 	}
 
 	// Step 0: Create base logger from config (used by all components).
-	// Log level and format are not yet fields in Config; extend Options here when
-	// cfg.Log.Level / cfg.Log.Format are added to the application configuration.
-	log := logger.New(logger.Options{})
+	log := logger.New(logger.Options{
+		Level:  cfg.Log.Level,
+		Format: cfg.Log.Format,
+	})
 
 	// Step 1: Create infrastructure adapters
 	// Note: order matters - skillManager and subagentManager must be created before aiAdapter
@@ -304,7 +305,7 @@ func createInvestigationComponents(
 	alertSourceManager.SetAlertHandler(alertHandler.HandleEntityAlert)
 
 	// Create webhook HTTP adapter
-	webhookAdapter := webhook.NewHTTPAdapter(alertSourceManager, webhook.DefaultConfig())
+	webhookAdapter := webhook.NewHTTPAdapter(alertSourceManager, webhook.DefaultConfig(), log)
 	webhookAdapter.SetAlertHandler(alertHandler.HandleEntityAlert)
 
 	return investigationUseCase, alertSourceManager, webhookAdapter, nil

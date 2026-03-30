@@ -90,6 +90,8 @@ Environment variables with `AGENT_` prefix:
 - `AGENT_MODEL` - AI model (default: `hf:zai-org/GLM-4.7`)
 - `AGENT_MAX_TOKENS` - Response limit
 - `AGENT_WORKING_DIR` - Base directory for file operations
+- `AGENT_LOG_LEVEL` - Log level: `debug`, `info` (default), `warn`, `error`
+- `AGENT_LOG_FORMAT` - Log format: `text` (default) or `json`
 - `AGENT_SAFETY_COMMAND_VALIDATION_MODE` - Command validation mode: `blacklist` (default) or `whitelist`
 - `AGENT_SAFETY_COMMAND_WHITELIST_JSON` - JSON array of whitelist patterns with optional excludes (whitelist mode only)
 - `AGENT_SAFETY_COMMAND_WHITELIST_OVERRIDE` - Replace default whitelist patterns with custom ones (default: `false`)
