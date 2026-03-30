@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -131,6 +130,8 @@ type subagentRunContext struct {
 }
 
 // NewSubagentRunner creates a new SubagentRunner with dependency validation.
+//
+// An optional logger can be provided; if omitted a no-op logger is used.
 func NewSubagentRunner(
 	convService ConversationServiceInterface,
 	toolExecutor port.ToolExecutor,
@@ -138,6 +139,7 @@ func NewSubagentRunner(
 	userInterface port.UserInterface,
 	config SubagentConfig,
 	convFactory ConversationServiceFactory,
+	loggers ...port.Logger,
 ) *SubagentRunner {
 	if convService == nil {
 		panic("convService cannot be nil")
@@ -153,8 +155,9 @@ func NewSubagentRunner(
 	}
 	// userInterface is optional (can be nil for tests)
 
+	log := port.FirstOrNop(loggers...)
 	return &SubagentRunner{
-		BaseRunner:    newBaseRunner(convService, toolExecutor, &AllowedListPermissionChecker{AllowedTools: config.AllowedTools}),
+		BaseRunner:    newBaseRunner(convService, toolExecutor, &AllowedListPermissionChecker{AllowedTools: config.AllowedTools}, log),
 		aiProvider:    aiProvider,
 		userInterface: userInterface,
 		config:        config,
@@ -207,7 +210,7 @@ func (r *SubagentRunner) Run(
 
 	// Build a local runner so all BaseRunner methods use the isolated conv service
 	localRunner := &SubagentRunner{
-		BaseRunner:    newBaseRunner(localConvService, r.ToolExecutor, r.PermissionChecker),
+		BaseRunner:    newBaseRunner(localConvService, r.ToolExecutor, r.PermissionChecker, r.log()),
 		aiProvider:    localProvider,
 		userInterface: r.userInterface,
 		config:        r.config,
@@ -263,7 +266,7 @@ func (r *SubagentRunner) Run(
 	if thinkingInfo.Enabled {
 		if err := localConvService.SetThinkingMode(sessionID, thinkingInfo); err != nil {
 			// Log warning but don't fail - thinking mode is optional
-			slog.Warn("failed to set thinking mode", //nolint:sloglint // no injected logger on this struct
+			r.log().Warn("failed to set thinking mode",
 				"error", err,
 				"agent", rc.agent.Name,
 				"session_id", sessionID,

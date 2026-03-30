@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
@@ -48,12 +47,16 @@ Only return the JSON object.`
 // RCAService provides Root Cause Analysis correlation logic.
 type RCAService struct {
 	aiProvider port.AIProvider
+	logger     port.Logger
 }
 
 // NewRCAService creates a new RCAService.
-func NewRCAService(aiProvider port.AIProvider) *RCAService {
+//
+// An optional logger can be provided; if omitted a no-op logger is used.
+func NewRCAService(aiProvider port.AIProvider, loggers ...port.Logger) *RCAService {
 	return &RCAService{
 		aiProvider: aiProvider,
+		logger:     port.FirstOrNop(loggers...),
 	}
 }
 
@@ -63,7 +66,7 @@ func (s *RCAService) Correlate(ctx context.Context, findings []entity.Investigat
 		return nil, nil
 	}
 
-	slog.Info("correlating findings into RCA", "findings_count", len(findings)) //nolint:sloglint // keep global logger for now
+	s.logger.Info("correlating findings into RCA", "findings_count", len(findings))
 
 	// 1. Prepare findings for the prompt
 	var findingsText strings.Builder
@@ -118,7 +121,7 @@ func (s *RCAService) Correlate(ctx context.Context, findings []entity.Investigat
 			if len(contentPreview) > 200 {
 				contentPreview = contentPreview[:200] + "..."
 			}
-			slog.Error("failed to parse RCA findings JSON", //nolint:sloglint // keep global logger for now
+			s.logger.Error("failed to parse RCA findings JSON",
 				"error", err,
 				"content_preview", contentPreview)
 			return nil, fmt.Errorf("failed to parse RCA findings JSON: %w", err)
@@ -128,11 +131,11 @@ func (s *RCAService) Correlate(ctx context.Context, findings []entity.Investigat
 	// 5. Basic validation of the result
 	for _, f := range response.Findings {
 		if err := f.Validate(); err != nil {
-			slog.Error("AI returned invalid RCA finding", "error", err) //nolint:sloglint // keep global logger for now
+			s.logger.Error("AI returned invalid RCA finding", "error", err)
 			return nil, fmt.Errorf("AI returned invalid RCA finding: %w", err)
 		}
 	}
 
-	slog.Info("RCA correlation complete", "findings_count", len(response.Findings)) //nolint:sloglint // keep global logger for now
+	s.logger.Info("RCA correlation complete", "findings_count", len(response.Findings))
 	return response.Findings, nil
 }

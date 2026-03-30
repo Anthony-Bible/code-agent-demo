@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -109,8 +108,7 @@ func (a *ExecutorAdapter) buildActivateSkillDescription() string {
 
 	skills, err := a.skillManager.DiscoverSkills(ctx)
 	if err != nil {
-		//nolint:sloglint // operational warning without context
-		slog.Warn("failed to discover skills for tool description", "error", err)
+		a.logger.Warn("failed to discover skills for tool description", "error", err)
 		return baseDescription
 	}
 	if len(skills.Skills) == 0 {

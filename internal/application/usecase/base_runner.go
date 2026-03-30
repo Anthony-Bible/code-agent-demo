@@ -3,7 +3,6 @@ package usecase
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"slices"
 	"time"
 
@@ -42,14 +41,16 @@ type BaseRunner struct {
 	ConvService       ConversationServiceInterface
 	ToolExecutor      port.ToolExecutor
 	PermissionChecker ToolPermissionChecker
+	logger            port.Logger
 }
 
 // newBaseRunner creates a BaseRunner with the given dependencies.
-func newBaseRunner(convService ConversationServiceInterface, toolExecutor port.ToolExecutor, permChecker ToolPermissionChecker) BaseRunner {
+func newBaseRunner(convService ConversationServiceInterface, toolExecutor port.ToolExecutor, permChecker ToolPermissionChecker, logger port.Logger) BaseRunner {
 	return BaseRunner{
 		ConvService:       convService,
 		ToolExecutor:      toolExecutor,
 		PermissionChecker: permChecker,
+		logger:            logger,
 	}
 }
 
@@ -62,13 +63,19 @@ func newSafetyPermissionChecker(enforcer SafetyEnforcer) ToolPermissionChecker {
 	return &SafetyEnforcerPermissionChecker{Enforcer: enforcer}
 }
 
+// log returns the injected logger, or a NopLogger if none was provided.
+// This protects against tests that create BaseRunner via struct literals.
+func (b *BaseRunner) log() port.Logger {
+	return port.FirstOrNop(b.logger)
+}
+
 // CleanupConversation ends a conversation using a background context
 // so cleanup succeeds even if the parent context was cancelled.
 func (b *BaseRunner) CleanupConversation(sessionID, entityID, entityLabel string) {
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), conversationCleanupTimeout)
 	defer cancel()
 	if err := b.ConvService.EndConversation(cleanupCtx, sessionID); err != nil {
-		slog.Error("failed to end conversation", //nolint:sloglint // no injected logger on this struct
+		b.log().Error("failed to end conversation",
 			"session_id", sessionID,
 			entityLabel, entityID,
 			"error", err,
@@ -120,7 +127,7 @@ func (b *BaseRunner) InjectTurnWarningIfNeeded(rc *BaseRunContext, cfg TurnWarni
 	warningMsg := BuildTurnWarningMessage(remaining, cfg)
 	if warningMsg != "" {
 		if _, err := b.ConvService.AddUserMessage(rc.Ctx, rc.SessionID, warningMsg); err != nil {
-			slog.Error("failed to add warning message", "error", err) //nolint:sloglint // no injected logger
+			b.log().Error("failed to add warning message", "error", err)
 		}
 	}
 }
