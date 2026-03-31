@@ -100,35 +100,15 @@ func toRawMessage(input interface{}) (json.RawMessage, error) {
 	}
 }
 
-// wrapFileOperationError wraps file operation errors with context and logs a security
-// warning for path traversal attempts. It is a method on ExecutorAdapter so that it
-// can use the injected logger rather than the global slog logger.
-func (a *ExecutorAdapter) wrapFileOperationError(operation string, err error) error {
-	if err == nil {
-		return nil
-	}
-
-	// Check for path traversal error in the error chain
-	if errors.Is(err, fileadapter.ErrPathTraversal) {
-		a.logger.Error("path traversal attempt detected and blocked")
-		return fmt.Errorf("%s blocked due to potential security threat: %w", operation, err)
-	}
-
-	// Check for PathValidationError which has detailed reason
-	var pathErr *fileadapter.PathValidationError
-	if errors.As(err, &pathErr) && pathErr.Reason == "path traversal attempt detected" {
-		a.logger.Error("path traversal attempt detected and blocked")
-		return fmt.Errorf("%s blocked due to potential security threat: %w", operation, err)
-	}
-
-	return fmt.Errorf("%s: %w", operation, err)
-}
-
 // NewExecutorAdapter creates a new ExecutorAdapter with the provided FileManager.
 // SkillManager can be provided via SetSkillManager for skill-related functionality.
 // SubagentManager can be provided via SetSubagentManager for subagent-related functionality.
 // It also registers the default tools (read_file, list_files, edit_file, bash, fetch, activate_skill).
 func NewExecutorAdapter(fileManager port.FileManager, logger port.Logger) *ExecutorAdapter {
+	// Ensure logger is never nil - for tests that create ExecutorAdapter via struct literals
+	if logger == nil {
+		logger = port.NopLogger{}
+	}
 	adapter := &ExecutorAdapter{
 		fileManager:         fileManager,
 		skillManager:        nil,
@@ -142,6 +122,30 @@ func NewExecutorAdapter(fileManager port.FileManager, logger port.Logger) *Execu
 	adapter.registerDefaultTools()
 
 	return adapter
+}
+
+// wrapFileOperationError wraps file operation errors with context and logs a security
+// warning for path traversal attempts. It is a method on ExecutorAdapter so that it
+// can use the injected logger rather than the global slog logger.
+func (a *ExecutorAdapter) wrapFileOperationError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+
+	// Check for path traversal error in the error chain
+	if errors.Is(err, fileadapter.ErrPathTraversal) {
+		a.logger.Error("path traversal attempt detected and blocked", "operation", operation)
+		return fmt.Errorf("%s blocked due to potential security threat: %w", operation, err)
+	}
+
+	// Check for PathValidationError which has detailed reason
+	var pathErr *fileadapter.PathValidationError
+	if errors.As(err, &pathErr) && pathErr.Reason == "path traversal attempt detected" {
+		a.logger.Error("path traversal attempt detected and blocked", "operation", operation)
+		return fmt.Errorf("%s blocked due to potential security threat: %w", operation, err)
+	}
+
+	return fmt.Errorf("%s: %w", operation, err)
 }
 
 // SetSkillManager sets the skill manager for skill-related functionality.
