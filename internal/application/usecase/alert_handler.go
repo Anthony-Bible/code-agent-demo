@@ -81,6 +81,9 @@ func NewAlertHandlerWithValidation(
 	if uc == nil {
 		return nil, ErrNilUseCase
 	}
+	if logger == nil {
+		logger = port.NopLogger{}
+	}
 	return &AlertHandler{
 		investigationUseCase: uc,
 		config:               config,
