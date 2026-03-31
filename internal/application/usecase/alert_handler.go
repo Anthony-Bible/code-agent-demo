@@ -115,25 +115,24 @@ func (h *AlertHandler) Handle(ctx context.Context, alert *AlertForInvestigation)
 	}
 
 	// All checks passed - start the investigation
-	h.logger.Info("Starting investigation for alert",
-		"alert", alert.Title(),
-		"severity", alert.Severity())
+	log := h.logger.With("alert_id", alert.ID(), "severity", alert.Severity())
+	log.Info("Starting investigation for alert", "alert", alert.Title())
 
 	result, err := h.investigationUseCase.HandleAlert(ctx, alert)
 	if err != nil {
-		h.logger.Error("Investigation error", "error", err)
+		log.Error("Investigation error", "error", err)
 		return err
 	}
 
-	h.logger.Info("Investigation completed",
+	log.Info("Investigation completed",
 		"status", result.Status,
 		"findings", len(result.Findings),
 		"confidence", result.Confidence)
 
 	if len(result.Findings) > 0 {
-		h.logger.Info("Investigation findings", "count", len(result.Findings))
+		log.Info("Investigation findings", "count", len(result.Findings))
 		for i, finding := range result.Findings {
-			h.logger.Info("Finding", "index", i+1, "description", finding)
+			log.Info("Finding", "index", i+1, "description", finding)
 		}
 	}
 
@@ -146,7 +145,7 @@ func (h *AlertHandler) Handle(ctx context.Context, alert *AlertForInvestigation)
 	}
 
 	if result.Escalated {
-		h.logger.Warn("ESCALATED", "reason", result.EscalateReason)
+		log.Warn("ESCALATED", "reason", result.EscalateReason)
 	}
 	return nil
 }
@@ -265,21 +264,23 @@ func (h *AlertHandler) RunEntityAlertInvestigation(
 		labels:      alert.Labels(),
 	}
 
+	log := h.logger.With("alert_id", alert.ID(), "severity", alert.Severity())
+
 	result, err := h.investigationUseCase.RunInvestigation(ctx, invAlert, invID)
 	if err != nil {
-		h.logger.Error("Investigation error", "error", err)
+		log.Error("Investigation error", "error", err)
 		return err
 	}
 
-	h.logger.Info("Investigation completed",
+	log.Info("Investigation completed",
 		"status", result.Status,
 		"findings", len(result.Findings),
 		"confidence", result.Confidence)
 
 	if len(result.Findings) > 0 {
-		h.logger.Info("Investigation findings", "count", len(result.Findings))
+		log.Info("Investigation findings", "count", len(result.Findings))
 		for i, finding := range result.Findings {
-			h.logger.Info("Finding", "index", i+1, "description", finding)
+			log.Info("Finding", "index", i+1, "description", finding)
 		}
 	}
 
@@ -292,7 +293,7 @@ func (h *AlertHandler) RunEntityAlertInvestigation(
 	}
 
 	if result.Escalated {
-		h.logger.Warn("ESCALATED", "reason", result.EscalateReason)
+		log.Warn("ESCALATED", "reason", result.EscalateReason)
 	}
 	return nil
 }

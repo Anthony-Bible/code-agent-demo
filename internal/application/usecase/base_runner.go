@@ -68,12 +68,9 @@ func newSafetyPermissionChecker(enforcer SafetyEnforcer) ToolPermissionChecker {
 func (b *BaseRunner) CleanupConversation(sessionID, entityID, entityLabel string) {
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), conversationCleanupTimeout)
 	defer cancel()
+	log := b.logger.With("session_id", sessionID, entityLabel, entityID)
 	if err := b.ConvService.EndConversation(cleanupCtx, sessionID); err != nil {
-		b.logger.Error("failed to end conversation",
-			"session_id", sessionID,
-			entityLabel, entityID,
-			"error", err,
-		)
+		log.Error("failed to end conversation", "error", err)
 	}
 }
 

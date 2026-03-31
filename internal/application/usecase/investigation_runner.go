@@ -149,6 +149,7 @@ type runContext struct {
 
 	alert           *AlertForInvestigation
 	investigationID string
+	logger          port.Logger
 }
 
 // failedResult creates a failed investigation result.
@@ -243,6 +244,8 @@ func (r *InvestigationRunner) Run(
 		maxActions = r.safetyEnforcer.GetMaxActions()
 	}
 
+	log := r.logger.With("investigation_id", investigationID, "alert_id", alert.ID())
+
 	rc := &runContext{
 		BaseRunContext: BaseRunContext{
 			Ctx:        ctx,
@@ -251,6 +254,7 @@ func (r *InvestigationRunner) Run(
 		},
 		alert:           alert,
 		investigationID: investigationID,
+		logger:          log,
 	}
 
 	sessionID, err := r.ConvService.StartConversation(ctx)
@@ -282,9 +286,7 @@ func (r *InvestigationRunner) Run(
 
 	// Perform Root Cause Analysis if findings were gathered and RCA service is available
 	if result != nil && (result.Status == "completed" || result.Status == "escalated") && len(result.Findings) > 0 && r.rcaService != nil {
-		r.logger.Info("findings gathered, triggering RCA correlation",
-			"investigation_id", result.InvestigationID,
-			"findings_count", len(result.Findings))
+		rc.logger.Info("findings gathered, triggering RCA correlation", "findings_count", len(result.Findings))
 
 		// Convert findings to InvestigationFinding entities for the RCA service
 		// In a real scenario, we might want to store InvestigationFinding entities in the result directly.
@@ -301,14 +303,10 @@ func (r *InvestigationRunner) Run(
 
 		rcaFindings, rcaErr := r.rcaService.Correlate(ctx, invFindings)
 		if rcaErr != nil {
-			r.logger.Error("RCA correlation failed",
-				"investigation_id", result.InvestigationID,
-				"error", rcaErr)
+			rc.logger.Error("RCA correlation failed", "error", rcaErr)
 		} else {
 			result.RCAFindings = rcaFindings
-			r.logger.Info("RCA correlation successful",
-				"investigation_id", result.InvestigationID,
-				"rca_findings_count", len(rcaFindings))
+			rc.logger.Info("RCA correlation successful", "rca_findings_count", len(rcaFindings))
 		}
 	}
 
@@ -329,9 +327,7 @@ func (r *InvestigationRunner) Run(
 			escalateReason: result.EscalateReason,
 		}
 		if err := r.store.Store(ctx, stub); err != nil {
-			r.logger.Error("failed to store result",
-				"investigation_id", result.InvestigationID,
-				"error", err)
+			rc.logger.Error("failed to store result", "error", err)
 		}
 	}
 
@@ -586,12 +582,12 @@ func (r *InvestigationRunner) runInvestigationLoop(rc *runContext) (*Investigati
 
 		if rc.ActionsTaken >= rc.MaxActions {
 			if err := r.handleMaxActionsReached(rc); err != nil {
-				r.logger.Error("error handling max actions", "error", err)
+				rc.logger.Error("error handling max actions", "error", err)
 			}
 			break
 		}
 	}
-	r.logger.Info("investigation loop ended naturally", "investigation_id", rc.investigationID)
+	rc.logger.Info("investigation loop ended naturally")
 	return rc.completedResult(), nil
 }
 
@@ -611,7 +607,7 @@ func (r *InvestigationRunner) handleNoToolCalls(rc *runContext, msg *entity.Mess
 			msgContent = msgContent[:200] + "..."
 		}
 	}
-	r.logger.Info("AI responded without tool calls", "message_preview", msgContent)
+	rc.logger.Info("AI responded without tool calls", "message_preview", msgContent)
 
 	// End loop naturally and return completed result
 	return rc.completedResult(), nil
@@ -620,19 +616,19 @@ func (r *InvestigationRunner) handleNoToolCalls(rc *runContext, msg *entity.Mess
 // handleMaxActionsReached handles the scenario where max actions limit is reached.
 // Sends a summary request and allows one final AI response.
 func (r *InvestigationRunner) handleMaxActionsReached(rc *runContext) error {
-	r.logger.Info("max actions limit reached, requesting summary",
+	rc.logger.Info("max actions limit reached, requesting summary",
 		"actions_taken", rc.ActionsTaken,
 		"max_actions", rc.MaxActions)
 
 	summaryMsg := "TURN LIMIT REACHED: You have reached the maximum number of allowed turns for this investigation. Please provide a summary of your findings and conclusions based on the investigation performed so far."
 	if _, err := r.ConvService.AddUserMessage(rc.Ctx, rc.SessionID, summaryMsg); err != nil {
-		r.logger.Error("failed to add summary request", "error", err)
+		rc.logger.Error("failed to add summary request", "error", err)
 		return err
 	}
 
 	_, _, err := r.ConvService.ProcessAssistantResponse(rc.Ctx, rc.SessionID)
 	if err != nil {
-		r.logger.Error("error processing final summary response", "error", err)
+		rc.logger.Error("error processing final summary response", "error", err)
 		return err
 	}
 

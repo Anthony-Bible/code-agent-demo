@@ -400,11 +400,10 @@ func (uc *AlertInvestigationUseCase) StartInvestigation(
 
 	// Persist to store if configured
 	if uc.investigationStore != nil {
+		log := uc.logger.With("investigation_id", invID)
 		stub := newSimpleInvestigationRecord(invID, alert.ID(), "", "started")
 		if err := uc.investigationStore.Store(ctx, stub); err != nil {
-			uc.logger.Error("failed to store investigation",
-				"investigation_id", invID,
-				"error", err)
+			log.Error("failed to store investigation", "error", err)
 		}
 	}
 
@@ -433,11 +432,10 @@ func (uc *AlertInvestigationUseCase) StopInvestigation(ctx context.Context, invI
 
 	// Update store with stopped status if configured
 	if uc.investigationStore != nil {
+		log := uc.logger.With("investigation_id", invID)
 		stub := newSimpleInvestigationRecord(invID, inv.alertID, "", "stopped")
 		if err := uc.investigationStore.Update(ctx, stub); err != nil {
-			uc.logger.Error("failed to update investigation",
-				"investigation_id", invID,
-				"error", err)
+			log.Error("failed to update investigation", "error", err)
 		}
 	}
 
