@@ -1,10 +1,10 @@
 package usecase
 
 import (
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 	"context"
 	"testing"
 
-	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
 // =============================================================================
@@ -20,9 +20,9 @@ import (
 // =============================================================================
 
 func TestNewAlertHandler_NotNil(t *testing.T) {
-	uc := NewAlertInvestigationUseCase(logger.NewNop())
+	uc := NewAlertInvestigationUseCase(port.NopLogger{})
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
+		t.Skip("NewAlertInvestigationUseCase(port.NopLogger{}) returned nil")
 	}
 
 	config := AlertHandlerConfig{
@@ -31,9 +31,9 @@ func TestNewAlertHandler_NotNil(t *testing.T) {
 		IgnoredSources:          []string{},
 	}
 
-	handler := NewAlertHandler(uc, config, logger.NewNop())
+	handler := NewAlertHandler(uc, config, port.NopLogger{})
 	if handler == nil {
-		t.Error("NewAlertHandler(, logger.NewNop()) should not return nil")
+		t.Error("NewAlertHandler(, port.NopLogger{}) should not return nil")
 	}
 }
 
@@ -42,19 +42,19 @@ func TestNewAlertHandler_ConfigValidation_NilUseCase(t *testing.T) {
 		AutoInvestigateCritical: true,
 	}
 
-	handler, err := NewAlertHandlerWithValidation(nil, config, logger.NewNop())
+	handler, err := NewAlertHandlerWithValidation(nil, config, port.NopLogger{})
 	if err == nil {
-		t.Error("NewAlertHandlerWithValidation(nil, config, logger.NewNop()) should return error")
+		t.Error("NewAlertHandlerWithValidation(nil, config, port.NopLogger{}) should return error")
 	}
 	if handler != nil {
-		t.Error("NewAlertHandlerWithValidation(nil, config, logger.NewNop()) should return nil handler")
+		t.Error("NewAlertHandlerWithValidation(nil, config, port.NopLogger{}) should return nil handler")
 	}
 }
 
 func TestNewAlertHandler_ConfigValidation_ValidConfig(t *testing.T) {
-	uc := NewAlertInvestigationUseCase(logger.NewNop())
+	uc := NewAlertInvestigationUseCase(port.NopLogger{})
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
+		t.Skip("NewAlertInvestigationUseCase(port.NopLogger{}) returned nil")
 	}
 
 	config := AlertHandlerConfig{
@@ -63,12 +63,12 @@ func TestNewAlertHandler_ConfigValidation_ValidConfig(t *testing.T) {
 		IgnoredSources:          []string{"test-source"},
 	}
 
-	handler, err := NewAlertHandlerWithValidation(uc, config, logger.NewNop())
+	handler, err := NewAlertHandlerWithValidation(uc, config, port.NopLogger{})
 	if err != nil {
-		t.Errorf("NewAlertHandlerWithValidation(, logger.NewNop()) error = %v, want nil", err)
+		t.Errorf("NewAlertHandlerWithValidation(, port.NopLogger{}) error = %v, want nil", err)
 	}
 	if handler == nil {
-		t.Error("NewAlertHandlerWithValidation(, logger.NewNop()) should return non-nil handler")
+		t.Error("NewAlertHandlerWithValidation(, port.NopLogger{}) should return non-nil handler")
 	}
 }
 
@@ -78,9 +78,9 @@ func TestNewAlertHandler_ConfigValidation_ValidConfig(t *testing.T) {
 
 func TestAlertHandler_Handle_CriticalAlert_StartsInvestigation(t *testing.T) {
 	// Arrange
-	uc := NewAlertInvestigationUseCase(logger.NewNop())
+	uc := NewAlertInvestigationUseCase(port.NopLogger{})
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
+		t.Skip("NewAlertInvestigationUseCase(port.NopLogger{}) returned nil")
 	}
 	uc.SetConversationService(newInvestigationRunnerConvServiceMock())
 	uc.SetToolExecutor(newInvestigationRunnerToolExecutorMock())
@@ -92,9 +92,9 @@ func TestAlertHandler_Handle_CriticalAlert_StartsInvestigation(t *testing.T) {
 		IgnoredSources:          []string{},
 	}
 
-	handler := NewAlertHandler(uc, config, logger.NewNop())
+	handler := NewAlertHandler(uc, config, port.NopLogger{})
 	if handler == nil {
-		t.Fatal("NewAlertHandler(, logger.NewNop()) returned nil")
+		t.Fatal("NewAlertHandler(, port.NopLogger{}) returned nil")
 	}
 
 	alert := &AlertForInvestigation{
@@ -116,9 +116,9 @@ func TestAlertHandler_Handle_CriticalAlert_StartsInvestigation(t *testing.T) {
 
 func TestAlertHandler_Handle_CriticalAlert_AutoInvestigateDisabled(t *testing.T) {
 	// Arrange
-	uc := NewAlertInvestigationUseCase(logger.NewNop())
+	uc := NewAlertInvestigationUseCase(port.NopLogger{})
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
+		t.Skip("NewAlertInvestigationUseCase(port.NopLogger{}) returned nil")
 	}
 
 	config := AlertHandlerConfig{
@@ -127,9 +127,9 @@ func TestAlertHandler_Handle_CriticalAlert_AutoInvestigateDisabled(t *testing.T)
 		IgnoredSources:          []string{},
 	}
 
-	handler := NewAlertHandler(uc, config, logger.NewNop())
+	handler := NewAlertHandler(uc, config, port.NopLogger{})
 	if handler == nil {
-		t.Fatal("NewAlertHandler(, logger.NewNop()) returned nil")
+		t.Fatal("NewAlertHandler(, port.NopLogger{}) returned nil")
 	}
 
 	alert := &AlertForInvestigation{
@@ -158,9 +158,9 @@ func TestAlertHandler_Handle_CriticalAlert_AutoInvestigateDisabled(t *testing.T)
 
 func TestAlertHandler_Handle_WarningAlert_ConfigEnabled(t *testing.T) {
 	// Arrange
-	uc := NewAlertInvestigationUseCase(logger.NewNop())
+	uc := NewAlertInvestigationUseCase(port.NopLogger{})
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
+		t.Skip("NewAlertInvestigationUseCase(port.NopLogger{}) returned nil")
 	}
 	uc.SetConversationService(newInvestigationRunnerConvServiceMock())
 	uc.SetToolExecutor(newInvestigationRunnerToolExecutorMock())
@@ -172,9 +172,9 @@ func TestAlertHandler_Handle_WarningAlert_ConfigEnabled(t *testing.T) {
 		IgnoredSources:          []string{},
 	}
 
-	handler := NewAlertHandler(uc, config, logger.NewNop())
+	handler := NewAlertHandler(uc, config, port.NopLogger{})
 	if handler == nil {
-		t.Fatal("NewAlertHandler(, logger.NewNop()) returned nil")
+		t.Fatal("NewAlertHandler(, port.NopLogger{}) returned nil")
 	}
 
 	alert := &AlertForInvestigation{
@@ -196,9 +196,9 @@ func TestAlertHandler_Handle_WarningAlert_ConfigEnabled(t *testing.T) {
 
 func TestAlertHandler_Handle_WarningAlert_ConfigDisabled(t *testing.T) {
 	// Arrange
-	uc := NewAlertInvestigationUseCase(logger.NewNop())
+	uc := NewAlertInvestigationUseCase(port.NopLogger{})
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
+		t.Skip("NewAlertInvestigationUseCase(port.NopLogger{}) returned nil")
 	}
 
 	config := AlertHandlerConfig{
@@ -207,9 +207,9 @@ func TestAlertHandler_Handle_WarningAlert_ConfigDisabled(t *testing.T) {
 		IgnoredSources:          []string{},
 	}
 
-	handler := NewAlertHandler(uc, config, logger.NewNop())
+	handler := NewAlertHandler(uc, config, port.NopLogger{})
 	if handler == nil {
-		t.Fatal("NewAlertHandler(, logger.NewNop()) returned nil")
+		t.Fatal("NewAlertHandler(, port.NopLogger{}) returned nil")
 	}
 
 	alert := &AlertForInvestigation{
@@ -237,9 +237,9 @@ func TestAlertHandler_Handle_WarningAlert_ConfigDisabled(t *testing.T) {
 
 func TestAlertHandler_Handle_InfoAlert_NeverAutoInvestigates(t *testing.T) {
 	// Arrange
-	uc := NewAlertInvestigationUseCase(logger.NewNop())
+	uc := NewAlertInvestigationUseCase(port.NopLogger{})
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
+		t.Skip("NewAlertInvestigationUseCase(port.NopLogger{}) returned nil")
 	}
 
 	config := AlertHandlerConfig{
@@ -248,9 +248,9 @@ func TestAlertHandler_Handle_InfoAlert_NeverAutoInvestigates(t *testing.T) {
 		IgnoredSources:          []string{},
 	}
 
-	handler := NewAlertHandler(uc, config, logger.NewNop())
+	handler := NewAlertHandler(uc, config, port.NopLogger{})
 	if handler == nil {
-		t.Fatal("NewAlertHandler(, logger.NewNop()) returned nil")
+		t.Fatal("NewAlertHandler(, port.NopLogger{}) returned nil")
 	}
 
 	alert := &AlertForInvestigation{
@@ -281,9 +281,9 @@ func TestAlertHandler_Handle_RespectsMaxConcurrent(t *testing.T) {
 	ucConfig := AlertInvestigationUseCaseConfig{
 		MaxConcurrent: 2, // Only allow 2 concurrent investigations
 	}
-	uc := NewAlertInvestigationUseCaseWithConfig(ucConfig, logger.NewNop())
+	uc := NewAlertInvestigationUseCaseWithConfig(ucConfig, port.NopLogger{})
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCaseWithConfig(, logger.NewNop()) returned nil")
+		t.Skip("NewAlertInvestigationUseCaseWithConfig(, port.NopLogger{}) returned nil")
 	}
 
 	handlerConfig := AlertHandlerConfig{
@@ -292,9 +292,9 @@ func TestAlertHandler_Handle_RespectsMaxConcurrent(t *testing.T) {
 		IgnoredSources:          []string{},
 	}
 
-	handler := NewAlertHandler(uc, handlerConfig, logger.NewNop())
+	handler := NewAlertHandler(uc, handlerConfig, port.NopLogger{})
 	if handler == nil {
-		t.Fatal("NewAlertHandler(, logger.NewNop()) returned nil")
+		t.Fatal("NewAlertHandler(, port.NopLogger{}) returned nil")
 	}
 
 	// Start max concurrent alerts
@@ -334,9 +334,9 @@ func TestAlertHandler_Handle_RespectsMaxConcurrent(t *testing.T) {
 
 func TestAlertHandler_Handle_IgnoredSources_SingleSource(t *testing.T) {
 	// Arrange
-	uc := NewAlertInvestigationUseCase(logger.NewNop())
+	uc := NewAlertInvestigationUseCase(port.NopLogger{})
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
+		t.Skip("NewAlertInvestigationUseCase(port.NopLogger{}) returned nil")
 	}
 
 	config := AlertHandlerConfig{
@@ -345,9 +345,9 @@ func TestAlertHandler_Handle_IgnoredSources_SingleSource(t *testing.T) {
 		IgnoredSources:          []string{"test-ignored"},
 	}
 
-	handler := NewAlertHandler(uc, config, logger.NewNop())
+	handler := NewAlertHandler(uc, config, port.NopLogger{})
 	if handler == nil {
-		t.Fatal("NewAlertHandler(, logger.NewNop()) returned nil")
+		t.Fatal("NewAlertHandler(, port.NopLogger{}) returned nil")
 	}
 
 	alert := &AlertForInvestigation{
@@ -371,9 +371,9 @@ func TestAlertHandler_Handle_IgnoredSources_SingleSource(t *testing.T) {
 
 func TestAlertHandler_Handle_IgnoredSources_MultipleIgnored(t *testing.T) {
 	// Arrange
-	uc := NewAlertInvestigationUseCase(logger.NewNop())
+	uc := NewAlertInvestigationUseCase(port.NopLogger{})
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
+		t.Skip("NewAlertInvestigationUseCase(port.NopLogger{}) returned nil")
 	}
 
 	config := AlertHandlerConfig{
@@ -382,9 +382,9 @@ func TestAlertHandler_Handle_IgnoredSources_MultipleIgnored(t *testing.T) {
 		IgnoredSources:          []string{"ignored-1", "ignored-2", "ignored-3"},
 	}
 
-	handler := NewAlertHandler(uc, config, logger.NewNop())
+	handler := NewAlertHandler(uc, config, port.NopLogger{})
 	if handler == nil {
-		t.Fatal("NewAlertHandler(, logger.NewNop()) returned nil")
+		t.Fatal("NewAlertHandler(, port.NopLogger{}) returned nil")
 	}
 
 	tests := []struct {
@@ -402,11 +402,11 @@ func TestAlertHandler_Handle_IgnoredSources_MultipleIgnored(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Reset use case
 			_ = uc.Shutdown(context.Background())
-			uc = NewAlertInvestigationUseCase(logger.NewNop())
+			uc = NewAlertInvestigationUseCase(port.NopLogger{})
 			uc.SetConversationService(newInvestigationRunnerConvServiceMock())
 			uc.SetToolExecutor(newInvestigationRunnerToolExecutorMock())
 			uc.SetPromptBuilderRegistry(newInvestigationRunnerPromptBuilderMock())
-			handler = NewAlertHandler(uc, config, logger.NewNop())
+			handler = NewAlertHandler(uc, config, port.NopLogger{})
 
 			alert := &AlertForInvestigation{
 				id:       "alert-" + tt.source,
@@ -430,9 +430,9 @@ func TestAlertHandler_Handle_IgnoredSources_MultipleIgnored(t *testing.T) {
 
 func TestAlertHandler_Handle_IgnoredSources_NotIgnored(t *testing.T) {
 	// Arrange
-	uc := NewAlertInvestigationUseCase(logger.NewNop())
+	uc := NewAlertInvestigationUseCase(port.NopLogger{})
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
+		t.Skip("NewAlertInvestigationUseCase(port.NopLogger{}) returned nil")
 	}
 	uc.SetConversationService(newInvestigationRunnerConvServiceMock())
 	uc.SetToolExecutor(newInvestigationRunnerToolExecutorMock())
@@ -444,9 +444,9 @@ func TestAlertHandler_Handle_IgnoredSources_NotIgnored(t *testing.T) {
 		IgnoredSources:          []string{"ignored-source"},
 	}
 
-	handler := NewAlertHandler(uc, config, logger.NewNop())
+	handler := NewAlertHandler(uc, config, port.NopLogger{})
 	if handler == nil {
-		t.Fatal("NewAlertHandler(, logger.NewNop()) returned nil")
+		t.Fatal("NewAlertHandler(, port.NopLogger{}) returned nil")
 	}
 
 	alert := &AlertForInvestigation{
@@ -472,18 +472,18 @@ func TestAlertHandler_Handle_IgnoredSources_NotIgnored(t *testing.T) {
 
 func TestAlertHandler_Handle_NilAlert(t *testing.T) {
 	// Arrange
-	uc := NewAlertInvestigationUseCase(logger.NewNop())
+	uc := NewAlertInvestigationUseCase(port.NopLogger{})
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
+		t.Skip("NewAlertInvestigationUseCase(port.NopLogger{}) returned nil")
 	}
 
 	config := AlertHandlerConfig{
 		AutoInvestigateCritical: true,
 	}
 
-	handler := NewAlertHandler(uc, config, logger.NewNop())
+	handler := NewAlertHandler(uc, config, port.NopLogger{})
 	if handler == nil {
-		t.Fatal("NewAlertHandler(, logger.NewNop()) returned nil")
+		t.Fatal("NewAlertHandler(, port.NopLogger{}) returned nil")
 	}
 
 	// Act
@@ -501,18 +501,18 @@ func TestAlertHandler_Handle_NilAlert(t *testing.T) {
 
 func TestAlertHandler_Handle_CancelledContext(t *testing.T) {
 	// Arrange
-	uc := NewAlertInvestigationUseCase(logger.NewNop())
+	uc := NewAlertInvestigationUseCase(port.NopLogger{})
 	if uc == nil {
-		t.Skip("NewAlertInvestigationUseCase(logger.NewNop()) returned nil")
+		t.Skip("NewAlertInvestigationUseCase(port.NopLogger{}) returned nil")
 	}
 
 	config := AlertHandlerConfig{
 		AutoInvestigateCritical: true,
 	}
 
-	handler := NewAlertHandler(uc, config, logger.NewNop())
+	handler := NewAlertHandler(uc, config, port.NopLogger{})
 	if handler == nil {
-		t.Fatal("NewAlertHandler(, logger.NewNop()) returned nil")
+		t.Fatal("NewAlertHandler(, port.NopLogger{}) returned nil")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
