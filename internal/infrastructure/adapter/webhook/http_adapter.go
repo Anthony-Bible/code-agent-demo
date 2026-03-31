@@ -65,6 +65,10 @@ func NewHTTPAdapter(
 	config HTTPAdapterConfig,
 	logger port.Logger,
 ) *HTTPAdapter {
+	// Ensure logger is never nil - for tests that create HTTPAdapter via struct literals
+	if logger == nil {
+		logger = port.NopLogger{}
+	}
 	invCtx, invCancel := context.WithCancel(context.Background())
 	adapter := &HTTPAdapter{
 		sourceManager: sourceManager,
