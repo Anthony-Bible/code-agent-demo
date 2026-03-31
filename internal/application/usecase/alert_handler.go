@@ -55,15 +55,11 @@ type AlertHandler struct {
 //
 // Note: This constructor does not validate the use case parameter.
 // Use NewAlertHandlerWithValidation if nil checking is required.
-func NewAlertHandler(uc *AlertInvestigationUseCase, config AlertHandlerConfig, logger port.Logger) *AlertHandler {
-	// Ensure logger is never nil - for tests that create AlertHandler via struct literals
-	if logger == nil {
-		logger = port.NopLogger{}
-	}
+func NewAlertHandler(uc *AlertInvestigationUseCase, config AlertHandlerConfig, log port.Logger) *AlertHandler {
 	return &AlertHandler{
 		investigationUseCase: uc,
 		config:               config,
-		logger:               logger,
+		logger:               port.SafeLogger(log),
 	}
 }
 
@@ -76,18 +72,15 @@ func NewAlertHandler(uc *AlertInvestigationUseCase, config AlertHandlerConfig, l
 func NewAlertHandlerWithValidation(
 	uc *AlertInvestigationUseCase,
 	config AlertHandlerConfig,
-	logger port.Logger,
+	log port.Logger,
 ) (*AlertHandler, error) {
 	if uc == nil {
 		return nil, ErrNilUseCase
 	}
-	if logger == nil {
-		logger = port.NopLogger{}
-	}
 	return &AlertHandler{
 		investigationUseCase: uc,
 		config:               config,
-		logger:               logger,
+		logger:               port.SafeLogger(log),
 	}, nil
 }
 

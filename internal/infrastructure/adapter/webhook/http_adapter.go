@@ -63,12 +63,8 @@ type HTTPAdapter struct {
 func NewHTTPAdapter(
 	sourceManager port.AlertSourceManager,
 	config HTTPAdapterConfig,
-	logger port.Logger,
+	log port.Logger,
 ) *HTTPAdapter {
-	// Ensure logger is never nil - for tests that create HTTPAdapter via struct literals
-	if logger == nil {
-		logger = port.NopLogger{}
-	}
 	invCtx, invCancel := context.WithCancel(context.Background())
 	adapter := &HTTPAdapter{
 		sourceManager: sourceManager,
@@ -76,7 +72,7 @@ func NewHTTPAdapter(
 		mux:           http.NewServeMux(),
 		invCtx:        invCtx,
 		invCancel:     invCancel,
-		logger:        logger,
+		logger:        port.SafeLogger(log),
 	}
 	adapter.registerRoutes()
 	return adapter

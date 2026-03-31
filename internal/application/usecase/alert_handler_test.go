@@ -1,10 +1,10 @@
 package usecase
 
 import (
-	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 	"context"
 	"testing"
 
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 )
 
 // =============================================================================

@@ -51,14 +51,10 @@ type RCAService struct {
 }
 
 // NewRCAService creates a new RCAService.
-func NewRCAService(aiProvider port.AIProvider, logger port.Logger) *RCAService {
-	// Ensure logger is never nil - for tests that create RCAService via struct literals
-	if logger == nil {
-		logger = port.NopLogger{}
-	}
+func NewRCAService(aiProvider port.AIProvider, log port.Logger) *RCAService {
 	return &RCAService{
 		aiProvider: aiProvider,
-		logger:     logger,
+		logger:     port.SafeLogger(log),
 	}
 }
 

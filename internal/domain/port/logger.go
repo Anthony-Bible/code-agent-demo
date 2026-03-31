@@ -46,3 +46,12 @@ var nopLoggerInstance = &NopLogger{}
 // With returns the same NopLogger instance since it has no state.
 // This returns a singleton to avoid unnecessary allocations on each call.
 func (NopLogger) With(_ ...any) Logger { return nopLoggerInstance }
+
+// SafeLogger returns the provided logger, or a no-op logger if nil.
+// Use this in constructors to ensure the logger field is never nil.
+func SafeLogger(l Logger) Logger {
+	if l == nil {
+		return NopLogger{}
+	}
+	return l
+}

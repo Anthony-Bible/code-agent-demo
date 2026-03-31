@@ -21,6 +21,7 @@
 package logger
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -50,18 +51,7 @@ func (s *slogLogger) Info(msg string, args ...any)  { s.l.Info(msg, args...) }
 func (s *slogLogger) Warn(msg string, args ...any)  { s.l.Warn(msg, args...) }
 func (s *slogLogger) Error(msg string, args ...any) { s.l.Error(msg, args...) }
 func (s *slogLogger) Log(level string, msg string, args ...any) {
-	switch strings.ToLower(level) {
-	case "debug":
-		s.l.Debug(msg, args...)
-	case "info":
-		s.l.Info(msg, args...)
-	case "warn", "warning":
-		s.l.Warn(msg, args...)
-	case "error":
-		s.l.Error(msg, args...)
-	default:
-		s.l.Info(msg, args...)
-	}
+	s.l.Log(context.Background(), parseLevel(level), msg, args...)
 }
 
 // With returns a new Logger that includes the given key-value pairs in every

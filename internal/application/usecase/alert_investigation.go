@@ -233,30 +233,24 @@ type activeInvestigation struct {
 //
 // Safety settings (allowed tools, blocked commands, action limits, timeouts)
 // are configured via SetSafetyEnforcer().
-func NewAlertInvestigationUseCase(logger port.Logger) *AlertInvestigationUseCase {
-	if logger == nil {
-		logger = port.NopLogger{}
-	}
+func NewAlertInvestigationUseCase(log port.Logger) *AlertInvestigationUseCase {
 	return &AlertInvestigationUseCase{
 		config: AlertInvestigationUseCaseConfig{
 			MaxConcurrent: 5,
 		},
 		activeInvestigations: make(map[string]*activeInvestigation),
 		alertToInvestigation: make(map[string]string),
-		logger:               logger,
+		logger:               port.SafeLogger(log),
 	}
 }
 
 // NewAlertInvestigationUseCaseWithConfig creates a use case with custom configuration.
-func NewAlertInvestigationUseCaseWithConfig(config AlertInvestigationUseCaseConfig, logger port.Logger) *AlertInvestigationUseCase {
-	if logger == nil {
-		logger = port.NopLogger{}
-	}
+func NewAlertInvestigationUseCaseWithConfig(config AlertInvestigationUseCaseConfig, log port.Logger) *AlertInvestigationUseCase {
 	return &AlertInvestigationUseCase{
 		config:               config,
 		activeInvestigations: make(map[string]*activeInvestigation),
 		alertToInvestigation: make(map[string]string),
-		logger:               logger,
+		logger:               port.SafeLogger(log),
 	}
 }
 

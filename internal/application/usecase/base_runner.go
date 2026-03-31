@@ -45,16 +45,12 @@ type BaseRunner struct {
 }
 
 // newBaseRunner creates a BaseRunner with the given dependencies.
-func newBaseRunner(convService ConversationServiceInterface, toolExecutor port.ToolExecutor, permChecker ToolPermissionChecker, logger port.Logger) BaseRunner {
-	// Ensure logger is never nil - for tests that create BaseRunner via struct literals
-	if logger == nil {
-		logger = port.NopLogger{}
-	}
+func newBaseRunner(convService ConversationServiceInterface, toolExecutor port.ToolExecutor, permChecker ToolPermissionChecker, log port.Logger) BaseRunner {
 	return BaseRunner{
 		ConvService:       convService,
 		ToolExecutor:      toolExecutor,
 		PermissionChecker: permChecker,
-		logger:            logger,
+		logger:            port.SafeLogger(log),
 	}
 }
 

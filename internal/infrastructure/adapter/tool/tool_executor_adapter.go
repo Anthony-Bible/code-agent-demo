@@ -104,18 +104,14 @@ func toRawMessage(input interface{}) (json.RawMessage, error) {
 // SkillManager can be provided via SetSkillManager for skill-related functionality.
 // SubagentManager can be provided via SetSubagentManager for subagent-related functionality.
 // It also registers the default tools (read_file, list_files, edit_file, bash, fetch, activate_skill).
-func NewExecutorAdapter(fileManager port.FileManager, logger port.Logger) *ExecutorAdapter {
-	// Ensure logger is never nil - for tests that create ExecutorAdapter via struct literals
-	if logger == nil {
-		logger = port.NopLogger{}
-	}
+func NewExecutorAdapter(fileManager port.FileManager, log port.Logger) *ExecutorAdapter {
 	adapter := &ExecutorAdapter{
 		fileManager:         fileManager,
 		skillManager:        nil,
 		subagentManager:     nil,
 		tools:               make(map[string]entity.Tool),
 		investigationStates: make(map[string]string),
-		logger:              logger,
+		logger:              port.SafeLogger(log),
 	}
 
 	// Register default tools
