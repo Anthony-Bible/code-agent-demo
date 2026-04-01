@@ -375,7 +375,7 @@ func (h *investigationRunnerTestHarness) build() *InvestigationRunner {
 	h.t.Helper()
 	return NewInvestigationRunner(
 		h.convService, h.toolExecutor, h.safetyEnforcer, h.promptBuilder,
-		nil, nil, nil, h.config,
+		nil, nil, nil, h.config, port.NopLogger{},
 	)
 }
 
@@ -1126,7 +1126,7 @@ func TestNewInvestigationRunner_NotNil(t *testing.T) {
 	h := newTestHarness(t)
 	runner := h.build()
 	if runner == nil {
-		t.Error("NewInvestigationRunner() should not return nil")
+		t.Error("NewInvestigationRunner(, port.NopLogger{}) should not return nil")
 	}
 }
 
@@ -1529,7 +1529,7 @@ func TestInvestigationRunner_PersistsToStore(t *testing.T) {
 		nil, // rcaService
 		nil, // uiAdapter
 		store,
-		h.config,
+		h.config, port.NopLogger{},
 	)
 
 	alert := createTestAlert("alert-store", "warning", "Test")
@@ -1573,7 +1573,7 @@ func TestInvestigationRunner_UpdatesStoreOnCompletion(t *testing.T) {
 		nil, // rcaService
 		nil, // uiAdapter
 		store,
-		h.config,
+		h.config, port.NopLogger{},
 	)
 
 	alert := createTestAlert("alert-store-update", "warning", "Test")
@@ -1607,7 +1607,7 @@ func TestInvestigationRunner_UpdatesStoreOnError(t *testing.T) {
 		nil, // rcaService
 		nil, // uiAdapter
 		store,
-		h.config,
+		h.config, port.NopLogger{},
 	)
 
 	alert := createTestAlert("alert-store-error", "warning", "Test")
@@ -1983,6 +1983,7 @@ func TestNewInvestigationRunner_WithNilDependencies(t *testing.T) {
 				nil, // rcaService
 				nil, // uiAdapter
 				AlertInvestigationUseCaseConfig{},
+				port.NopLogger{},
 			)
 		})
 	}
@@ -2001,11 +2002,11 @@ func TestNewInvestigationRunnerWithStore_NotNil(t *testing.T) {
 		nil, // rcaService
 		nil, // uiAdapter
 		store,
-		h.config,
+		h.config, port.NopLogger{},
 	)
 
 	if runner == nil {
-		t.Error("NewInvestigationRunnerWithStore() should not return nil")
+		t.Error("NewInvestigationRunnerWithStore(, port.NopLogger{}) should not return nil")
 	}
 }
 
@@ -3366,7 +3367,7 @@ func TestInvestigationRunner_DisplayThinkingViaUIAdapter(t *testing.T) {
 		nil, // skillManager
 		nil, // rcaService
 		uiAdapter,
-		h.config,
+		h.config, port.NopLogger{},
 	)
 
 	alert := createTestAlert("alert-1", "critical", "Test")
@@ -3485,7 +3486,7 @@ func TestInvestigationRunner_RCA(t *testing.T) {
 		nil, // skillManager
 		rcaService,
 		nil, // uiAdapter
-		h.config,
+		h.config, port.NopLogger{},
 	)
 
 	alert := createTestAlert("alert-rca", "critical", "RCA Test")
@@ -3546,7 +3547,7 @@ func TestInvestigationRunner_RCA_Escalated(t *testing.T) {
 		nil, // skillManager
 		rcaService,
 		nil, // uiAdapter
-		h.config,
+		h.config, port.NopLogger{},
 	)
 
 	alert := createTestAlert("alert-escalate-rca", "critical", "Escalate RCA Test")

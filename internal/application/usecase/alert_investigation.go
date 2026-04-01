@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
@@ -217,6 +216,7 @@ type AlertInvestigationUseCase struct {
 	rcaReporter           port.RCAReporter                // Reporter for RCA findings
 	shutdown              bool                            // True after Shutdown is called
 	idCounter             int64                           // Counter for generating unique IDs
+	logger                port.Logger                     // Structured logger
 }
 
 // activeInvestigation tracks a running investigation.
@@ -233,22 +233,24 @@ type activeInvestigation struct {
 //
 // Safety settings (allowed tools, blocked commands, action limits, timeouts)
 // are configured via SetSafetyEnforcer().
-func NewAlertInvestigationUseCase() *AlertInvestigationUseCase {
+func NewAlertInvestigationUseCase(log port.Logger) *AlertInvestigationUseCase {
 	return &AlertInvestigationUseCase{
 		config: AlertInvestigationUseCaseConfig{
 			MaxConcurrent: 5,
 		},
 		activeInvestigations: make(map[string]*activeInvestigation),
 		alertToInvestigation: make(map[string]string),
+		logger:               port.SafeLogger(log),
 	}
 }
 
 // NewAlertInvestigationUseCaseWithConfig creates a use case with custom configuration.
-func NewAlertInvestigationUseCaseWithConfig(config AlertInvestigationUseCaseConfig) *AlertInvestigationUseCase {
+func NewAlertInvestigationUseCaseWithConfig(config AlertInvestigationUseCaseConfig, log port.Logger) *AlertInvestigationUseCase {
 	return &AlertInvestigationUseCase{
 		config:               config,
 		activeInvestigations: make(map[string]*activeInvestigation),
 		alertToInvestigation: make(map[string]string),
+		logger:               port.SafeLogger(log),
 	}
 }
 
@@ -329,6 +331,7 @@ func (uc *AlertInvestigationUseCase) RunInvestigation(
 		rcaService,
 		uiAdapter,
 		config,
+		uc.logger,
 	)
 	result, err := runner.Run(ctx, alert, invID)
 	if err != nil {
@@ -397,11 +400,10 @@ func (uc *AlertInvestigationUseCase) StartInvestigation(
 
 	// Persist to store if configured
 	if uc.investigationStore != nil {
+		log := uc.logger.With("investigation_id", invID)
 		stub := newSimpleInvestigationRecord(invID, alert.ID(), "", "started")
 		if err := uc.investigationStore.Store(ctx, stub); err != nil {
-			slog.Error("failed to store investigation",
-				"investigation_id", invID,
-				"error", err)
+			log.Error("failed to store investigation", "error", err)
 		}
 	}
 
@@ -430,11 +432,10 @@ func (uc *AlertInvestigationUseCase) StopInvestigation(ctx context.Context, invI
 
 	// Update store with stopped status if configured
 	if uc.investigationStore != nil {
+		log := uc.logger.With("investigation_id", invID)
 		stub := newSimpleInvestigationRecord(invID, inv.alertID, "", "stopped")
 		if err := uc.investigationStore.Update(ctx, stub); err != nil {
-			slog.Error("failed to update investigation",
-				"investigation_id", invID,
-				"error", err)
+			log.Error("failed to update investigation", "error", err)
 		}
 	}
 

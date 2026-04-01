@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
 // bashOutput represents the expected output structure from bash tool.
@@ -20,7 +21,7 @@ type bashOutputTest struct {
 
 func TestBashTool_Registration(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	tools, err := adapter.ListTools()
 	if err != nil {
@@ -42,7 +43,7 @@ func TestBashTool_Registration(t *testing.T) {
 
 func TestBashTool_BasicExecution(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	input := `{"command": "echo hello", "dangerous": false}`
 	result, err := adapter.ExecuteTool(context.Background(), "bash", input)
@@ -68,7 +69,7 @@ func TestBashTool_BasicExecution(t *testing.T) {
 
 func TestBashTool_StderrCapture(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	input := `{"command": "echo error >&2", "dangerous": false}`
 	result, err := adapter.ExecuteTool(context.Background(), "bash", input)
@@ -88,7 +89,7 @@ func TestBashTool_StderrCapture(t *testing.T) {
 
 func TestBashTool_ExitCode(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	input := `{"command": "exit 42", "dangerous": false}`
 	result, err := adapter.ExecuteTool(context.Background(), "bash", input)
@@ -108,7 +109,7 @@ func TestBashTool_ExitCode(t *testing.T) {
 
 func TestBashTool_Timeout(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	input := `{"command": "sleep 5", "timeout_ms": 100, "dangerous": false}`
 	_, err := adapter.ExecuteTool(context.Background(), "bash", input)
@@ -123,7 +124,7 @@ func TestBashTool_Timeout(t *testing.T) {
 
 func TestBashTool_DangerousCommandBlocked(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 	// No callback set - dangerous commands should be blocked
 
 	// LLM incorrectly marks as safe, but patterns detect dangerous
@@ -140,7 +141,7 @@ func TestBashTool_DangerousCommandBlocked(t *testing.T) {
 
 func TestBashTool_DangerousCommandDenied(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Set callback that returns false
 	adapter.SetCommandConfirmationCallback(func(_ string, _ bool, _, _ string) bool {
@@ -160,7 +161,7 @@ func TestBashTool_DangerousCommandDenied(t *testing.T) {
 
 func TestBashTool_DangerousCommandAllowed(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Set callback that returns true (user confirmed)
 	adapter.SetCommandConfirmationCallback(func(_ string, _ bool, _, _ string) bool {
@@ -195,7 +196,7 @@ func TestBashTool_DangerousCommandAllowed(t *testing.T) {
 
 func TestBashTool_DangerousPatterns(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 	// No callback - all dangerous commands should be blocked
 
 	dangerousCases := []struct {
@@ -225,7 +226,7 @@ func TestBashTool_DangerousPatterns(t *testing.T) {
 
 func TestBashTool_EmptyCommand(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	input := `{"command": "", "dangerous": false}`
 	_, err := adapter.ExecuteTool(context.Background(), "bash", input)
@@ -236,7 +237,7 @@ func TestBashTool_EmptyCommand(t *testing.T) {
 
 func TestBashTool_MixedOutput(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	input := `{"command": "echo stdout; echo stderr >&2", "dangerous": false}`
 	result, err := adapter.ExecuteTool(context.Background(), "bash", input)
@@ -259,7 +260,7 @@ func TestBashTool_MixedOutput(t *testing.T) {
 
 func TestBashTool_CommandNotFound(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	input := `{"command": "nonexistent_command_xyz123", "dangerous": false}`
 	result, err := adapter.ExecuteTool(context.Background(), "bash", input)
@@ -280,7 +281,7 @@ func TestBashTool_CommandNotFound(t *testing.T) {
 
 func TestBashTool_DangerousPatternVariations(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	dangerousCases := []struct {
 		name    string
@@ -323,7 +324,7 @@ type callbackInvocation struct {
 
 func TestBashTool_AllCommandsConfirmation_CallbackCalledForNonDangerous(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	var invocations []callbackInvocation
 
@@ -373,7 +374,7 @@ func TestBashTool_AllCommandsConfirmation_CallbackCalledForNonDangerous(t *testi
 
 func TestBashTool_AllCommandsConfirmation_CallbackCalledForDangerous(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	var invocations []callbackInvocation
 
@@ -419,7 +420,7 @@ func TestBashTool_AllCommandsConfirmation_CallbackCalledForDangerous(t *testing.
 
 func TestBashTool_AllCommandsConfirmation_NonDangerousDenied(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Set CommandConfirmationCallback that denies all commands
 	adapter.SetCommandConfirmationCallback(func(_ string, _ bool, _, _ string) bool {
@@ -441,7 +442,7 @@ func TestBashTool_AllCommandsConfirmation_NonDangerousDenied(t *testing.T) {
 
 func TestBashTool_AllCommandsConfirmation_NoCallbackNonDangerousProceeds(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Explicitly do NOT set any callback - backward compatible behavior
 	// Non-dangerous commands should proceed without requiring confirmation
@@ -467,7 +468,7 @@ func TestBashTool_AllCommandsConfirmation_NoCallbackNonDangerousProceeds(t *test
 
 func TestBashTool_LLMSpecifiedDangerous(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	var invocations []callbackInvocation
 
@@ -511,7 +512,7 @@ func TestBashTool_LLMSpecifiedDangerous(t *testing.T) {
 
 func TestBashTool_LLMSpecifiedDangerous_CombinesWithPatternDetection(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	var invocations []callbackInvocation
 
@@ -553,7 +554,7 @@ func TestBashTool_LLMSpecifiedDangerous_CombinesWithPatternDetection(t *testing.
 
 func TestBashTool_LLMFailedToIdentifyDangerous(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	var invocations []callbackInvocation
 
@@ -605,7 +606,7 @@ func TestBashTool_LLMFailedToIdentifyDangerous(t *testing.T) {
 
 func TestFetchTool_Registration(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	tools, err := adapter.ListTools()
 	if err != nil {
@@ -642,7 +643,7 @@ func TestFetchTool_Registration(t *testing.T) {
 
 func TestFetchTool_SimpleTextFetch(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Use a public test server
 	serverURL := "https://httpbin.org/robots.txt"
@@ -661,7 +662,7 @@ func TestFetchTool_SimpleTextFetch(t *testing.T) {
 
 func TestFetchTool_HTMLToTextConversion(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Use a public test server that returns simple HTML
 	serverURL := "https://httpbin.org/html"
@@ -686,7 +687,7 @@ func TestFetchTool_HTMLToTextConversion(t *testing.T) {
 
 func TestFetchTool_IncludeMarkup(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Use a public test server that returns HTML
 	serverURL := "https://httpbin.org/html"
@@ -714,7 +715,7 @@ func TestFetchTool_IncludeMarkup(t *testing.T) {
 
 func TestFetchTool_HTTPError(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Use a public test server that returns 404
 	serverURL := "https://httpbin.org/status/404"
@@ -732,7 +733,7 @@ func TestFetchTool_HTTPError(t *testing.T) {
 
 func TestFetchTool_403AuthorizationError(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Use a public test server that returns 403
 	serverURL := "https://httpbin.org/status/403"
@@ -750,7 +751,7 @@ func TestFetchTool_403AuthorizationError(t *testing.T) {
 
 func TestFetchTool_InvalidURL(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	testCases := []struct {
 		name string
@@ -776,7 +777,7 @@ func TestFetchTool_InvalidURL(t *testing.T) {
 
 func TestFetchTool_EmptyURL(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	input := `{"url": ""}`
 	_, err := adapter.ExecuteTool(context.Background(), "fetch", input)
@@ -791,7 +792,7 @@ func TestFetchTool_EmptyURL(t *testing.T) {
 
 func TestFetchTool_MissingURL(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	input := `{"includeMarkup": true}`
 	_, err := adapter.ExecuteTool(context.Background(), "fetch", input)
@@ -806,7 +807,7 @@ func TestFetchTool_MissingURL(t *testing.T) {
 
 func TestFetchTool_ContextCancel(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Use a public test server that delays response
 	serverURL := "https://httpbin.org/delay/2"
@@ -834,7 +835,7 @@ func TestFetchTool_ContextCancel(t *testing.T) {
 
 func TestFetchTool_NonHTMLContentKeepOriginal(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Use a public test server that returns JSON content
 	serverURL := "https://httpbin.org/json"
@@ -859,7 +860,7 @@ func TestFetchTool_NonHTMLContentKeepOriginal(t *testing.T) {
 
 func TestFetchTool_RedirectPolicyLimit(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// This endpoint will redirect multiple times to test our redirect limit
 	// httpbin.org/relative-redirect/3 creates 3 redirects
@@ -887,7 +888,7 @@ func TestFetchTool_RedirectPolicyLimit(t *testing.T) {
 
 func TestFetchTool_ExcessiveRedirectsBlocked(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// This endpoint will create 5 redirects, which should exceed our limit of 3
 	serverURL := "https://httpbin.org/relative-redirect/5"
@@ -903,7 +904,7 @@ func TestFetchTool_ExcessiveRedirectsBlocked(t *testing.T) {
 
 func TestFetchTool_RedirectToPrivateIPBlocked(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// We'll use a test that simulates a redirect to a private IP
 	// Since we can't easily set up a server that redirects to private IPs,
@@ -922,7 +923,7 @@ func TestFetchTool_RedirectToPrivateIPBlocked(t *testing.T) {
 
 func TestFetchTool_RedirectURLWithCredentialsBlocked(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Test that URLs with credentials in redirect are blocked
 	credsURL := "http://user:pass@example.com"
@@ -937,7 +938,7 @@ func TestFetchTool_RedirectURLWithCredentialsBlocked(t *testing.T) {
 
 func TestFetchTool_ContentLengthHandling(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Test case 1: Normal content-Length handling with public server
 	t.Run("Content-Length header present", func(t *testing.T) {
@@ -985,7 +986,7 @@ func TestFetchTool_ContentLengthHandling(t *testing.T) {
 
 func TestFetchTool_MalformedInput(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	testCases := []string{
 		`{"url": 123}`,
@@ -1006,7 +1007,7 @@ func TestFetchTool_MalformedInput(t *testing.T) {
 
 func TestFetchTool_SSFRProtection_BlockPrivateIPs(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	testCases := []struct {
 		name string
@@ -1040,7 +1041,7 @@ func TestFetchTool_SSFRProtection_BlockPrivateIPs(t *testing.T) {
 
 func TestFetchTool_SSFRProtection_BlockHostnamesResolvingToPrivateIPs(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// We can't actually resolve internal hostnames in the test environment,
 	// but we can test the mechanism by using hostnames that might resolve to private IPs
@@ -1072,7 +1073,7 @@ func TestFetchTool_SSFRProtection_BlockHostnamesResolvingToPrivateIPs(t *testing
 
 func TestFetchTool_SSFRProtection_AllowPublicIPs(t *testing.T) {
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Test with a real public URL (httpbin.org for testing)
 	// This tests that public IPs/domains work correctly

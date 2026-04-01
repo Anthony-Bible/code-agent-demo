@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"sync"
 	"time"
 
@@ -57,12 +56,14 @@ type HTTPAdapter struct {
 	invCtx            context.Context
 	invCancel         context.CancelFunc
 	started           bool
+	logger            port.Logger
 }
 
 // NewHTTPAdapter creates a new webhook HTTP adapter.
 func NewHTTPAdapter(
 	sourceManager port.AlertSourceManager,
 	config HTTPAdapterConfig,
+	log port.Logger,
 ) *HTTPAdapter {
 	invCtx, invCancel := context.WithCancel(context.Background())
 	adapter := &HTTPAdapter{
@@ -71,6 +72,7 @@ func NewHTTPAdapter(
 		mux:           http.NewServeMux(),
 		invCtx:        invCtx,
 		invCancel:     invCancel,
+		logger:        port.SafeLogger(log),
 	}
 	adapter.registerRoutes()
 	return adapter
@@ -189,10 +191,12 @@ func (a *HTTPAdapter) handleWebhookAsync(
 	var startErrors int
 
 	for _, alert := range alerts {
+		log := a.logger.With("alert_id", alert.ID())
+
 		// Start investigation and get ID (non-blocking)
 		invID, err := asyncHandler(context.Background(), alert)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[Webhook] Failed to start investigation for alert %s: %v\n", alert.ID(), err)
+			log.Error("Failed to start investigation for alert", "error", err)
 			startErrors++
 			continue
 		}
@@ -206,13 +210,14 @@ func (a *HTTPAdapter) handleWebhookAsync(
 
 		// Run investigation in background
 		a.wg.Add(1)
-		go func(alert *entity.Alert, invID string) {
+		go func(invID string) {
 			defer a.wg.Done()
+			invLog := log.With("investigation_id", invID)
 			// Use investigation context so it can be cancelled during shutdown
 			if err := runner(a.invCtx, alert, invID); err != nil {
-				fmt.Fprintf(os.Stderr, "[Webhook] Async investigation %s failed: %v\n", invID, err)
+				invLog.Error("Async investigation failed", "error", err)
 			}
-		}(alert, invID)
+		}(invID)
 	}
 
 	// Return 202 Accepted immediately

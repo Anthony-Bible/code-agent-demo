@@ -15,6 +15,7 @@ import (
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/skill"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/tool"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
 // newTestSkillManager creates a skill manager for testing with only the specified directory.
@@ -206,7 +207,7 @@ This skill is used to test the activate_skill tool.
 	}
 
 	// Create tool executor and inject skill manager
-	toolExecutor := tool.NewExecutorAdapter(fileManager)
+	toolExecutor := tool.NewExecutorAdapter(fileManager, logger.NewNop())
 	toolExecutor.SetSkillManager(skillManager)
 
 	// Execute activate_skill tool
@@ -279,7 +280,7 @@ This skill is used to test metadata serialization.
 	}
 
 	// Create tool executor and inject skill manager
-	toolExecutor := tool.NewExecutorAdapter(fileManager)
+	toolExecutor := tool.NewExecutorAdapter(fileManager, logger.NewNop())
 	toolExecutor.SetSkillManager(skillManager)
 
 	// Execute activate_skill tool

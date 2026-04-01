@@ -11,6 +11,7 @@ import (
 
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/tool"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
 // =============================================================================
@@ -34,7 +35,7 @@ func newInvestigationTestHelper(t *testing.T) *investigationTestHelper {
 	t.Helper()
 	tempDir := t.TempDir()
 	fileManager := file.NewLocalFileManager(tempDir)
-	adapter := tool.NewExecutorAdapter(fileManager)
+	adapter := tool.NewExecutorAdapter(fileManager, logger.NewNop())
 	// Pre-register a default investigation ID for tests
 	adapter.RegisterInvestigation(defaultTestInvestigationID)
 	return &investigationTestHelper{

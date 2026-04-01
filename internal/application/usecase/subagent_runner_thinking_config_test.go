@@ -42,7 +42,7 @@ func TestSubagentRunner_UsesStaticConfig(t *testing.T) {
 	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
 		return convService, nil
 	}
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory, port.NopLogger{})
 	agent := createTestAgent("base-agent", "Test Agent")
 
 	// Act
@@ -92,7 +92,7 @@ func TestSubagentRunner_UsesAgentOverrides(t *testing.T) {
 	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
 		return convService, nil
 	}
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory, port.NopLogger{})
 
 	// Agent explicitly ENABLES thinking with custom budget
 	enabled := true
@@ -145,7 +145,7 @@ func TestSubagentRunner_AgentCanDisableThinking(t *testing.T) {
 	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
 		return convService, nil
 	}
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory, port.NopLogger{})
 
 	// Agent explicitly DISABLES thinking
 	disabled := false
@@ -190,7 +190,7 @@ func TestSubagentRunner_NoContextInheritance(t *testing.T) {
 	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
 		return convService, nil
 	}
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory, port.NopLogger{})
 	agent := createTestAgent("no-inherit", "No Inherit Agent")
 
 	// Pass context with thinking ENABLED (should NOT be used anymore)

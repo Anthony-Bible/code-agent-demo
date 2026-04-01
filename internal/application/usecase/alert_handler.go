@@ -5,9 +5,9 @@ package usecase
 import (
 	"context"
 	"errors"
-	"log/slog"
 
 	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 )
 
 // Alert severity constants used internally by the handler for decision making.
@@ -48,16 +48,18 @@ type AlertHandlerConfig struct {
 type AlertHandler struct {
 	investigationUseCase *AlertInvestigationUseCase
 	config               AlertHandlerConfig
+	logger               port.Logger
 }
 
-// NewAlertHandler creates a new AlertHandler with the given use case and config.
+// NewAlertHandler creates a new AlertHandler with the given use case, config, and logger.
 //
 // Note: This constructor does not validate the use case parameter.
 // Use NewAlertHandlerWithValidation if nil checking is required.
-func NewAlertHandler(uc *AlertInvestigationUseCase, config AlertHandlerConfig) *AlertHandler {
+func NewAlertHandler(uc *AlertInvestigationUseCase, config AlertHandlerConfig, log port.Logger) *AlertHandler {
 	return &AlertHandler{
 		investigationUseCase: uc,
 		config:               config,
+		logger:               port.SafeLogger(log),
 	}
 }
 
@@ -70,6 +72,7 @@ func NewAlertHandler(uc *AlertInvestigationUseCase, config AlertHandlerConfig) *
 func NewAlertHandlerWithValidation(
 	uc *AlertInvestigationUseCase,
 	config AlertHandlerConfig,
+	log port.Logger,
 ) (*AlertHandler, error) {
 	if uc == nil {
 		return nil, ErrNilUseCase
@@ -77,6 +80,7 @@ func NewAlertHandlerWithValidation(
 	return &AlertHandler{
 		investigationUseCase: uc,
 		config:               config,
+		logger:               port.SafeLogger(log),
 	}, nil
 }
 
@@ -111,25 +115,24 @@ func (h *AlertHandler) Handle(ctx context.Context, alert *AlertForInvestigation)
 	}
 
 	// All checks passed - start the investigation
-	slog.Info("Starting investigation for alert", //nolint:sloglint // keep global logger for now
-		"alert", alert.Title(),
-		"severity", alert.Severity())
+	log := h.logger.With("alert_id", alert.ID(), "severity", alert.Severity())
+	log.Info("Starting investigation for alert", "alert", alert.Title())
 
 	result, err := h.investigationUseCase.HandleAlert(ctx, alert)
 	if err != nil {
-		slog.Error("Investigation error", "error", err) //nolint:sloglint // keep global logger for now
+		log.Error("Investigation error", "error", err)
 		return err
 	}
 
-	slog.Info("Investigation completed", //nolint:sloglint // keep global logger for now
+	log.Info("Investigation completed",
 		"status", result.Status,
 		"findings", len(result.Findings),
 		"confidence", result.Confidence)
 
 	if len(result.Findings) > 0 {
-		slog.Info("Investigation findings", "count", len(result.Findings)) //nolint:sloglint // keep global logger for now
+		log.Info("Investigation findings", "count", len(result.Findings))
 		for i, finding := range result.Findings {
-			slog.Info("Finding", "index", i+1, "description", finding) //nolint:sloglint // keep global logger for now
+			log.Info("Finding", "index", i+1, "description", finding)
 		}
 	}
 
@@ -142,7 +145,7 @@ func (h *AlertHandler) Handle(ctx context.Context, alert *AlertForInvestigation)
 	}
 
 	if result.Escalated {
-		slog.Warn("ESCALATED", "reason", result.EscalateReason) //nolint:sloglint // keep global logger for now
+		log.Warn("ESCALATED", "reason", result.EscalateReason)
 	}
 	return nil
 }
@@ -261,21 +264,23 @@ func (h *AlertHandler) RunEntityAlertInvestigation(
 		labels:      alert.Labels(),
 	}
 
+	log := h.logger.With("alert_id", alert.ID(), "severity", alert.Severity())
+
 	result, err := h.investigationUseCase.RunInvestigation(ctx, invAlert, invID)
 	if err != nil {
-		slog.Error("Investigation error", "error", err) //nolint:sloglint // keep global logger for now
+		log.Error("Investigation error", "error", err)
 		return err
 	}
 
-	slog.Info("Investigation completed", //nolint:sloglint // keep global logger for now
+	log.Info("Investigation completed",
 		"status", result.Status,
 		"findings", len(result.Findings),
 		"confidence", result.Confidence)
 
 	if len(result.Findings) > 0 {
-		slog.Info("Investigation findings", "count", len(result.Findings)) //nolint:sloglint // keep global logger for now
+		log.Info("Investigation findings", "count", len(result.Findings))
 		for i, finding := range result.Findings {
-			slog.Info("Finding", "index", i+1, "description", finding) //nolint:sloglint // keep global logger for now
+			log.Info("Finding", "index", i+1, "description", finding)
 		}
 	}
 
@@ -288,7 +293,7 @@ func (h *AlertHandler) RunEntityAlertInvestigation(
 	}
 
 	if result.Escalated {
-		slog.Warn("ESCALATED", "reason", result.EscalateReason) //nolint:sloglint // keep global logger for now
+		log.Warn("ESCALATED", "reason", result.EscalateReason)
 	}
 	return nil
 }

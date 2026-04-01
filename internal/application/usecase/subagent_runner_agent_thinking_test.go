@@ -44,7 +44,7 @@ func TestSubagentRunner_AgentThinkingEnabled_OverridesStaticDisabled(t *testing.
 	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
 		return convService, nil
 	}
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory, port.NopLogger{})
 
 	// Agent specifies thinking_enabled: true (override)
 	agent := createTestAgent("agent-001", "Test Agent")
@@ -99,7 +99,7 @@ func TestSubagentRunner_AgentThinkingDisabled_OverridesStaticEnabled(t *testing.
 	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
 		return convService, nil
 	}
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory, port.NopLogger{})
 
 	// Agent specifies thinking_enabled: false (override)
 	agent := createTestAgent("agent-002", "Test Agent")
@@ -147,7 +147,7 @@ func TestSubagentRunner_AgentThinkingBudget_OverridesStaticBudget(t *testing.T) 
 	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
 		return convService, nil
 	}
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory, port.NopLogger{})
 
 	// Agent specifies thinking_budget: 15000 (override)
 	agent := createTestAgent("agent-004", "Test Agent")
@@ -198,7 +198,7 @@ func TestSubagentRunner_AgentThinkingOverride_NoContextFallsBackToStatic(t *test
 	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
 		return convService, nil
 	}
-	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory)
+	runner := NewSubagentRunner(convService, toolExecutor, aiProvider, nil, config, factory, port.NopLogger{})
 
 	// Agent does NOT specify thinking fields
 	agent := createTestAgent("agent-008", "Test Agent")

@@ -21,6 +21,7 @@ import (
 	"github.com/anthony-bible/code-agent-demo/internal/application/usecase"
 	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
 // =============================================================================
@@ -62,7 +63,7 @@ func (m *MockSubagentUseCase) SpawnDynamicSubagent(
 func TestTaskTool_RegisteredInDefaultTools(t *testing.T) {
 	// Arrange
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Act
 	tools, err := adapter.ListTools()
@@ -87,7 +88,7 @@ func TestTaskTool_RegisteredInDefaultTools(t *testing.T) {
 func TestTaskTool_HasCorrectSchema(t *testing.T) {
 	// Arrange
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Act
 	tool, exists := adapter.GetTool("task")
@@ -132,7 +133,7 @@ func TestTaskTool_HasCorrectSchema(t *testing.T) {
 func TestTaskTool_AppearsInListTools(t *testing.T) {
 	// Arrange
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Act
 	tools, err := adapter.ListTools()
@@ -168,7 +169,7 @@ func TestTaskTool_AppearsInListTools(t *testing.T) {
 func TestExecutorAdapter_SetSubagentUseCase_StoresUseCase(t *testing.T) {
 	// Arrange
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 	mockUseCase := &MockSubagentUseCase{}
 
 	// Act
@@ -192,7 +193,7 @@ func TestExecutorAdapter_SetSubagentUseCase_StoresUseCase(t *testing.T) {
 func TestExecutorAdapter_SetSubagentUseCase_MultipleCallsUpdate(t *testing.T) {
 	// Arrange
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	callCount := 0
 	firstUseCase := &MockSubagentUseCase{
@@ -243,7 +244,7 @@ func TestExecutorAdapter_SetSubagentUseCase_MultipleCallsUpdate(t *testing.T) {
 func TestExecutorAdapter_ExecuteTool_TaskSuccess(t *testing.T) {
 	// Arrange
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	mockUseCase := &MockSubagentUseCase{
 		SpawnSubagentFunc: func(_ context.Context, agentName string, _ string) (*usecase.SubagentResult, error) {
@@ -291,7 +292,7 @@ func TestExecutorAdapter_ExecuteTool_TaskSuccess(t *testing.T) {
 func TestExecutorAdapter_ExecuteTool_TaskEmptyAgentName(t *testing.T) {
 	// Arrange
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	mockUseCase := &MockSubagentUseCase{
 		SpawnSubagentFunc: func(_ context.Context, _ string, _ string) (*usecase.SubagentResult, error) {
@@ -323,7 +324,7 @@ func TestExecutorAdapter_ExecuteTool_TaskEmptyAgentName(t *testing.T) {
 func TestExecutorAdapter_ExecuteTool_TaskEmptyPrompt(t *testing.T) {
 	// Arrange
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	mockUseCase := &MockSubagentUseCase{
 		SpawnSubagentFunc: func(_ context.Context, _ string, _ string) (*usecase.SubagentResult, error) {
@@ -355,7 +356,7 @@ func TestExecutorAdapter_ExecuteTool_TaskEmptyPrompt(t *testing.T) {
 func TestExecutorAdapter_ExecuteTool_TaskSubagentUseCaseError(t *testing.T) {
 	// Arrange
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	expectedError := errors.New("subagent execution failed")
 	mockUseCase := &MockSubagentUseCase{
@@ -387,7 +388,7 @@ func TestExecutorAdapter_ExecuteTool_TaskSubagentUseCaseError(t *testing.T) {
 func TestExecutorAdapter_ExecuteTool_TaskResultFormattedAsJSON(t *testing.T) {
 	// Arrange
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	mockUseCase := &MockSubagentUseCase{
 		SpawnSubagentFunc: func(_ context.Context, _ string, _ string) (*usecase.SubagentResult, error) {
@@ -434,7 +435,7 @@ func TestExecutorAdapter_ExecuteTool_TaskResultFormattedAsJSON(t *testing.T) {
 func TestExecutorAdapter_ExecuteTool_TaskRecursionBlockedInSubagentContext(t *testing.T) {
 	// Arrange
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	mockUseCase := &MockSubagentUseCase{
 		SpawnSubagentFunc: func(_ context.Context, _ string, _ string) (*usecase.SubagentResult, error) {
@@ -476,7 +477,7 @@ func TestExecutorAdapter_ExecuteTool_TaskRecursionBlockedInSubagentContext(t *te
 func TestExecutorAdapter_TaskTool_EndToEnd(t *testing.T) {
 	// Arrange
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	// Track calls to verify execution flow
 	var capturedAgentName, capturedPrompt string
@@ -531,7 +532,7 @@ func TestExecutorAdapter_TaskTool_EndToEnd(t *testing.T) {
 func TestExecutorAdapter_TaskTool_MultipleSequentialExecutions(t *testing.T) {
 	// Arrange
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 
 	executionCount := 0
 	mockUseCase := &MockSubagentUseCase{
@@ -576,7 +577,7 @@ func TestExecutorAdapter_TaskTool_MultipleSequentialExecutions(t *testing.T) {
 func TestExecutorAdapter_TaskTool_UnavailableIfUseCaseNotSet(t *testing.T) {
 	// Arrange
 	fileManager := file.NewLocalFileManager(".")
-	adapter := NewExecutorAdapter(fileManager)
+	adapter := NewExecutorAdapter(fileManager, logger.NewNop())
 	// NOTE: Do NOT set SubagentUseCase
 
 	input := map[string]interface{}{

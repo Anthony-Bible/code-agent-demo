@@ -47,6 +47,9 @@ type Config struct {
 	// Serve contains configuration for the webhook server command.
 	Serve ServeConfig `mapstructure:"serve"`
 
+	// Log contains logging configuration.
+	Log LogConfig `mapstructure:"log"`
+
 	// CompactionThreshold is the total token count at which the conversation
 	// is automatically compacted (summarized) to manage context window size.
 	// Defaults to 160000.
@@ -90,6 +93,16 @@ type ServeConfig struct {
 
 	// ConfigPath is the path to the alert sources config file.
 	ConfigPath string `mapstructure:"config_path"`
+}
+
+// LogConfig holds logging-related configuration.
+type LogConfig struct {
+	// Level sets the minimum log level. Accepted values (case-insensitive):
+	// "debug", "info", "warn", "error". Defaults to "info".
+	Level string `mapstructure:"level"`
+	// Format selects the output format. Accepted values: "json", "text".
+	// Defaults to "text".
+	Format string `mapstructure:"format"`
 }
 
 // SafetyConfig holds safety and validation configuration.
@@ -143,6 +156,10 @@ func Defaults() *Config {
 		Serve: ServeConfig{
 			Addr:       ":8080",
 			ConfigPath: "config/alert-sources.yaml",
+		},
+		Log: LogConfig{
+			Level:  "info",
+			Format: "text",
 		},
 		CompactionThreshold: 160000,
 	}

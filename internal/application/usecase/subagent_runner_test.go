@@ -436,7 +436,7 @@ func (h *subagentRunnerTestHarness) build() *SubagentRunner {
 	factory := func(_ port.AIProvider) (ConversationServiceInterface, error) {
 		return convService, nil
 	}
-	return NewSubagentRunner(h.convService, h.toolExecutor, h.aiProvider, nil, h.config, factory)
+	return NewSubagentRunner(h.convService, h.toolExecutor, h.aiProvider, nil, h.config, factory, port.NopLogger{})
 }
 
 func (h *subagentRunnerTestHarness) run(agent *entity.Subagent, prompt, id string) (*SubagentResult, error) {
@@ -487,7 +487,7 @@ func TestNewSubagentRunner_PanicsOnNilDependency(t *testing.T) {
 					t.Error("expected panic")
 				}
 			}()
-			NewSubagentRunner(tt.convService, tt.toolExecutor, tt.aiProvider, nil, SubagentConfig{}, tt.convFactory)
+			NewSubagentRunner(tt.convService, tt.toolExecutor, tt.aiProvider, nil, SubagentConfig{}, tt.convFactory, port.NopLogger{})
 		})
 	}
 }

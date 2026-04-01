@@ -57,7 +57,25 @@ Presentation (cmd/cli/) → Application (internal/application/) → Domain (inte
 - `adapter/investigation/` - File-based investigation storage
 - `adapter/subagent/` - `LocalSubagentManager` for file-based agent discovery
 - `config/container.go` - Dependency injection wiring
+- `logger/` - Structured logging implementation (wraps slog)
 - `signal/` - Signal handling (Ctrl+C exit, SIGHUP reload)
+
+### Logging Best Practices
+
+**Contextual Fields with `With()`**:
+- Use `logger.With()` at the start of an operation to attach scoped context (e.g., `investigation_id`, `alert_id`, `subagent_id`, `session_id`)
+- Log all messages through this contextual logger - don't repeat the same fields in each call
+- This makes logs more queryable and consistent for filtering/analysis
+
+**Example patterns**:
+- Investigations: `log := logger.With("investigation_id", id)` 
+- Alerts: `log.With("alert_id", alert.ID(), "severity", alert.Severity())`
+- Subagents: `log.With("subagent_id", id, "agent_name", agent.Name(), "session_id", sessionID)`
+
+**Message content**:
+- Keep messages human-readable and concise
+- Put structured data in key-value pairs, not formatted strings
+- Error messages: Always include the error object as a key-value pair (`"error", err`)
 
 ### Key Data Flows
 
@@ -71,6 +89,7 @@ Presentation (cmd/cli/) → Application (internal/application/) → Domain (inte
 |------|---------|---------|
 | `AIProvider` | AI model communication | `AnthropicAdapter` |
 | `FileManager` | Sandboxed file operations | `LocalFileManager` |
+| `Logger` | Structured logging | `logger.New()` (slog implementation) |
 | `ToolExecutor` | Tool registry & execution | `ExecutorAdapter` (decorated by `PlanningExecutorAdapter`) |
 | `UserInterface` | Terminal I/O | `CLIAdapter` |
 | `AlertSourceManager` | Alert source lifecycle & dispatch | `SourceManager` |
@@ -90,6 +109,8 @@ Environment variables with `AGENT_` prefix:
 - `AGENT_MODEL` - AI model (default: `hf:zai-org/GLM-4.7`)
 - `AGENT_MAX_TOKENS` - Response limit
 - `AGENT_WORKING_DIR` - Base directory for file operations
+- `AGENT_LOG_LEVEL` - Log level: `debug`, `info` (default), `warn`, `error`
+- `AGENT_LOG_FORMAT` - Log format: `text` (default) or `json`
 - `AGENT_SAFETY_COMMAND_VALIDATION_MODE` - Command validation mode: `blacklist` (default) or `whitelist`
 - `AGENT_SAFETY_COMMAND_WHITELIST_JSON` - JSON array of whitelist patterns with optional excludes (whitelist mode only)
 - `AGENT_SAFETY_COMMAND_WHITELIST_OVERRIDE` - Replace default whitelist patterns with custom ones (default: `false`)
@@ -99,7 +120,72 @@ Environment variables with `AGENT_` prefix:
 
 ## Logging
 
-Uses `log/slog` for structured logging throughout. Do not use `fmt.Fprintf(os.Stderr, ...)` or `log.Printf` — use `slog.Info`, `slog.Error`, etc.
+### Logger Package (`internal/infrastructure/logger`)
+
+The project uses a structured logging abstraction following hexagonal architecture principles:
+
+**Port Layer** (`internal/domain/port/logger.go`):
+- `port.Logger` - Core interface for structured logging with levels (Debug, Info, Warn, Error, Log)
+- `NopLogger` - No-op implementation for testing
+- `SafeLogger(l Logger) Logger` - Helper that returns the provided logger or NopLogger if nil
+
+**Infrastructure Layer** (`internal/infrastructure/logger/`):
+- `logger.New(Options)` - Creates a configured logger from Options struct
+- `logger.NewDefault()` - Creates a logger with default settings (info level, text format, stderr)
+- `logger.FromSlog(l *slog.Logger) Logger` - Wraps an existing slog.Logger
+
+### Usage Patterns
+
+Production code:
+```go
+// Accept Logger as a dependency in constructors
+func NewSomeService(logger port.Logger) *SomeService {
+    logger = port.SafeLogger(logger) // Default nil to NopLogger
+    // ...
+}
+
+// Use With() to attach contextual fields ONCE at operation scope
+func (s *SomeHandler) Handle(ctx context.Context, operationID string) error {
+    // Create contextual logger for this operation - fields apply to all logs within
+    log := s.logger.With("operation_id", operationID, "handler", s.name)
+    
+    // Now use 'log' instead of 's.logger' for all logs
+    log.Info("Starting operation")
+    log.Error("Failed step", "error", err)
+    
+    return nil
+}
+
+// For alert/investigation handlers:
+func (h *Handler) ProcessAlert(ctx context.Context, alert *Alert) error {
+    log := h.logger.With(
+        "alert_id", alert.ID(),
+        "alert_title", alert.Title(),
+        "severity", alert.Severity(),
+    )
+    log.Info("Starting investigation")
+    // ...
+}
+```
+
+❌ **Anti-pattern** - Repeating the same context in every call:
+```go
+h.logger.Info("Starting investigation", "alert_id", alert.ID(), "severity", alert.Severity())
+h.logger.Error("Failed step", "alert_id", alert.ID(), "error", err) // Repeats alert_id
+```
+
+✅ **Better** - Use `With()` once at scope entry:
+```go
+log := h.logger.With("alert_id", alert.ID(), "severity", alert.Severity())
+log.Info("Starting investigation")
+log.Error("Failed step", "error", err)
+```
+
+Tests:
+```go
+// Use NopLogger for tests where logs aren't relevant
+svc := NewSomeService(port.NopLogger{})
+```
 
 ## Testing Patterns
 

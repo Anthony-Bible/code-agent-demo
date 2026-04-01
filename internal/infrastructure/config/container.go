@@ -26,6 +26,7 @@ import (
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/tool"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/ui"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/webhook"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
 // investigationStoreAdapter adapts FileInvestigationStore to the usecase.InvestigationStoreWriter interface.
@@ -78,14 +79,16 @@ type Container struct {
 	webhookAdapter       *webhook.HTTPAdapter
 	subagentManager      port.SubagentManager
 	subagentUseCase      *usecase.SubagentUseCase
+	logger               port.Logger
 }
 
 // NewContainer creates a new DI container and wires all dependencies.
 //
 // The wiring order is:
-// 1. Create infrastructure adapters (infra layer)
-// 2. Create domain services (domain layer)
-// 3. Create application services (application layer)
+// 1. Create base logger
+// 2. Create infrastructure adapters (infra layer)
+// 3. Create domain services (domain layer)
+// 4. Create application services (application layer)
 //
 // Parameters:
 //   - cfg: Configuration object containing application settings
@@ -97,6 +100,12 @@ func NewContainer(cfg *Config) (*Container, error) {
 	if cfg == nil {
 		return nil, errors.New("config cannot be nil")
 	}
+
+	// Step 0: Create base logger from config (used by all components).
+	log := logger.New(logger.Options{
+		Level:  cfg.Log.Level,
+		Format: cfg.Log.Format,
+	})
 
 	// Step 1: Create infrastructure adapters
 	// Note: order matters - skillManager and subagentManager must be created before aiAdapter
@@ -114,7 +123,7 @@ func NewContainer(cfg *Config) (*Container, error) {
 	aiAdapter := ai.NewAnthropicAdapter(cfg.AIModel, cfg.MaxTokens, subagentManager)
 
 	// Create base executor and wrap with planning decorator
-	baseExecutor := tool.NewExecutorAdapter(fileManager)
+	baseExecutor := tool.NewExecutorAdapter(fileManager, log)
 	baseExecutor.SetSkillManager(skillManager)
 	baseExecutor.SetSubagentManager(subagentManager)
 
@@ -181,7 +190,7 @@ func NewContainer(cfg *Config) (*Container, error) {
 	// Step 3: Create investigation and alert handling components
 	investigationUseCase, alertSourceManager, webhookAdapter, err := createInvestigationComponents(
 		cfg, convService, toolExecutor, skillManager, uiAdapter, aiAdapter,
-		validationMode, validationWhitelist,
+		validationMode, validationWhitelist, log,
 	)
 	if err != nil {
 		return nil, err
@@ -189,7 +198,7 @@ func NewContainer(cfg *Config) (*Container, error) {
 
 	// Step 4: Create subagent components (pass the already-created subagentManager)
 	subagentUseCase := createSubagentComponents(
-		cfg, convService, toolExecutor, aiAdapter, baseExecutor, uiAdapter, subagentManager,
+		cfg, convService, toolExecutor, aiAdapter, baseExecutor, uiAdapter, subagentManager, log,
 	)
 
 	return &Container{
@@ -205,6 +214,7 @@ func NewContainer(cfg *Config) (*Container, error) {
 		webhookAdapter:       webhookAdapter,
 		subagentManager:      subagentManager,
 		subagentUseCase:      subagentUseCase,
+		logger:               log,
 	}, nil
 }
 
@@ -219,6 +229,7 @@ func createInvestigationComponents(
 	aiAdapter port.AIProvider,
 	validationMode safety.CommandValidationMode,
 	validationWhitelist *safety.CommandWhitelist,
+	log port.Logger,
 ) (*usecase.AlertInvestigationUseCase, port.AlertSourceManager, *webhook.HTTPAdapter, error) {
 	// Create safety config (single source of truth for safety settings)
 	safetyConfig := appconfig.DefaultInvestigationConfig()
@@ -249,7 +260,7 @@ func createInvestigationComponents(
 		ThinkingBudget:   cfg.Thinking.Budget,
 		ShowThinking:     cfg.Thinking.Show,
 	}
-	investigationUseCase := usecase.NewAlertInvestigationUseCaseWithConfig(opConfig)
+	investigationUseCase := usecase.NewAlertInvestigationUseCaseWithConfig(opConfig, log)
 
 	// Wire safety enforcer
 	investigationUseCase.SetSafetyEnforcer(safetyEnforcer)
@@ -264,7 +275,7 @@ func createInvestigationComponents(
 	}
 
 	// Wire RCA service
-	rcaService := service.NewRCAService(aiAdapter)
+	rcaService := service.NewRCAService(aiAdapter, log)
 	investigationUseCase.SetRCAService(rcaService)
 
 	// Wire prompt builder (generic builder for all alert types)
@@ -287,14 +298,14 @@ func createInvestigationComponents(
 	alertHandler := usecase.NewAlertHandler(investigationUseCase, usecase.AlertHandlerConfig{
 		AutoInvestigateCritical: true,
 		AutoInvestigateWarning:  false,
-	})
+	}, log)
 
 	// Create alert source manager
 	alertSourceManager := alert.NewLocalAlertSourceManager()
 	alertSourceManager.SetAlertHandler(alertHandler.HandleEntityAlert)
 
 	// Create webhook HTTP adapter
-	webhookAdapter := webhook.NewHTTPAdapter(alertSourceManager, webhook.DefaultConfig())
+	webhookAdapter := webhook.NewHTTPAdapter(alertSourceManager, webhook.DefaultConfig(), log)
 	webhookAdapter.SetAlertHandler(alertHandler.HandleEntityAlert)
 
 	return investigationUseCase, alertSourceManager, webhookAdapter, nil
@@ -312,6 +323,7 @@ func createSubagentComponents(
 	baseExecutor *tool.ExecutorAdapter,
 	uiAdapter port.UserInterface,
 	subagentManager port.SubagentManager,
+	log port.Logger,
 ) *usecase.SubagentUseCase {
 	// Factory creates an isolated ConversationService per concurrent subagent execution.
 	// Each subagent clone gets its own AIProvider, so model switching doesn't race.
@@ -338,6 +350,7 @@ func createSubagentComponents(
 			AllowedTools:  nil, // nil means allow all tools (can be overridden per agent)
 		},
 		convFactory,
+		log,
 	)
 
 	// Create SubagentUseCase to orchestrate subagent spawning and execution
@@ -427,6 +440,12 @@ func (c *Container) SubagentManager() port.SubagentManager {
 // Useful for spawning and managing subagent lifecycles.
 func (c *Container) SubagentUseCase() *usecase.SubagentUseCase {
 	return c.subagentUseCase
+}
+
+// Logger returns the application-wide structured logger.
+// Use this to obtain the same logger that was injected into all components.
+func (c *Container) Logger() port.Logger {
+	return c.logger
 }
 
 // getUserHome returns the user's home directory.

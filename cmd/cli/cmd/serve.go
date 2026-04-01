@@ -160,7 +160,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	alertHandler := usecase.NewAlertHandler(container.InvestigationUseCase(), usecase.AlertHandlerConfig{
 		AutoInvestigateCritical: true,
 		AutoInvestigateWarning:  false,
-	})
+	}, container.Logger())
 
 	// Create webhook adapter with configured address
 	webhookAdapter := webhook.NewHTTPAdapter(sourceManager, webhook.HTTPAdapterConfig{
@@ -168,7 +168,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		ReadTimeout:     webhook.DefaultConfig().ReadTimeout,
 		WriteTimeout:    webhook.DefaultConfig().WriteTimeout,
 		ShutdownTimeout: webhook.DefaultConfig().ShutdownTimeout,
-	})
+	}, container.Logger())
 	webhookAdapter.SetAsyncAlertHandler(alertHandler.HandleEntityAlertAsync, alertHandler.RunEntityAlertInvestigation)
 
 	// Set up SIGHUP handler for skill hot-reload

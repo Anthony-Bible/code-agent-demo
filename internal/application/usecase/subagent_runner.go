@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -138,6 +137,7 @@ func NewSubagentRunner(
 	userInterface port.UserInterface,
 	config SubagentConfig,
 	convFactory ConversationServiceFactory,
+	logger port.Logger,
 ) *SubagentRunner {
 	if convService == nil {
 		panic("convService cannot be nil")
@@ -154,7 +154,7 @@ func NewSubagentRunner(
 	// userInterface is optional (can be nil for tests)
 
 	return &SubagentRunner{
-		BaseRunner:    newBaseRunner(convService, toolExecutor, &AllowedListPermissionChecker{AllowedTools: config.AllowedTools}),
+		BaseRunner:    newBaseRunner(convService, toolExecutor, &AllowedListPermissionChecker{AllowedTools: config.AllowedTools}, logger),
 		aiProvider:    aiProvider,
 		userInterface: userInterface,
 		config:        config,
@@ -207,7 +207,7 @@ func (r *SubagentRunner) Run(
 
 	// Build a local runner so all BaseRunner methods use the isolated conv service
 	localRunner := &SubagentRunner{
-		BaseRunner:    newBaseRunner(localConvService, r.ToolExecutor, r.PermissionChecker),
+		BaseRunner:    newBaseRunner(localConvService, r.ToolExecutor, r.PermissionChecker, r.logger),
 		aiProvider:    localProvider,
 		userInterface: r.userInterface,
 		config:        r.config,
@@ -245,6 +245,8 @@ func (r *SubagentRunner) Run(
 	rc.SessionID = sessionID
 	defer localRunner.CleanupConversation(sessionID, agent.Name, "agent")
 
+	log := r.logger.With("agent", rc.agent.Name, "session_id", sessionID)
+
 	// Subagents use their own configuration or inherit from static config.
 	thinkingInfo := port.ThinkingModeInfo{
 		Enabled:      r.config.ThinkingEnabled,
@@ -263,10 +265,8 @@ func (r *SubagentRunner) Run(
 	if thinkingInfo.Enabled {
 		if err := localConvService.SetThinkingMode(sessionID, thinkingInfo); err != nil {
 			// Log warning but don't fail - thinking mode is optional
-			slog.Warn("failed to set thinking mode", //nolint:sloglint // no injected logger on this struct
+			log.Warn("failed to set thinking mode",
 				"error", err,
-				"agent", rc.agent.Name,
-				"session_id", sessionID,
 				"enabled", thinkingInfo.Enabled,
 				"budget", thinkingInfo.BudgetTokens,
 			)

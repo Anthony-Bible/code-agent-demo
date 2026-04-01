@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"sync"
 
@@ -79,6 +78,8 @@ type ExecutorAdapter struct {
 	pendingWhitelist     *safety.CommandWhitelist
 	pendingAskLLM        bool
 	validatorConfigured  bool // true if SetValidationMode was called before first use
+
+	logger port.Logger
 }
 
 // toRawMessage converts various input types to json.RawMessage for validation.
@@ -99,45 +100,48 @@ func toRawMessage(input interface{}) (json.RawMessage, error) {
 	}
 }
 
-// wrapFileOperationError wraps file operation errors and prints a warning for path traversal attempts.
-func wrapFileOperationError(operation string, err error) error {
-	if err == nil {
-		return nil
-	}
-
-	// Check for path traversal error in the error chain
-	if errors.Is(err, fileadapter.ErrPathTraversal) {
-		slog.Error("path traversal attempt detected and blocked") //nolint:sloglint // security warning must always log
-		return fmt.Errorf("%s blocked due to potential security threat: %w", operation, err)
-	}
-
-	// Check for PathValidationError which has detailed reason
-	var pathErr *fileadapter.PathValidationError
-	if errors.As(err, &pathErr) && pathErr.Reason == "path traversal attempt detected" {
-		slog.Error("path traversal attempt detected and blocked") //nolint:sloglint // security warning must always log
-		return fmt.Errorf("%s blocked due to potential security threat: %w", operation, err)
-	}
-
-	return fmt.Errorf("%s: %w", operation, err)
-}
-
 // NewExecutorAdapter creates a new ExecutorAdapter with the provided FileManager.
 // SkillManager can be provided via SetSkillManager for skill-related functionality.
 // SubagentManager can be provided via SetSubagentManager for subagent-related functionality.
 // It also registers the default tools (read_file, list_files, edit_file, bash, fetch, activate_skill).
-func NewExecutorAdapter(fileManager port.FileManager) *ExecutorAdapter {
+func NewExecutorAdapter(fileManager port.FileManager, log port.Logger) *ExecutorAdapter {
 	adapter := &ExecutorAdapter{
 		fileManager:         fileManager,
 		skillManager:        nil,
 		subagentManager:     nil,
 		tools:               make(map[string]entity.Tool),
 		investigationStates: make(map[string]string),
+		logger:              port.SafeLogger(log),
 	}
 
 	// Register default tools
 	adapter.registerDefaultTools()
 
 	return adapter
+}
+
+// wrapFileOperationError wraps file operation errors with context and logs a security
+// warning for path traversal attempts. It is a method on ExecutorAdapter so that it
+// can use the injected logger rather than the global slog logger.
+func (a *ExecutorAdapter) wrapFileOperationError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+
+	// Check for path traversal error in the error chain
+	if errors.Is(err, fileadapter.ErrPathTraversal) {
+		a.logger.Error("path traversal attempt detected and blocked", "operation", operation)
+		return fmt.Errorf("%s blocked due to potential security threat: %w", operation, err)
+	}
+
+	// Check for PathValidationError which has detailed reason
+	var pathErr *fileadapter.PathValidationError
+	if errors.As(err, &pathErr) && pathErr.Reason == "path traversal attempt detected" {
+		a.logger.Error("path traversal attempt detected and blocked", "operation", operation)
+		return fmt.Errorf("%s blocked due to potential security threat: %w", operation, err)
+	}
+
+	return fmt.Errorf("%s: %w", operation, err)
 }
 
 // SetSkillManager sets the skill manager for skill-related functionality.
@@ -233,8 +237,7 @@ func (a *ExecutorAdapter) SetValidationMode(
 
 	// Check if validator has already been initialized (first use has occurred)
 	if a.commandValidator != nil {
-		//nolint:sloglint // security warning about potential race condition must always log
-		slog.Warn(
+		a.logger.Warn(
 			"SetValidationMode called after validator was already initialized; ignoring to prevent race condition",
 			"mode", mode,
 		)

@@ -157,12 +157,12 @@ func (a *ExecutorAdapter) executeReadFile(input json.RawMessage) (string, error)
 
 	path, err := a.fileManager.ResolvePath(in.Path)
 	if err != nil {
-		return "", wrapFileOperationError("Failed to read file", err)
+		return "", a.wrapFileOperationError("Failed to read file", err)
 	}
 
 	f, err := os.Open(path)
 	if err != nil {
-		return "", wrapFileOperationError("Failed to read file", err)
+		return "", a.wrapFileOperationError("Failed to read file", err)
 	}
 	defer f.Close()
 
@@ -197,7 +197,7 @@ func (a *ExecutorAdapter) executeReadFile(input json.RawMessage) (string, error)
 		fmt.Fprintf(&result, "%d: %s\n", lineNum, scanner.Text())
 	}
 	if err := scanner.Err(); err != nil {
-		return "", wrapFileOperationError("Failed to read file", err)
+		return "", a.wrapFileOperationError("Failed to read file", err)
 	}
 
 	if noExplicitRange && lineNum > maxReadFileLines {
@@ -227,7 +227,7 @@ func (a *ExecutorAdapter) executeListFiles(input json.RawMessage) (string, error
 	// Exclude .git directories by default for cleaner AI output
 	files, err := a.fileManager.ListFiles(dir, true, false)
 	if err != nil {
-		return "", wrapFileOperationError("Failed to list files", err)
+		return "", a.wrapFileOperationError("Failed to list files", err)
 	}
 
 	// Convert relative paths to exclude the base directory for cleaner output
@@ -278,7 +278,7 @@ func (a *ExecutorAdapter) executeEditFile(input json.RawMessage) (string, error)
 	if in.OldStr == "" {
 		exists, err := a.fileManager.FileExists(in.Path)
 		if err != nil {
-			return "", wrapFileOperationError("Failed to check if file exists", err)
+			return "", a.wrapFileOperationError("Failed to check if file exists", err)
 		}
 		if !exists {
 			return a.createNewFile(in.Path, in.NewStr)
@@ -289,16 +289,16 @@ func (a *ExecutorAdapter) executeEditFile(input json.RawMessage) (string, error)
 	// Resolve and validate the path
 	path, err := a.fileManager.ResolvePath(in.Path)
 	if err != nil {
-		return "", wrapFileOperationError("Failed to read file", err)
+		return "", a.wrapFileOperationError("Failed to read file", err)
 	}
 
 	// Check file size before reading to prevent OOM on huge files
 	info, err := os.Stat(path)
 	if err != nil {
-		return "", wrapFileOperationError("Failed to read file", err)
+		return "", a.wrapFileOperationError("Failed to read file", err)
 	}
 	if info.IsDir() {
-		return "", wrapFileOperationError("Failed to read file", fileadapter.ErrIsDirectory)
+		return "", a.wrapFileOperationError("Failed to read file", fileadapter.ErrIsDirectory)
 	}
 	if info.Size() > maxEditFileSize {
 		return "", fmt.Errorf(
@@ -311,7 +311,7 @@ func (a *ExecutorAdapter) executeEditFile(input json.RawMessage) (string, error)
 	// Read as []byte directly to avoid string conversion copy
 	oldContent, err := os.ReadFile(path)
 	if err != nil {
-		return "", wrapFileOperationError("Failed to read file", err)
+		return "", a.wrapFileOperationError("Failed to read file", err)
 	}
 
 	newContent := bytes.ReplaceAll(oldContent, []byte(in.OldStr), []byte(in.NewStr))
@@ -323,7 +323,7 @@ func (a *ExecutorAdapter) executeEditFile(input json.RawMessage) (string, error)
 
 	// Write the modified content directly to avoid []byte→string→[]byte round-trip
 	if err := os.WriteFile(path, newContent, info.Mode().Perm()); err != nil {
-		return "", wrapFileOperationError("Failed to write file", err)
+		return "", a.wrapFileOperationError("Failed to write file", err)
 	}
 
 	return "OK", nil
@@ -335,13 +335,13 @@ func (a *ExecutorAdapter) createNewFile(filePath, content string) (string, error
 	dir := filepath.Dir(filePath)
 	if dir != "." && dir != "" {
 		if err := a.fileManager.CreateDirectory(dir); err != nil {
-			return "", wrapFileOperationError(fmt.Sprintf("Failed to create directory %s", dir), err)
+			return "", a.wrapFileOperationError(fmt.Sprintf("Failed to create directory %s", dir), err)
 		}
 	}
 
 	// Write the new file content
 	if err := a.fileManager.WriteFile(filePath, content); err != nil {
-		return "", wrapFileOperationError(fmt.Sprintf("Failed to create file %s", filePath), err)
+		return "", a.wrapFileOperationError(fmt.Sprintf("Failed to create file %s", filePath), err)
 	}
 
 	return fmt.Sprintf("Created file %s", filePath), nil

@@ -192,7 +192,7 @@ func TestRCAService_Correlate(t *testing.T) {
 			if tt.mockSetup != nil {
 				tt.mockSetup(mockAI)
 			}
-			rcaService := service.NewRCAService(mockAI)
+			rcaService := service.NewRCAService(mockAI, port.NopLogger{})
 
 			rcaFindings, err := rcaService.Correlate(ctx, tt.findings)
 
