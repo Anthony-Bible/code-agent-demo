@@ -697,7 +697,7 @@ func (r *InvestigationRunner) processLoopIteration(
 		if len(inputPreview) > 200 {
 			inputPreview = inputPreview[:200] + "..."
 		}
-		r.logger.Info("complete_investigation called", "input_preview", inputPreview)
+		rc.logger.Info("complete_investigation called", "input_preview", inputPreview)
 
 		return rc.buildCompletionResult(separated.completion.Input), true, nil
 	}
