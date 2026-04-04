@@ -532,85 +532,77 @@ func TestHTTPAdapter_BasicAuth(t *testing.T) {
 		}
 	}
 
-	t.Run("allows request when no auth configured", func(t *testing.T) {
-		source := makeSource("/alerts/prometheus")
-		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{source}}
-		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
+	tests := []struct {
+		name       string
+		authUser   string
+		authPass   string
+		reqUser    string
+		reqPass    string
+		wantStatus int
+	}{
+		{
+			name:       "allows request when no auth configured",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "rejects request with no credentials when auth is required",
+			authUser:   "user",
+			authPass:   "pass",
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "rejects request with wrong password",
+			authUser:   "user",
+			authPass:   "correct-pass",
+			reqUser:    "user",
+			reqPass:    "wrong-pass",
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "rejects request with wrong username",
+			authUser:   "correct-user",
+			authPass:   "pass",
+			reqUser:    "wrong-user",
+			reqPass:    "pass",
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "allows request with correct credentials",
+			authUser:   "myuser",
+			authPass:   "mypass",
+			reqUser:    "myuser",
+			reqPass:    "mypass",
+			wantStatus: http.StatusOK,
+		},
+	}
 
-		req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString("{}"))
-		rec := httptest.NewRecorder()
-		adapter.Mux().ServeHTTP(rec, req)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := makeSource("/alerts/prometheus")
+			manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{source}}
+			adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
 
-		if rec.Code != http.StatusOK {
-			t.Errorf("expected 200, got %d", rec.Code)
-		}
-	})
+			if tt.authUser != "" {
+				adapter.SetBasicAuth("/alerts/prometheus", tt.authUser, tt.authPass)
+			}
 
-	t.Run("rejects request with no credentials when auth is required", func(t *testing.T) {
-		source := makeSource("/alerts/prometheus")
-		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{source}}
-		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
-		adapter.SetBasicAuth("/alerts/prometheus", "user", "pass")
+			req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString("{}"))
+			if tt.reqUser != "" {
+				req.Header.Set("Authorization", basicAuthHeader(tt.reqUser, tt.reqPass))
+			}
+			rec := httptest.NewRecorder()
+			adapter.Mux().ServeHTTP(rec, req)
 
-		req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString("{}"))
-		rec := httptest.NewRecorder()
-		adapter.Mux().ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("expected 401, got %d", rec.Code)
-		}
-		if rec.Header().Get("WWW-Authenticate") == "" {
-			t.Error("expected WWW-Authenticate header to be set")
-		}
-	})
-
-	t.Run("rejects request with wrong password", func(t *testing.T) {
-		source := makeSource("/alerts/prometheus")
-		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{source}}
-		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
-		adapter.SetBasicAuth("/alerts/prometheus", "user", "correct-pass")
-
-		req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString("{}"))
-		req.Header.Set("Authorization", basicAuthHeader("user", "wrong-pass"))
-		rec := httptest.NewRecorder()
-		adapter.Mux().ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("expected 401, got %d", rec.Code)
-		}
-	})
-
-	t.Run("rejects request with wrong username", func(t *testing.T) {
-		source := makeSource("/alerts/prometheus")
-		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{source}}
-		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
-		adapter.SetBasicAuth("/alerts/prometheus", "correct-user", "pass")
-
-		req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString("{}"))
-		req.Header.Set("Authorization", basicAuthHeader("wrong-user", "pass"))
-		rec := httptest.NewRecorder()
-		adapter.Mux().ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("expected 401, got %d", rec.Code)
-		}
-	})
-
-	t.Run("allows request with correct credentials", func(t *testing.T) {
-		source := makeSource("/alerts/prometheus")
-		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{source}}
-		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
-		adapter.SetBasicAuth("/alerts/prometheus", "myuser", "mypass")
-
-		req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString("{}"))
-		req.Header.Set("Authorization", basicAuthHeader("myuser", "mypass"))
-		rec := httptest.NewRecorder()
-		adapter.Mux().ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Errorf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-		}
-	})
+			if rec.Code != tt.wantStatus {
+				t.Errorf("expected %d, got %d", tt.wantStatus, rec.Code)
+			}
+			if tt.wantStatus == http.StatusUnauthorized && tt.reqUser == "" {
+				if rec.Header().Get("WWW-Authenticate") == "" {
+					t.Error("expected WWW-Authenticate header to be set")
+				}
+			}
+		})
+	}
 
 	t.Run("auth is scoped per path: authenticated path does not affect unauthenticated path", func(t *testing.T) {
 		sourceA := makeSource("/alerts/prometheus")
