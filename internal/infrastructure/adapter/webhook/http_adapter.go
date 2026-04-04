@@ -5,6 +5,7 @@ package webhook
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +19,13 @@ import (
 
 // maxBodySize is the maximum allowed size for webhook request bodies (10MB).
 const maxBodySize = 10 << 20
+
+// basicAuthEntry holds the expected credentials for a single webhook path.
+// Credentials are never logged; only their presence is noted.
+type basicAuthEntry struct {
+	username string
+	password string
+}
 
 // HTTPAdapterConfig configures the webhook HTTP server.
 type HTTPAdapterConfig struct {
@@ -57,6 +65,10 @@ type HTTPAdapter struct {
 	invCancel         context.CancelFunc
 	started           bool
 	logger            port.Logger
+	// basicAuth maps webhook paths to their required credentials.
+	// Protected by credsMu because SetBasicAuth may be called concurrently.
+	basicAuth map[string]basicAuthEntry
+	credsMu   sync.RWMutex
 }
 
 // NewHTTPAdapter creates a new webhook HTTP adapter.
@@ -73,6 +85,7 @@ func NewHTTPAdapter(
 		invCtx:        invCtx,
 		invCancel:     invCancel,
 		logger:        port.SafeLogger(log),
+		basicAuth:     make(map[string]basicAuthEntry),
 	}
 	adapter.registerRoutes()
 	return adapter
@@ -111,6 +124,63 @@ func (a *HTTPAdapter) handleReady(w http.ResponseWriter, _ *http.Request) {
 	_, _ = fmt.Fprintf(w, `{"status":"ok","sources":%d}`, len(sources))
 }
 
+// SetBasicAuth registers HTTP Basic Auth credentials for a specific webhook path.
+// When credentials are set for a path, every incoming request to that path must
+// supply a matching Authorization header or it will be rejected with 401.
+// Credentials are compared using constant-time equality to prevent timing attacks.
+// Calling SetBasicAuth with an empty username and password removes any existing
+// credentials for the path (making the endpoint unauthenticated again).
+func (a *HTTPAdapter) SetBasicAuth(path, username, password string) {
+	a.credsMu.Lock()
+	defer a.credsMu.Unlock()
+	if username == "" && password == "" {
+		delete(a.basicAuth, path)
+		return
+	}
+	a.basicAuth[path] = basicAuthEntry{username: username, password: password}
+}
+
+// checkBasicAuth validates the request's Basic Auth credentials against the
+// registered credentials for the given path.
+// Returns true when the path has no auth requirement, or when the supplied
+// credentials match exactly (constant-time comparison).
+// Returns false when credentials are required but missing or incorrect; in that
+// case the appropriate 401 response has already been written to w.
+func (a *HTTPAdapter) checkBasicAuth(w http.ResponseWriter, r *http.Request, path string) bool {
+	a.credsMu.RLock()
+	entry, required := a.basicAuth[path]
+	a.credsMu.RUnlock()
+
+	if !required {
+		return true
+	}
+
+	username, password, ok := r.BasicAuth()
+	if !ok {
+		// No credentials provided at all
+		w.Header().Set("WWW-Authenticate", `Basic realm="webhook"`)
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"authentication required"}`))
+		// Log only that auth was missing, never the expected credentials
+		a.logger.Warn("Webhook request rejected: missing Basic Auth credentials", "path", path)
+		return false
+	}
+
+	// Constant-time comparison to prevent timing-based credential enumeration
+	usernameMatch := subtle.ConstantTimeCompare([]byte(username), []byte(entry.username))
+	passwordMatch := subtle.ConstantTimeCompare([]byte(password), []byte(entry.password))
+	if usernameMatch&passwordMatch != 1 {
+		w.Header().Set("WWW-Authenticate", `Basic realm="webhook"`)
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"invalid credentials"}`))
+		// Log only the path and that auth failed; never log the supplied or expected credentials
+		a.logger.Warn("Webhook request rejected: invalid Basic Auth credentials", "path", path)
+		return false
+	}
+
+	return true
+}
+
 // handleWebhook routes incoming webhooks to the appropriate source.
 func (a *HTTPAdapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -118,6 +188,12 @@ func (a *HTTPAdapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	// Reconstruct the full path from the wildcard
 	sourcePath := r.PathValue("source")
 	path := "/alerts/" + sourcePath
+
+	// Validate Basic Auth before any other processing.
+	// This ensures credentials are checked before we reveal whether a path exists.
+	if !a.checkBasicAuth(w, r, path) {
+		return
+	}
 
 	// Find the matching webhook source
 	source := a.sourceManager.GetWebhookSourceByPath(path)

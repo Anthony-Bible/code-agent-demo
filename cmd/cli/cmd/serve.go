@@ -91,6 +91,19 @@ func registerAlertSources(webhookCfg *config.WebhookServerConfig, container *con
 	return nil
 }
 
+// applyBasicAuth registers Basic Auth credentials from the config with the webhook adapter.
+// Sources without a basicAuth block are left unauthenticated (no change to their endpoint).
+// This function is intentionally separate from registerAlertSources so that credentials
+// are applied directly to the adapter and never stored in any other intermediate state.
+func applyBasicAuth(webhookCfg *config.WebhookServerConfig, adapter *webhook.HTTPAdapter) {
+	for _, srcCfg := range webhookCfg.Sources {
+		if srcCfg.BasicAuth == nil {
+			continue
+		}
+		adapter.SetBasicAuth(srcCfg.WebhookPath, srcCfg.BasicAuth.Username, srcCfg.BasicAuth.Password)
+	}
+}
+
 // setupSkillReloadHandler creates and starts a SIGHUP handler for skill hot-reload.
 func setupSkillReloadHandler(container *config.Container) *signalhandler.ReloadHandler {
 	ui := container.UIAdapter()
@@ -170,6 +183,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		ShutdownTimeout: webhook.DefaultConfig().ShutdownTimeout,
 	}, container.Logger())
 	webhookAdapter.SetAsyncAlertHandler(alertHandler.HandleEntityAlertAsync, alertHandler.RunEntityAlertInvestigation)
+
+	// Register per-source Basic Auth credentials with the webhook adapter.
+	// Credentials are applied after adapter creation so they are never stored
+	// in any intermediate structure beyond the adapter's internal map.
+	applyBasicAuth(webhookCfg, webhookAdapter)
 
 	// Set up SIGHUP handler for skill hot-reload
 	reloadHandler := setupSkillReloadHandler(container)
