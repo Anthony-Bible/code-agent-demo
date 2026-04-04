@@ -137,6 +137,14 @@ func (a *HTTPAdapter) SetBasicAuth(path, username, password string) {
 		delete(a.basicAuth, path)
 		return
 	}
+	if username == "" && password == "" {
+		delete(a.basicAuth, path)
+		return
+	}
+	if username == "" || password == "" {
+		a.logger.Warn("SetBasicAuth called with partial credentials — both username and password must be non-empty; ignoring", "path", path)
+		return
+	}
 	a.basicAuth[path] = basicAuthEntry{username: username, password: password}
 }
 
