@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/anthony-bible/code-agent-demo/internal/application/usecase"
+	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/alert"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/webhook"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/config"
@@ -95,9 +96,14 @@ func registerAlertSources(webhookCfg *config.WebhookServerConfig, container *con
 // Sources without a basic_auth block are left unauthenticated (no change to their endpoint).
 // This function is intentionally separate from registerAlertSources so credentials from the
 // parsed config are copied into the adapter for the matching webhook path without being logged here.
-func applyBasicAuth(webhookCfg *config.WebhookServerConfig, adapter *webhook.HTTPAdapter) {
+func applyBasicAuth(webhookCfg *config.WebhookServerConfig, adapter *webhook.HTTPAdapter, logger port.Logger) {
 	for _, srcCfg := range webhookCfg.Sources {
 		if srcCfg.BasicAuth == nil {
+			continue
+		}
+		if srcCfg.BasicAuth.Username == "" && srcCfg.BasicAuth.Password == "" {
+			logger.Warn("basic_auth block present but username and password are empty — endpoint will NOT be protected",
+				"path", srcCfg.WebhookPath)
 			continue
 		}
 		adapter.SetBasicAuth(srcCfg.WebhookPath, srcCfg.BasicAuth.Username, srcCfg.BasicAuth.Password)
@@ -185,9 +191,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	webhookAdapter.SetAsyncAlertHandler(alertHandler.HandleEntityAlertAsync, alertHandler.RunEntityAlertInvestigation)
 
 	// Register per-source Basic Auth credentials with the webhook adapter.
-	// Credentials are applied after adapter creation so they are never stored
-	// in any intermediate structure beyond the adapter's internal map.
-	applyBasicAuth(webhookCfg, webhookAdapter)
+	// Credentials are applied after adapter creation so they are not logged.
+	// They are stored in the adapter's internal map and in the parsed config.
+	applyBasicAuth(webhookCfg, webhookAdapter, container.Logger())
 
 	// Set up SIGHUP handler for skill hot-reload
 	reloadHandler := setupSkillReloadHandler(container)
@@ -199,7 +205,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	_ = ui.DisplaySystemMessage("Health check: GET http://localhost" + addr + "/health")
 	_ = ui.DisplaySystemMessage("Ready check:  GET http://localhost" + addr + "/ready")
 	for _, srcCfg := range webhookCfg.Sources {
-		_ = ui.DisplaySystemMessage("Webhook:      POST http://localhost" + addr + srcCfg.WebhookPath)
+		authTag := ""
+		if srcCfg.BasicAuth != nil && srcCfg.BasicAuth.Username != "" && srcCfg.BasicAuth.Password != "" {
+			authTag = " [basic auth]"
+		}
+		_ = ui.DisplaySystemMessage("Webhook:      POST http://localhost" + addr + srcCfg.WebhookPath + authTag)
 	}
 	_ = ui.DisplaySystemMessage("")
 	_ = ui.DisplaySystemMessage("Press Ctrl+C to stop")

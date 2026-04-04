@@ -5,6 +5,7 @@ package webhook
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
@@ -137,15 +138,18 @@ func (a *HTTPAdapter) SetBasicAuth(path, username, password string) {
 		delete(a.basicAuth, path)
 		return
 	}
-	if username == "" && password == "" {
-		delete(a.basicAuth, path)
-		return
-	}
 	if username == "" || password == "" {
 		a.logger.Warn("SetBasicAuth called with partial credentials — both username and password must be non-empty; ignoring", "path", path)
 		return
 	}
 	a.basicAuth[path] = basicAuthEntry{username: username, password: password}
+}
+
+// hashCredential hashes b with SHA-256 so that ConstantTimeCompare
+// always operates on equal-length slices regardless of input length.
+func hashCredential(b []byte) []byte {
+	h := sha256.Sum256(b)
+	return h[:]
 }
 
 // checkBasicAuth validates the request's Basic Auth credentials against the
@@ -175,8 +179,10 @@ func (a *HTTPAdapter) checkBasicAuth(w http.ResponseWriter, r *http.Request, pat
 	}
 
 	// Constant-time comparison to prevent timing-based credential enumeration
-	usernameMatch := subtle.ConstantTimeCompare([]byte(username), []byte(entry.username))
-	passwordMatch := subtle.ConstantTimeCompare([]byte(password), []byte(entry.password))
+	usernameMatch := subtle.ConstantTimeCompare(hashCredential([]byte(username)), hashCredential([]byte(entry.username)))
+	passwordMatch := subtle.ConstantTimeCompare(hashCredential([]byte(password)), hashCredential([]byte(entry.password)))
+	// Use bitwise & (not &&) to ensure both comparisons complete before combining,
+	// preventing short-circuit evaluation that could leak which credential was wrong.
 	if usernameMatch&passwordMatch != 1 {
 		w.Header().Set("WWW-Authenticate", `Basic realm="webhook"`)
 		w.WriteHeader(http.StatusUnauthorized)

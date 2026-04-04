@@ -20,6 +20,12 @@ type BasicAuthConfig struct {
 	Password string `yaml:"password"`
 }
 
+// String returns a redacted representation of the config to prevent
+// accidental credential exposure in logs.
+func (b BasicAuthConfig) String() string {
+	return "BasicAuthConfig{username:[redacted], password:[redacted]}"
+}
+
 // AlertSourceConfig represents the configuration for a single alert source.
 type AlertSourceConfig struct {
 	// Type is the alert source type (e.g., "prometheus", "grafana").
