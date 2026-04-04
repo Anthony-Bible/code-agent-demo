@@ -92,9 +92,9 @@ func registerAlertSources(webhookCfg *config.WebhookServerConfig, container *con
 }
 
 // applyBasicAuth registers Basic Auth credentials from the config with the webhook adapter.
-// Sources without a basicAuth block are left unauthenticated (no change to their endpoint).
-// This function is intentionally separate from registerAlertSources so that credentials
-// are applied directly to the adapter and never stored in any other intermediate state.
+// Sources without a basic_auth block are left unauthenticated (no change to their endpoint).
+// This function is intentionally separate from registerAlertSources so credentials from the
+// parsed config are copied into the adapter for the matching webhook path without being logged here.
 func applyBasicAuth(webhookCfg *config.WebhookServerConfig, adapter *webhook.HTTPAdapter) {
 	for _, srcCfg := range webhookCfg.Sources {
 		if srcCfg.BasicAuth == nil {
