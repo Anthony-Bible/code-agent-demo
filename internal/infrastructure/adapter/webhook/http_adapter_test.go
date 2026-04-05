@@ -574,6 +574,18 @@ func TestHTTPAdapter_BasicAuth(t *testing.T) {
 			reqPass:    "mypass",
 			wantStatus: http.StatusOK,
 		},
+		{
+			name:       "ignores auth when username is empty (partial credential)",
+			authUser:   "",
+			authPass:   "somepass",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "ignores auth when password is empty (partial credential)",
+			authUser:   "someuser",
+			authPass:   "",
+			wantStatus: http.StatusOK,
+		},
 	}
 
 	for _, tt := range tests {

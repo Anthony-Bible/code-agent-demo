@@ -101,8 +101,8 @@ func applyBasicAuth(webhookCfg *config.WebhookServerConfig, adapter *webhook.HTT
 		if srcCfg.BasicAuth == nil {
 			continue
 		}
-		if srcCfg.BasicAuth.Username == "" && srcCfg.BasicAuth.Password == "" {
-			logger.Warn("basic_auth block present but username and password are empty — endpoint will NOT be protected",
+		if srcCfg.BasicAuth.Username == "" || srcCfg.BasicAuth.Password == "" {
+			logger.Warn("basic_auth block present but username or password is empty — endpoint will NOT be protected",
 				"path", srcCfg.WebhookPath)
 			continue
 		}
