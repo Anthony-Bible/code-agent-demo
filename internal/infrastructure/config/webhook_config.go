@@ -9,6 +9,23 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// BasicAuthConfig holds credentials for HTTP Basic Authentication.
+// These credentials are used to validate incoming webhook requests.
+// Neither the username nor the password will ever appear in logs or error responses.
+type BasicAuthConfig struct {
+	// Username is the expected HTTP Basic Auth username.
+	Username string `yaml:"username"`
+	// Password is the expected HTTP Basic Auth password.
+	// Treat this value as a secret: do not log it or include it in error messages.
+	Password string `yaml:"password"`
+}
+
+// String returns a redacted representation of the config to prevent
+// accidental credential exposure in logs.
+func (b BasicAuthConfig) String() string {
+	return "BasicAuthConfig{username:[redacted], password:[redacted]}"
+}
+
 // AlertSourceConfig represents the configuration for a single alert source.
 type AlertSourceConfig struct {
 	// Type is the alert source type (e.g., "prometheus", "grafana").
@@ -19,6 +36,10 @@ type AlertSourceConfig struct {
 	WebhookPath string `yaml:"webhook_path"`
 	// Extra contains additional source-specific configuration options.
 	Extra map[string]string `yaml:"extra,omitempty"`
+	// BasicAuth configures HTTP Basic Authentication for this source's webhook endpoint.
+	// When set, incoming requests must supply matching credentials or they will be rejected
+	// with 401 Unauthorized. Omit this field to leave the endpoint unauthenticated.
+	BasicAuth *BasicAuthConfig `yaml:"basic_auth,omitempty"`
 }
 
 // WebhookServerConfig represents the webhook server configuration.

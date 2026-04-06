@@ -3,9 +3,11 @@ package webhook
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -511,6 +513,172 @@ func TestHTTPAdapter_AsyncHandler_ShutdownWaits(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Error("shutdown did not complete after investigation finished")
 	}
+}
+
+// basicAuthHeader returns the Authorization header value for the given credentials.
+func basicAuthHeader(username, password string) string {
+	creds := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
+	return "Basic " + creds
+}
+
+func TestHTTPAdapter_BasicAuth(t *testing.T) {
+	makeSource := func(path string) *porttest.MockWebhookSource {
+		return &porttest.MockWebhookSource{
+			MockAlertSource: &porttest.MockAlertSource{NameVal: "prometheus", SourceTypeVal: port.SourceTypeWebhook},
+			PathVal:         path,
+			HandleFunc: func(_ context.Context, _ []byte) ([]*entity.Alert, error) {
+				return []*entity.Alert{}, nil
+			},
+		}
+	}
+
+	tests := []struct {
+		name       string
+		authUser   string
+		authPass   string
+		reqUser    string
+		reqPass    string
+		wantStatus int
+	}{
+		{
+			name:       "allows request when no auth configured",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "rejects request with no credentials when auth is required",
+			authUser:   "user",
+			authPass:   "pass",
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "rejects request with wrong password",
+			authUser:   "user",
+			authPass:   "correct-pass",
+			reqUser:    "user",
+			reqPass:    "wrong-pass",
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "rejects request with wrong username",
+			authUser:   "correct-user",
+			authPass:   "pass",
+			reqUser:    "wrong-user",
+			reqPass:    "pass",
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "allows request with correct credentials",
+			authUser:   "myuser",
+			authPass:   "mypass",
+			reqUser:    "myuser",
+			reqPass:    "mypass",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "ignores auth when username is empty (partial credential)",
+			authUser:   "",
+			authPass:   "somepass",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "ignores auth when password is empty (partial credential)",
+			authUser:   "someuser",
+			authPass:   "",
+			wantStatus: http.StatusOK,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := makeSource("/alerts/prometheus")
+			manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{source}}
+			adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
+
+			if tt.authUser != "" {
+				adapter.SetBasicAuth("/alerts/prometheus", tt.authUser, tt.authPass)
+			}
+
+			req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString("{}"))
+			if tt.reqUser != "" {
+				req.Header.Set("Authorization", basicAuthHeader(tt.reqUser, tt.reqPass))
+			}
+			rec := httptest.NewRecorder()
+			adapter.Mux().ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("expected %d, got %d", tt.wantStatus, rec.Code)
+			}
+			if tt.wantStatus == http.StatusUnauthorized && tt.reqUser == "" {
+				if rec.Header().Get("WWW-Authenticate") == "" {
+					t.Error("expected WWW-Authenticate header to be set")
+				}
+			}
+		})
+	}
+
+	t.Run("auth is scoped per path: authenticated path does not affect unauthenticated path", func(t *testing.T) {
+		sourceA := makeSource("/alerts/prometheus")
+		sourceB := &porttest.MockWebhookSource{
+			MockAlertSource: &porttest.MockAlertSource{NameVal: "gcp", SourceTypeVal: port.SourceTypeWebhook},
+			PathVal:         "/alerts/gcp",
+			HandleFunc:      func(_ context.Context, _ []byte) ([]*entity.Alert, error) { return nil, nil },
+		}
+		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{sourceA, sourceB}}
+		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
+		adapter.SetBasicAuth("/alerts/prometheus", "user", "pass")
+
+		// /alerts/gcp has no auth configured — should be accessible without credentials
+		req := httptest.NewRequest(http.MethodPost, "/alerts/gcp", bytes.NewBufferString("{}"))
+		rec := httptest.NewRecorder()
+		adapter.Mux().ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected 200 for unauthenticated path, got %d", rec.Code)
+		}
+	})
+
+	t.Run("removes credentials when called with empty strings", func(t *testing.T) {
+		source := makeSource("/alerts/prometheus")
+		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{source}}
+		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
+		adapter.SetBasicAuth("/alerts/prometheus", "user", "pass")
+
+		// Confirm auth is enforced
+		req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString("{}"))
+		rec := httptest.NewRecorder()
+		adapter.Mux().ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401 before removal, got %d", rec.Code)
+		}
+
+		// Remove credentials
+		adapter.SetBasicAuth("/alerts/prometheus", "", "")
+
+		// Confirm auth is no longer enforced
+		req2 := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString("{}"))
+		rec2 := httptest.NewRecorder()
+		adapter.Mux().ServeHTTP(rec2, req2)
+		if rec2.Code != http.StatusOK {
+			t.Errorf("expected 200 after credential removal, got %d", rec2.Code)
+		}
+	})
+
+	t.Run("response body does not contain credential information on auth failure", func(t *testing.T) {
+		source := makeSource("/alerts/prometheus")
+		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{source}}
+		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
+		adapter.SetBasicAuth("/alerts/prometheus", "secretuser", "secretpass")
+
+		req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString("{}"))
+		req.Header.Set("Authorization", basicAuthHeader("secretuser", "wrongpass"))
+		rec := httptest.NewRecorder()
+		adapter.Mux().ServeHTTP(rec, req)
+
+		body := rec.Body.String()
+		if strings.Contains(body, "secretuser") || strings.Contains(body, "secretpass") || strings.Contains(body, "wrongpass") {
+			t.Errorf("response body must not contain credential values, got: %s", body)
+		}
+	})
 }
 
 func TestHTTPAdapter_AsyncAndSyncHandlerPrecedence(t *testing.T) {

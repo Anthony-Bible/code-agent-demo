@@ -4,19 +4,38 @@
 addr: ":8080"
 
 sources:
-  # Prometheus Alertmanager webhook source
+  # Prometheus Alertmanager webhook source (no authentication)
   - type: prometheus
     name: alertmanager
     webhook_path: /alerts/prometheus
     # extra:
     #   key: value
 
-  # Google Cloud Monitoring webhook source
+  # Google Cloud Monitoring webhook source (no authentication)
   - type: gcp_monitoring
     name: gcp-alerts
     webhook_path: /alerts/gcp
     # extra:
     #   key: value
+
+  # Example: Prometheus source with Basic Auth enabled.
+  # Requests to /alerts/prometheus-secure must supply the username and password
+  # below via HTTP Basic Authentication, or they will be rejected with 401.
+  #
+  # Security notes:
+  #   - Use strong, randomly-generated passwords (at least 32 characters).
+  #   - Rotate credentials regularly and avoid reusing them across sources.
+  #   - Credentials are compared using constant-time equality to prevent
+  #     timing-based enumeration attacks.
+  #   - Credentials are never written to logs or error responses.
+  #   - Prefer deploying behind TLS so credentials are not sent in the clear.
+  #
+  # - type: prometheus
+  #   name: alertmanager-secure
+  #   webhook_path: /alerts/prometheus-secure
+  #   basic_auth:
+  #     username: myuser
+  #     password: mypass   # treat this as a secret; do not commit real passwords
 
 # Configure Google Cloud Monitoring to send webhooks to:
 # http://your-server:8080/alerts/gcp
