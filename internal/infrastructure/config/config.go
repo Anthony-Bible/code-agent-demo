@@ -130,7 +130,7 @@ type SafetyConfig struct {
 // Defaults returns a Config struct with all default values set.
 func Defaults() *Config {
 	return &Config{
-		AIModel:    "hf:zai-org/GLM-4.7",
+		AIModel:    "claude-sonnet-4-6",
 		MaxTokens:  20000,
 		WorkingDir: ".",
 		UI: UIConfig{
