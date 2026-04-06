@@ -34,6 +34,7 @@ A Go-based AI-powered alert investigation agent built with hexagonal (clean) arc
   - [Skills](#skills)
   - [Subagents](#subagent-system)
   - [Alerts & Investigations](#alerts--investigations)
+- [Kubernetes Deployment](#kubernetes-deployment)
 - [Configuration](#configuration)
 - [Architecture](#architecture)
 - [Contributing](CONTRIBUTING.md)
@@ -539,6 +540,138 @@ Investigation escalated to human review:
 - Confidence: 0.45
 - Findings: 3 observations, no definitive root cause
 - Recommended actions: Manual log inspection required
+```
+
+---
+
+### Kubernetes Deployment
+
+The application can be deployed to Kubernetes using the provided manifests and Kustomize. Kustomize is used to pin immutable image tags at deploy time, ensuring reliable rollbacks.
+
+`★ Insight ─────────────────────────────────────`
+**Kustomize Image Tagging**: Kustomize generates manifests at runtime by merging and transforming resources. The `images:` field in `kustomization.yaml` declares an image target that can be overridden at deploy time using `kustomize edit set image`. The git-tracked `deployment.yaml` uses `:latest` as a placeholder, while `kustomize build` substitutes the actual immutable SHA tag like `sha-a1b2c3d` before applying to Kubernetes. This pattern keeps git history clean while enabling reliable deployments.
+
+**Kubernetes Security**: The deployment includes several security best practices: `automountServiceAccountToken: false` (no implicit RBAC access), `readOnlyRootFilesystem: true` (immutability), dropping all Linux capabilities, and running as non-root user (10001). The alert sources configuration is injected via ConfigMap to avoid baking secrets into images.
+`─────────────────────────────────────────────────`
+
+#### Prerequisites
+
+- **Kubernetes cluster** (v1.20+)
+- **kubectl** configured to access your cluster
+- **kustomize** installed (`brew install kustomize` or `go install sigs.k8s.io/kustomize/kustomize/v5@latest`)
+
+#### Deployment Overview
+
+The deployment includes:
+
+| Resource | Description |
+|----------|-------------|
+| `namespace.yaml` | Kubernetes namespace (`code-agent`) |
+| `configmap.yaml` | Environment configuration (model, tokens, safety settings) |
+| `configmap-alert-sources.yaml` | Alert sources configuration (Prometheus, GCP Monitoring) |
+| `deployment.yaml` | Deployment manifest with security hardening |
+| `service.yaml` | Service to expose the webhook server |
+
+#### Quick Deploy (Development)
+
+For development/testing without image tag pinning:
+
+```bash
+kubectl apply -k deploy/k8s
+```
+
+#### Production Deploy (with Immutable Image Tags)
+
+For production, pin to an immutable SHA tag to enable reliable rollbacks:
+
+```bash
+# Get the short SHA of the commit you want to deploy
+export SHORT_SHA=$(git rev-parse --short HEAD)
+
+# Build and apply with the specific image tag
+cd deploy/k8s
+kustomize edit set image ghcr.io/anthony-bible/code-agent-demo:sha-${SHORT_SHA}
+kustomize build . | kubectl apply -f -
+```
+
+This generates a manifest where the image tag is pinned to `sha-a1b2c3d` (or your specific commit SHA), making rollbacks predictable.
+
+#### Deployment from CI Image
+
+After CI builds and pushes an image, deploy the specific SHA tag:
+
+```bash
+# List available tags from GHCR
+gh api repos/Anthony-Bible/code-agent-demo/packages/container/code-agent-demo/versions
+
+# Deploy with the specific SHA tag
+cd deploy/k8s
+kustomize edit set image ghcr.io/anthony-bible/code-agent-demo:sha-<commit>
+kustomize build . | kubectl apply -f -
+```
+
+#### Verify Deployment
+
+```bash
+# Check pod status
+kubectl get pods -n code-agent
+
+# View logs
+kubectl logs -n code-agent -l app.kubernetes.io/name=code-agent-demo -f
+
+# Test health endpoint
+kubectl port-forward -n code-agent svc/code-agent-demo 8080:8080
+curl http://localhost:8080/health
+```
+
+#### Alert Sources Configuration
+
+The alert sources are configured via the `code-agent-alert-sources` ConfigMap. To update alert sources without redeploying:
+
+```bash
+# Edit the ConfigMap directly
+kubectl edit configmap -n code-agent code-agent-alert-sources
+
+# Or apply an updated file
+kubectl apply -f deploy/k8s/configmap-alert-sources.yaml
+
+# Restart the pod to pick up changes (if needed)
+kubectl rollout restart deployment -n code-agent code-agent-demo
+```
+
+#### Rollback
+
+To rollback to a previous version:
+
+```bash
+# Rollback using kubectl history
+kubectl rollout history deployment -n code-agent code-agent-demo
+kubectl rollout undo deployment -n code-agent code-agent-demo
+
+# Or redeploy with a previous SHA tag
+cd deploy/k8s
+kustomize edit set image ghcr.io/anthony-bible/code-agent-demo:sha-<previous-commit>
+kustomize build . | kubectl apply -f -
+```
+
+#### Security Considerations
+
+The deployment includes several security hardening measures:
+
+| Setting | Value | Purpose |
+|---------|-------|---------|
+| `automountServiceAccountToken` | `false` | Disables implicit RBAC access |
+| ` readOnlyRootFilesystem` | `true` | Prevents in-place modifications |
+| `capabilities.drop` | `["ALL"]` | Removes all Linux capabilities |
+| `runAsNonRoot` | `true` | Enforces non-root user |
+| `runAsUser` / `runAsGroup` | `10001` | Specific non-privileged UID/GID |
+| `seccompProfile.type` | `RuntimeDefault` | Enables seccomp filtering |
+
+**Note**: Secrets (like API keys) should be stored in Kubernetes Secrets, not ConfigMaps. Create a secret if needed:
+
+```bash
+kubectl create secret generic -n code-agent code-agent-secrets \
+  --from-literal=ANTHROPIC_API_KEY=your-key-here
 ```
 
 ### Configuration

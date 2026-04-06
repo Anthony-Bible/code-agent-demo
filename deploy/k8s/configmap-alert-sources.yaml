@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: code-agent-alert-sources
+  namespace: code-agent
+  labels:
+    app.kubernetes.io/name: code-agent-demo
+data:
+  alert-sources.yaml: |
+    # Alert Sources Configuration
+    # This file configures alert sources for the webhook server.
+
+    # Server address (optional, default: ":8080")
+    addr: ":8080"
+
+    # Alert sources to register
+    # Alert sources to register. Customize webhook_path values to match your Alertmanager/GCP
+    # notification configuration. The webhook_path must match what your alert sources POST to.
+    sources:
+      # Prometheus Alertmanager webhook
+      - type: prometheus
+        name: prometheus-prod
+        webhook_path: /alerts/prometheus
+
+      # Google Cloud Monitoring webhook source
+      - type: gcp_monitoring
+        name: gcp-alerts
+        webhook_path: /alerts/gcp
