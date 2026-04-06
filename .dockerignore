@@ -1,0 +1,48 @@
+# Version control
+.git
+.github
+
+# Agent/AI working directories
+.agent
+.claude
+.gemini
+
+# IDE
+.idea
+
+# Documentation (not needed in image)
+*.md
+REVIEW-*.md
+
+# Local binary artifacts
+code-agent-demo
+agent
+cli
+
+# Build artifacts
+vendor
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+
+# Data and logs
+data/
+logs/
+*.log
+
+# Deployment manifests (not needed in image)
+deploy/
+
+# Untracked work-in-progress
+conductor/
+
+# Demo files
+demo.*
+
+# Prevent real config with potential secrets from being baked into image
+config/alert-sources.yaml
+
+# Skills and agents directories are needed at runtime
+# so they are NOT ignored
