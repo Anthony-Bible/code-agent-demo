@@ -32,6 +32,10 @@ type basicAuthEntry struct {
 type HTTPAdapterConfig struct {
 	// Addr is the address to listen on (e.g., ":8080", "0.0.0.0:9090").
 	Addr string
+	// InternalAddr is the address for the internal-only probe server
+	// (e.g., "127.0.0.1:8081"). The /health and /ready endpoints are served
+	// exclusively on this address so they are never reachable from the internet.
+	InternalAddr string
 	// ReadTimeout is the maximum duration for reading the entire request.
 	ReadTimeout time.Duration
 	// WriteTimeout is the maximum duration for writing the response.
@@ -44,6 +48,7 @@ type HTTPAdapterConfig struct {
 func DefaultConfig() HTTPAdapterConfig {
 	return HTTPAdapterConfig{
 		Addr:            ":8080",
+		InternalAddr:    ":8081",
 		ReadTimeout:     30 * time.Second,
 		WriteTimeout:    30 * time.Second,
 		ShutdownTimeout: 10 * time.Second,
@@ -59,7 +64,9 @@ type HTTPAdapter struct {
 	alertRunner       port.AlertRunner
 	config            HTTPAdapterConfig
 	server            *http.Server
+	internalServer    *http.Server
 	mux               *http.ServeMux
+	internalMux       *http.ServeMux
 	mu                sync.RWMutex
 	wg                sync.WaitGroup // tracks in-flight async investigations
 	invCtx            context.Context
@@ -78,29 +85,35 @@ func NewHTTPAdapter(
 	config HTTPAdapterConfig,
 	log port.Logger,
 ) *HTTPAdapter {
-	invCtx, invCancel := context.WithCancel(context.Background())
+	invCtx, invCancel := context.WithCancel(context.Background()) //nolint:gosec // cancel stored in struct field invCancel and called during Shutdown
 	adapter := &HTTPAdapter{
 		sourceManager: sourceManager,
 		config:        config,
 		mux:           http.NewServeMux(),
+		internalMux:   http.NewServeMux(),
 		invCtx:        invCtx,
 		invCancel:     invCancel,
 		logger:        port.SafeLogger(log),
 		basicAuth:     make(map[string]basicAuthEntry),
 	}
 	adapter.registerRoutes()
+	adapter.registerInternalRoutes()
 	return adapter
 }
 
 // registerRoutes sets up the HTTP routes using Go 1.22+ syntax.
 func (a *HTTPAdapter) registerRoutes() {
-	// Health endpoints
-	a.mux.HandleFunc("GET /health", a.handleHealth)
-	a.mux.HandleFunc("GET /ready", a.handleReady)
-
 	// Dynamic webhook routes based on registered sources
 	// Using a catch-all pattern that routes to the appropriate source
 	a.mux.HandleFunc("POST /alerts/{source...}", a.handleWebhook)
+}
+
+// registerInternalRoutes sets up the internal-only probe endpoints.
+// These are served on a separate listener bound to the loopback address
+// so they are never reachable from outside the host.
+func (a *HTTPAdapter) registerInternalRoutes() {
+	a.internalMux.HandleFunc("GET /health", a.handleHealth)
+	a.internalMux.HandleFunc("GET /ready", a.handleReady)
 }
 
 // handleHealth returns 200 OK if the server is running.
@@ -368,16 +381,29 @@ func (a *HTTPAdapter) Start(ctx context.Context) error {
 		return nil
 	}
 
-	a.server = &http.Server{
-		Addr:         a.config.Addr,
-		Handler:      a.mux,
-		ReadTimeout:  a.config.ReadTimeout,
-		WriteTimeout: a.config.WriteTimeout,
+	a.server = a.newServer(a.config.Addr, a.mux)
+
+	// Internal probe server is only bound to the loopback address when an
+	// InternalAddr is configured, ensuring /health and /ready are never
+	// reachable from the public network.
+	if a.config.InternalAddr != "" {
+		a.internalServer = a.newServer(a.config.InternalAddr, a.internalMux)
 	}
+
 	a.started = true
 	a.mu.Unlock()
 
-	// Start server in goroutine
+	// Start internal probe server in a goroutine (best-effort; a failure here
+	// is logged but does not prevent the main server from running).
+	if a.internalServer != nil {
+		go func() {
+			if err := a.internalServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				a.logger.Warn("Internal probe server stopped unexpectedly", "error", err)
+			}
+		}()
+	}
+
+	// Start main server in goroutine
 	errCh := make(chan error, 1)
 	go func() {
 		if err := a.server.ListenAndServe(); err != http.ErrServerClosed {
@@ -426,6 +452,12 @@ func (a *HTTPAdapter) Shutdown() error {
 	ctx, cancel := context.WithTimeout(context.Background(), a.config.ShutdownTimeout)
 	defer cancel()
 
+	// Shut down the internal probe server first (best-effort), sharing the same
+	// deadline so both shutdowns together stay within ShutdownTimeout.
+	if a.internalServer != nil {
+		_ = a.internalServer.Shutdown(ctx)
+	}
+
 	err := a.server.Shutdown(ctx)
 	a.started = false
 	return err
@@ -439,4 +471,18 @@ func (a *HTTPAdapter) Addr() string {
 // Mux returns the HTTP mux for testing purposes.
 func (a *HTTPAdapter) Mux() *http.ServeMux {
 	return a.mux
+}
+
+// InternalMux returns the internal-only HTTP mux (probe endpoints) for testing purposes.
+func (a *HTTPAdapter) InternalMux() *http.ServeMux {
+	return a.internalMux
+}
+
+func (a *HTTPAdapter) newServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:         addr,
+		Handler:      handler,
+		ReadTimeout:  a.config.ReadTimeout,
+		WriteTimeout: a.config.WriteTimeout,
+	}
 }

@@ -30,6 +30,9 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
+            - name: internal
+              containerPort: 8081
+              protocol: TCP
           envFrom:
             - configMapRef:
                 name: code-agent-config
@@ -38,7 +41,7 @@ spec:
           livenessProbe:
             httpGet:
               path: /health
-              port: http
+              port: internal
             initialDelaySeconds: 5
             periodSeconds: 15
             timeoutSeconds: 3
@@ -46,7 +49,7 @@ spec:
           readinessProbe:
             httpGet:
               path: /ready
-              port: http
+              port: internal
             initialDelaySeconds: 3
             periodSeconds: 10
             timeoutSeconds: 3

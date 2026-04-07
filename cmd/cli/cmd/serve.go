@@ -182,12 +182,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}, container.Logger())
 
 	// Create webhook adapter with configured address
-	webhookAdapter := webhook.NewHTTPAdapter(sourceManager, webhook.HTTPAdapterConfig{
-		Addr:            addr,
-		ReadTimeout:     webhook.DefaultConfig().ReadTimeout,
-		WriteTimeout:    webhook.DefaultConfig().WriteTimeout,
-		ShutdownTimeout: webhook.DefaultConfig().ShutdownTimeout,
-	}, container.Logger())
+	adapterCfg := webhook.DefaultConfig()
+	adapterCfg.Addr = addr
+	webhookAdapter := webhook.NewHTTPAdapter(sourceManager, adapterCfg, container.Logger())
 	webhookAdapter.SetAsyncAlertHandler(alertHandler.HandleEntityAlertAsync, alertHandler.RunEntityAlertInvestigation)
 
 	// Register per-source Basic Auth credentials with the webhook adapter.
