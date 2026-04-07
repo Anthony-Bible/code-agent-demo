@@ -25,9 +25,9 @@ var serveCmd = &cobra.Command{
 	Long: `Start an HTTP server to receive webhook alerts from external systems.
 
 The server exposes endpoints for:
-- Health checks: GET /health
-- Readiness checks: GET /ready
-- Webhook receivers: POST /alerts/{source-path}
+- Health checks: GET /health  (internal listener, default :8081)
+- Readiness checks: GET /ready  (internal listener, default :8081)
+- Webhook receivers: POST /alerts/{source-path}  (public listener, default :8080)
 
 Example:
   code-agent-demo serve --addr :8080
@@ -199,8 +199,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// Print startup info
 	_ = ui.DisplaySystemMessage("")
 	_ = ui.DisplaySystemMessage("Starting webhook server on " + addr)
-	_ = ui.DisplaySystemMessage("Health check: GET http://localhost" + addr + "/health")
-	_ = ui.DisplaySystemMessage("Ready check:  GET http://localhost" + addr + "/ready")
+	_ = ui.DisplaySystemMessage("Health check: GET http://localhost" + adapterCfg.InternalAddr + "/health")
+	_ = ui.DisplaySystemMessage("Ready check:  GET http://localhost" + adapterCfg.InternalAddr + "/ready")
 	for _, srcCfg := range webhookCfg.Sources {
 		authTag := ""
 		if srcCfg.BasicAuth != nil && srcCfg.BasicAuth.Username != "" && srcCfg.BasicAuth.Password != "" {

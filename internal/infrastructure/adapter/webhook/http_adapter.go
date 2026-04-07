@@ -32,9 +32,10 @@ type basicAuthEntry struct {
 type HTTPAdapterConfig struct {
 	// Addr is the address to listen on (e.g., ":8080", "0.0.0.0:9090").
 	Addr string
-	// InternalAddr is the address for the internal-only probe server
-	// (e.g., "127.0.0.1:8081"). The /health and /ready endpoints are served
-	// exclusively on this address so they are never reachable from the internet.
+	// InternalAddr is the address for the internal probe server (e.g., ":8081").
+	// The /health and /ready endpoints are served exclusively on this address.
+	// In Kubernetes, security is enforced by not exposing this port via a Service,
+	// rather than by binding to loopback.
 	InternalAddr string
 	// ReadTimeout is the maximum duration for reading the entire request.
 	ReadTimeout time.Duration
@@ -109,8 +110,8 @@ func (a *HTTPAdapter) registerRoutes() {
 }
 
 // registerInternalRoutes sets up the internal-only probe endpoints.
-// These are served on a separate listener bound to the loopback address
-// so they are never reachable from outside the host.
+// These are served on a separate listener (InternalAddr) that is not
+// exposed via the public-facing Service in Kubernetes.
 func (a *HTTPAdapter) registerInternalRoutes() {
 	a.internalMux.HandleFunc("GET /health", a.handleHealth)
 	a.internalMux.HandleFunc("GET /ready", a.handleReady)
@@ -383,9 +384,9 @@ func (a *HTTPAdapter) Start(ctx context.Context) error {
 
 	a.server = a.newServer(a.config.Addr, a.mux)
 
-	// Internal probe server is only bound to the loopback address when an
-	// InternalAddr is configured, ensuring /health and /ready are never
-	// reachable from the public network.
+	// Internal probe server is started alongside the main server when InternalAddr
+	// is configured. In Kubernetes, port 8081 is intentionally not exposed via a
+	// Service so only the kubelet can reach it via the Pod IP.
 	if a.config.InternalAddr != "" {
 		a.internalServer = a.newServer(a.config.InternalAddr, a.internalMux)
 	}
@@ -398,7 +399,7 @@ func (a *HTTPAdapter) Start(ctx context.Context) error {
 	if a.internalServer != nil {
 		go func() {
 			if err := a.internalServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				a.logger.Warn("Internal probe server stopped unexpectedly", "error", err)
+				a.logger.Error("Internal probe server stopped unexpectedly", "error", err, "addr", a.config.InternalAddr)
 			}
 		}()
 	}
