@@ -26,7 +26,7 @@ func TestHTTPAdapter_HealthEndpoint(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/health", nil)
 		rec := httptest.NewRecorder()
 
-		adapter.Mux().ServeHTTP(rec, req)
+		adapter.InternalMux().ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusOK {
 			t.Errorf("expected 200, got %d", rec.Code)
@@ -50,7 +50,7 @@ func TestHTTPAdapter_ReadyEndpoint(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 		rec := httptest.NewRecorder()
 
-		adapter.Mux().ServeHTTP(rec, req)
+		adapter.InternalMux().ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Errorf("expected 503, got %d", rec.Code)
@@ -68,7 +68,7 @@ func TestHTTPAdapter_ReadyEndpoint(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 		rec := httptest.NewRecorder()
 
-		adapter.Mux().ServeHTTP(rec, req)
+		adapter.InternalMux().ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusOK {
 			t.Errorf("expected 200, got %d", rec.Code)
@@ -80,6 +80,38 @@ func TestHTTPAdapter_ReadyEndpoint(t *testing.T) {
 		}
 		if resp["sources"] != float64(1) {
 			t.Errorf("expected sources=1, got %v", resp["sources"])
+		}
+	})
+}
+
+func TestHTTPAdapter_ProbesNotOnPublicMux(t *testing.T) {
+	t.Run("health endpoint is not served on public mux", func(t *testing.T) {
+		manager := &porttest.MockAlertSourceManager{}
+		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
+
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		rec := httptest.NewRecorder()
+
+		adapter.Mux().ServeHTTP(rec, req)
+
+		// The public mux has no /health route, so it returns 404
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("expected 404 on public mux, got %d", rec.Code)
+		}
+	})
+
+	t.Run("ready endpoint is not served on public mux", func(t *testing.T) {
+		manager := &porttest.MockAlertSourceManager{}
+		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
+
+		req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+		rec := httptest.NewRecorder()
+
+		adapter.Mux().ServeHTTP(rec, req)
+
+		// The public mux has no /ready route, so it returns 404
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("expected 404 on public mux, got %d", rec.Code)
 		}
 	})
 }
@@ -204,7 +236,7 @@ func TestHTTPAdapter_MethodRouting(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/health", nil)
 		rec := httptest.NewRecorder()
 
-		adapter.Mux().ServeHTTP(rec, req)
+		adapter.InternalMux().ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusMethodNotAllowed {
 			t.Errorf("expected 405, got %d", rec.Code)
@@ -318,6 +350,9 @@ func TestHTTPAdapter_Config(t *testing.T) {
 
 		if config.Addr != ":8080" {
 			t.Errorf("expected :8080, got %s", config.Addr)
+		}
+		if config.InternalAddr != ":8081" {
+			t.Errorf("expected :8081, got %s", config.InternalAddr)
 		}
 		if config.ReadTimeout != 30*time.Second {
 			t.Errorf("expected 30s, got %v", config.ReadTimeout)
@@ -588,32 +623,38 @@ func TestHTTPAdapter_BasicAuth(t *testing.T) {
 		},
 	}
 
+	runCase := func(t *testing.T, tt struct {
+		name       string
+		authUser   string
+		authPass   string
+		reqUser    string
+		reqPass    string
+		wantStatus int
+	},
+	) {
+		t.Helper()
+		source := makeSource("/alerts/prometheus")
+		manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{source}}
+		adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
+		if tt.authUser != "" {
+			adapter.SetBasicAuth("/alerts/prometheus", tt.authUser, tt.authPass)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString("{}"))
+		if tt.reqUser != "" {
+			req.Header.Set("Authorization", basicAuthHeader(tt.reqUser, tt.reqPass))
+		}
+		rec := httptest.NewRecorder()
+		adapter.Mux().ServeHTTP(rec, req)
+		if rec.Code != tt.wantStatus {
+			t.Errorf("expected %d, got %d", tt.wantStatus, rec.Code)
+		}
+		if tt.wantStatus == http.StatusUnauthorized && tt.reqUser == "" && rec.Header().Get("WWW-Authenticate") == "" {
+			t.Error("expected WWW-Authenticate header to be set")
+		}
+	}
+
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			source := makeSource("/alerts/prometheus")
-			manager := &porttest.MockAlertSourceManager{SourcesVal: []port.AlertSource{source}}
-			adapter := NewHTTPAdapter(manager, DefaultConfig(), logger.NewNop())
-
-			if tt.authUser != "" {
-				adapter.SetBasicAuth("/alerts/prometheus", tt.authUser, tt.authPass)
-			}
-
-			req := httptest.NewRequest(http.MethodPost, "/alerts/prometheus", bytes.NewBufferString("{}"))
-			if tt.reqUser != "" {
-				req.Header.Set("Authorization", basicAuthHeader(tt.reqUser, tt.reqPass))
-			}
-			rec := httptest.NewRecorder()
-			adapter.Mux().ServeHTTP(rec, req)
-
-			if rec.Code != tt.wantStatus {
-				t.Errorf("expected %d, got %d", tt.wantStatus, rec.Code)
-			}
-			if tt.wantStatus == http.StatusUnauthorized && tt.reqUser == "" {
-				if rec.Header().Get("WWW-Authenticate") == "" {
-					t.Error("expected WWW-Authenticate header to be set")
-				}
-			}
-		})
+		t.Run(tt.name, func(t *testing.T) { runCase(t, tt) })
 	}
 
 	t.Run("auth is scoped per path: authenticated path does not affect unauthenticated path", func(t *testing.T) {
