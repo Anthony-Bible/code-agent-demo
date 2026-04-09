@@ -20,6 +20,9 @@ const (
 	toolBash                  = "bash"
 )
 
+// statusEscalated is the investigation status when the AI escalates for human review.
+const statusEscalated = "escalated"
+
 // RCAServiceInterface defines the interface for Root Cause Analysis correlation.
 type RCAServiceInterface interface {
 	Correlate(ctx context.Context, findings []entity.InvestigationFinding) ([]entity.RCAFinding, error)
@@ -164,12 +167,22 @@ func (rc *runContext) failedResult(err error) *InvestigationResult {
 	}
 }
 
-// executeToolCallWithSafety wraps BaseRunner.ExecuteToolCall with command-level safety checks.
-func (r *InvestigationRunner) executeToolCallWithSafety(ctx context.Context, tc port.ToolCallInfo) entity.ToolResult {
-	if err := r.checkCommandSafety(tc); err != nil {
-		return entity.ToolResult{ToolID: tc.ToolID, Result: err.Error(), IsError: true}
+func (r *InvestigationRunner) logToolResult(log port.Logger, tc port.ToolCallInfo, result entity.ToolResult) {
+	log = log.With("tool", tc.ToolName, "tool_id", tc.ToolID)
+	if result.IsError {
+		log.Error("tool execution failed", "error_message", result.Result)
+		return
 	}
-	return r.ExecuteToolCall(ctx, tc)
+	log.Info("tool execution completed", "result_bytes", len(result.Result))
+	log.Debug("tool execution result preview", "result_preview", truncateForLog(result.Result, 500))
+}
+
+func truncateForLog(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "..."
 }
 
 // checkCommandSafety validates command-level safety for bash tools.
@@ -205,7 +218,17 @@ func extractCommandFromInput(input map[string]interface{}) string {
 
 // processToolCalls delegates to BaseRunner.ProcessToolCalls with safety-checked execution.
 func (r *InvestigationRunner) processToolCalls(rc *runContext, toolCalls []port.ToolCallInfo) error {
-	return r.ProcessToolCalls(&rc.BaseRunContext, toolCalls, "is not allowed for this investigation", r.executeToolCallWithSafety)
+	executor := func(ctx context.Context, tc port.ToolCallInfo) entity.ToolResult {
+		if err := r.checkCommandSafety(tc); err != nil {
+			blocked := entity.ToolResult{ToolID: tc.ToolID, Result: err.Error(), IsError: true}
+			r.logToolResult(rc.logger, tc, blocked)
+			return blocked
+		}
+		result := r.ExecuteToolCall(ctx, tc)
+		r.logToolResult(rc.logger, tc, result)
+		return result
+	}
+	return r.ProcessToolCalls(&rc.BaseRunContext, toolCalls, "is not allowed for this investigation", executor)
 }
 
 // Run executes an investigation for the given alert.
@@ -285,7 +308,7 @@ func (r *InvestigationRunner) Run(
 	result, err := r.runInvestigationLoop(rc)
 
 	// Perform Root Cause Analysis if findings were gathered and RCA service is available
-	if result != nil && (result.Status == "completed" || result.Status == "escalated") && len(result.Findings) > 0 && r.rcaService != nil {
+	if result != nil && (result.Status == "completed" || result.Status == statusEscalated) && len(result.Findings) > 0 && r.rcaService != nil {
 		rc.logger.Info("findings gathered, triggering RCA correlation", "findings_count", len(result.Findings))
 
 		// Convert findings to InvestigationFinding entities for the RCA service
@@ -504,7 +527,7 @@ func (rc *runContext) buildEscalationResult(input map[string]interface{}) *Inves
 	result := &InvestigationResult{
 		InvestigationID: rc.investigationID,
 		AlertID:         rc.alert.ID(),
-		Status:          "escalated",
+		Status:          statusEscalated,
 		Escalated:       true,
 		ActionsTaken:    rc.ActionsTaken,
 		Duration:        time.Since(rc.StartTime),
@@ -697,12 +720,16 @@ func (r *InvestigationRunner) processLoopIteration(
 		if len(inputPreview) > 200 {
 			inputPreview = inputPreview[:200] + "..."
 		}
-		rc.logger.Info("complete_investigation called", "input_preview", inputPreview)
+		rc.logger.Info("complete_investigation called",
+			"tool_id", separated.completion.ToolID,
+			"input_preview", inputPreview,
+		)
 
 		return rc.buildCompletionResult(separated.completion.Input), true, nil
 	}
 
 	if separated.escalation != nil {
+		rc.logger.Info("escalate_investigation called", "tool_id", separated.escalation.ToolID)
 		return rc.buildEscalationResult(separated.escalation.Input), true, nil
 	}
 
