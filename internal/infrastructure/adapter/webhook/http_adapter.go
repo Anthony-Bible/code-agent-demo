@@ -86,7 +86,7 @@ func NewHTTPAdapter(
 	config HTTPAdapterConfig,
 	log port.Logger,
 ) *HTTPAdapter {
-	invCtx, invCancel := context.WithCancel(context.Background()) //nolint:gosec // cancel stored in struct field invCancel and called during Shutdown
+	invCtx, invCancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel is stored in invCancel and called in Shutdown
 	adapter := &HTTPAdapter{
 		sourceManager: sourceManager,
 		config:        config,
@@ -453,10 +453,13 @@ func (a *HTTPAdapter) Shutdown() error {
 	ctx, cancel := context.WithTimeout(context.Background(), a.config.ShutdownTimeout)
 	defer cancel()
 
-	// Shut down the internal probe server first (best-effort), sharing the same
-	// deadline so both shutdowns together stay within ShutdownTimeout.
+	// Stop the probe server first so load balancers see /ready fail and stop
+	// routing new traffic before we drain in-flight requests on the main server.
+	// 2s timeout is ample for trivially short probe connections.
 	if a.internalServer != nil {
-		_ = a.internalServer.Shutdown(ctx)
+		probeCtx, probeCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer probeCancel()
+		_ = a.internalServer.Shutdown(probeCtx)
 	}
 
 	err := a.server.Shutdown(ctx)

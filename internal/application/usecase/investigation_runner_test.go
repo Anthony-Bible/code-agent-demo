@@ -3571,3 +3571,52 @@ func TestInvestigationRunner_RCA_Escalated(t *testing.T) {
 		t.Errorf("RCAFinding summary = %v, want 'Network instability suspected'", result.RCAFindings[0].Summary)
 	}
 }
+
+func TestTruncateForLog(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		maxLen int
+		want   string
+	}{
+		{
+			name:   "empty string",
+			input:  "",
+			maxLen: 10,
+			want:   "",
+		},
+		{
+			name:   "within limit",
+			input:  "hello",
+			maxLen: 10,
+			want:   "hello",
+		},
+		{
+			name:   "exact length",
+			input:  "hello",
+			maxLen: 5,
+			want:   "hello",
+		},
+		{
+			name:   "exceeds limit ASCII",
+			input:  "hello world",
+			maxLen: 5,
+			want:   "hello...",
+		},
+		{
+			name:   "multi-byte unicode truncates on rune boundary",
+			input:  "日本語テスト",
+			maxLen: 3,
+			want:   "日本語...",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncateForLog(tt.input, tt.maxLen)
+			if got != tt.want {
+				t.Errorf("truncateForLog(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
+			}
+		})
+	}
+}
