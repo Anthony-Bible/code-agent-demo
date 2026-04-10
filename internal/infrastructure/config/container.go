@@ -238,6 +238,13 @@ func createInvestigationComponents(
 	invToolExecutor.SetCommandConfirmationCallback(
 		buildHeadlessCallback(uiAdapter, "[INVESTIGATION BLOCKED]", "[INVESTIGATION AUTO-APPROVED]"),
 	)
+	// Explicitly deny plan mode in headless investigations. Without this callback,
+	// enter_plan_mode silently activates plan mode (nil == allow), which would cause
+	// bash and mutating tools to write plan files instead of executing — stalling the
+	// investigation with no terminal available to unblock it.
+	invToolExecutor.SetPlanModeConfirmCallback(func(_ string) bool {
+		return false
+	})
 
 	// Create safety config (single source of truth for safety settings)
 	safetyConfig := appconfig.DefaultInvestigationConfig()
