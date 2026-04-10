@@ -77,7 +77,7 @@ func (e *InvestigationSafetyEnforcer) CheckToolAllowed(tool string) error {
 // Uses the configured CommandValidator for whitelist/blacklist validation.
 func (e *InvestigationSafetyEnforcer) CheckCommandAllowed(cmd string) error {
 	result := e.validator.Validate(cmd, false)
-	if !result.Allowed {
+	if !result.Allowed || result.NeedsConfirm {
 		return ErrCommandBlocked
 	}
 	return nil

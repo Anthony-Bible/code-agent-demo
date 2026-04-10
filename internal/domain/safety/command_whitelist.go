@@ -63,6 +63,10 @@ type CommandWhitelist struct {
 // Used by all whitelist patterns to ensure proper command boundary matching.
 const cmdBoundary = `(\s|$)`
 
+// devNullRedirectRe matches output redirections to /dev/null with a word boundary,
+// preventing false matches like /dev/nullfoo or /dev/nullmalware.
+var devNullRedirectRe = regexp.MustCompile(`^>{1,2}\s*/dev/null\b`)
+
 // MustSimple creates a WhitelistPattern for a simple command.
 // Uses regexp.QuoteMeta to escape cmd, ensuring safe pattern compilation.
 // Panics on invalid pattern (should never happen with QuoteMeta).
@@ -121,6 +125,14 @@ func NewCommandWhitelist(patterns []WhitelistPattern) *CommandWhitelist {
 	}
 }
 
+// isDevNullRedirect reports whether the '>' at position i in cmd redirects to /dev/null.
+// It handles >>/dev/null, >> /dev/null, >/dev/null, and > /dev/null.
+// The regex requires a word boundary after /dev/null to prevent matching paths
+// like /dev/nullfoo or /dev/nullmalware.
+func isDevNullRedirect(cmd string, i int) bool {
+	return devNullRedirectRe.MatchString(cmd[i:])
+}
+
 // containsOutputRedirection checks if a command contains unquoted output redirection operators.
 // Detects: >, >>, 2>, 2>>, &>, &>>, n>, n>> (where n is any digit).
 // Does NOT block input redirections: <, <<, <<<.
@@ -164,6 +176,9 @@ func containsOutputRedirection(cmd string) bool {
 			// If preceded by '<', this is part of <<, <<<, or <> — not an output redirect
 			if i > 0 && cmd[i-1] == '<' {
 				continue
+			}
+			if isDevNullRedirect(cmd, i) {
+				continue // /dev/null discards output safely
 			}
 			// This is an output redirection (>, >>, n>, &>, etc.)
 			return true
