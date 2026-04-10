@@ -140,7 +140,9 @@ func (h *AlertHandler) Handle(ctx context.Context, alert *AlertForInvestigation)
 	if len(result.RCAFindings) > 0 {
 		reporter := h.investigationUseCase.RCAReporter()
 		if reporter != nil {
-			_ = reporter.DisplayRCAFindings(result.RCAFindings)
+			if displayErr := reporter.DisplayRCAFindings(result.RCAFindings); displayErr != nil {
+				log.Error("failed to display RCA findings", "error", displayErr)
+			}
 		}
 	}
 
@@ -288,7 +290,9 @@ func (h *AlertHandler) RunEntityAlertInvestigation(
 	if len(result.RCAFindings) > 0 {
 		reporter := h.investigationUseCase.RCAReporter()
 		if reporter != nil {
-			_ = reporter.DisplayRCAFindings(result.RCAFindings)
+			if displayErr := reporter.DisplayRCAFindings(result.RCAFindings); displayErr != nil {
+				log.Error("failed to display RCA findings", "error", displayErr)
+			}
 		}
 	}
 

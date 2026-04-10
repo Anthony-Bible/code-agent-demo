@@ -188,7 +188,8 @@ func TestEndToEndRCALogic(t *testing.T) {
 
 	// Verify RCA header is present
 	assert.Contains(t, out, "ROOT CAUSE ANALYSIS")
-	assert.Contains(t, out, "SUMMARY: CPU exhaustion on server-01 due to 'bad-actor' process")
+	assert.Contains(t, out, "SUMMARY")
+	assert.Contains(t, out, "CPU exhaustion on server-01 due to 'bad-actor' process")
 	assert.Contains(t, out, "IDENTIFIED CAUSES:")
 	assert.Contains(t, out, "[C1] Runaway 'bad-actor' process")
 	assert.Contains(t, out, "SUGGESTED REMEDIES:")

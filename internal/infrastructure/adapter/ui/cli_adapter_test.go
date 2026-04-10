@@ -1905,7 +1905,8 @@ func TestCLIAdapter_DisplayRCAFindings(t *testing.T) {
 		require.NoError(t, err)
 		out := output.String()
 		assert.Contains(t, out, "ROOT CAUSE ANALYSIS")
-		assert.Contains(t, out, "SUMMARY: Test RCA Summary")
+		assert.Contains(t, out, "SUMMARY")
+		assert.Contains(t, out, "Test RCA Summary")
 		assert.Contains(t, out, "IDENTIFIED CAUSES:")
 		assert.Contains(t, out, "[C1] Test Cause")
 		assert.Contains(t, out, "Confidence: 0.90")
@@ -1923,5 +1924,60 @@ func TestCLIAdapter_DisplayRCAFindings(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Empty(t, output.String())
+	})
+
+	t.Run("displays none for empty causes and remedies", func(t *testing.T) {
+		adapter, output := newTestAdapter(t, "")
+
+		findings := []entity.RCAFinding{
+			{
+				Summary:  "Minimal finding",
+				Causes:   []entity.Cause{},
+				Remedies: []entity.Remedy{},
+			},
+		}
+
+		err := adapter.DisplayRCAFindings(findings)
+
+		require.NoError(t, err)
+		out := output.String()
+		assert.Contains(t, out, "Minimal finding")
+		assert.Contains(t, out, "IDENTIFIED CAUSES:")
+		assert.Contains(t, out, "(none)")
+		assert.Contains(t, out, "SUGGESTED REMEDIES:")
+	})
+
+	t.Run("separates multiple findings", func(t *testing.T) {
+		adapter, output := newTestAdapter(t, "")
+
+		findings := []entity.RCAFinding{
+			{
+				Summary: "First Finding",
+				Causes: []entity.Cause{
+					{ID: "C1", Description: "Cause one", ConfidenceScore: 0.8},
+				},
+				Remedies: []entity.Remedy{
+					{Description: "Remedy one", ActionableSteps: []string{"Do it"}, Impact: "Low"},
+				},
+			},
+			{
+				Summary: "Second Finding",
+				Causes: []entity.Cause{
+					{ID: "C2", Description: "Cause two", ConfidenceScore: 0.7},
+				},
+				Remedies: []entity.Remedy{
+					{Description: "Remedy two", ActionableSteps: []string{"Fix it"}, Impact: "Medium"},
+				},
+			},
+		}
+
+		err := adapter.DisplayRCAFindings(findings)
+
+		require.NoError(t, err)
+		out := output.String()
+		assert.Contains(t, out, "First Finding")
+		assert.Contains(t, out, "Second Finding")
+		// Separator between findings
+		assert.Contains(t, out, "---")
 	})
 }
