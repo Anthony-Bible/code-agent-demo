@@ -332,7 +332,8 @@ func (r *InvestigationRunner) Run(
 		if rcaErr != nil {
 			rc.logger.Error("RCA correlation failed", "error", rcaErr)
 		} else if len(rcaFindings) == 0 {
-			rc.logger.Warn("RCA correlation returned no findings")
+			rc.logger.Warn("RCA correlation returned no findings",
+				"investigation_findings_count", len(invFindings))
 		} else {
 			result.RCAFindings = rcaFindings
 			rc.logger.Info("RCA correlation successful", "rca_findings_count", len(rcaFindings))
