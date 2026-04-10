@@ -112,8 +112,8 @@ func (p *PlanningExecutorAdapter) ValidateToolInput(name string, input interface
 // isReadOnlyTool returns true if the tool is read-only and should always execute.
 func isReadOnlyTool(name string) bool {
 	readOnlyTools := map[string]bool{
-		"read_file":  true,
-		"list_files": true,
+		toolNameReadFile: true,
+		"list_files":     true,
 	}
 	return readOnlyTools[name]
 }

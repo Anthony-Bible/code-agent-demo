@@ -211,15 +211,8 @@ func (a *ExecutorAdapter) checkAndSetInvestigationStatus(investigationID, newSta
 	a.investigationMu.Lock()
 	defer a.investigationMu.Unlock()
 
-	status, exists := a.investigationStates[investigationID]
-	if !exists {
+	if _, exists := a.investigationStates[investigationID]; !exists {
 		return fmt.Errorf("investigation_id %q not found. Use the investigation_id provided in the system prompt under 'Investigation Context', not the alert ID", investigationID)
-	}
-	if status == investigationStatusCompleted {
-		return errors.New("investigation already completed")
-	}
-	if status == investigationStatusEscalated {
-		return errors.New("investigation already escalated")
 	}
 	if newStatus == investigationStatusCompleted || newStatus == investigationStatusEscalated {
 		delete(a.investigationStates, investigationID)
@@ -239,13 +232,25 @@ func validateInvestigationID(id string) error {
 
 // requireInvestigationExists checks if an investigation exists and returns an error if not.
 func (a *ExecutorAdapter) requireInvestigationExists(investigationID string) error {
-	a.investigationMu.Lock()
-	_, exists := a.investigationStates[investigationID]
-	a.investigationMu.Unlock()
-	if !exists {
+	a.investigationMu.RLock()
+	defer a.investigationMu.RUnlock()
+	if _, exists := a.investigationStates[investigationID]; !exists {
 		return fmt.Errorf("investigation_id %q not found. Use the investigation_id provided in the system prompt under 'Investigation Context', not the alert ID", investigationID)
 	}
 	return nil
+}
+
+// DeregisterInvestigation removes an investigation ID from the state map.
+// It is idempotent: calling it on an unknown ID is safe and has no effect.
+// Intended to be called via defer after the investigation loop ends to prevent
+// unbounded map growth across many investigations.
+func (a *ExecutorAdapter) DeregisterInvestigation(investigationID string) {
+	if investigationID == "" || strings.TrimSpace(investigationID) == "" {
+		return
+	}
+	a.investigationMu.Lock()
+	defer a.investigationMu.Unlock()
+	delete(a.investigationStates, investigationID)
 }
 
 // marshalInvestigationOutput marshals the output map to JSON, optionally adding investigation_id.

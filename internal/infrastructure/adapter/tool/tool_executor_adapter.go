@@ -16,6 +16,13 @@ import (
 	fileadapter "github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/file"
 )
 
+// Tool name constants used across multiple files in this package.
+const (
+	toolNameReadFile  = "read_file"
+	toolNameBash      = "bash"
+	toolNameBatchTool = "batch_tool"
+)
+
 // SubagentUseCaseInterface defines the interface for spawning subagents.
 //
 // This interface enables the task tool to delegate work to specialized subagents,
@@ -64,7 +71,7 @@ type ExecutorAdapter struct {
 	skillActivationCallback     SkillActivationCallback
 	skillDeactivationCallback   SkillDeactivationCallback
 	investigationStates         map[string]string // tracks investigation_id -> status
-	investigationMu             sync.Mutex
+	investigationMu             sync.RWMutex
 
 	fetchClient     *http.Client
 	fetchClientOnce sync.Once
@@ -357,13 +364,13 @@ func (a *ExecutorAdapter) registerDefaultTools() {
 // executeByName executes the appropriate tool function based on the tool name.
 func (a *ExecutorAdapter) executeByName(ctx context.Context, name string, input json.RawMessage) (string, error) {
 	switch name {
-	case "read_file":
+	case toolNameReadFile:
 		return a.executeReadFile(input)
 	case "list_files":
 		return a.executeListFiles(input)
 	case "edit_file":
 		return a.executeEditFile(input)
-	case "bash":
+	case toolNameBash:
 		return a.executeBash(ctx, input)
 	case "fetch":
 		return a.executeFetch(ctx, input)
@@ -371,7 +378,7 @@ func (a *ExecutorAdapter) executeByName(ctx context.Context, name string, input 
 		return a.executeActivateSkill(ctx, input)
 	case "deactivate_skill":
 		return a.executeDeactivateSkill(ctx, input)
-	case "batch_tool":
+	case toolNameBatchTool:
 		return a.executeBatchTool(ctx, input)
 	case "task":
 		return a.executeTask(ctx, input)

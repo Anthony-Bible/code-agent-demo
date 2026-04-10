@@ -1969,3 +1969,49 @@ func TestReportInvestigationTool_ToolDescription(t *testing.T) {
 		t.Error("Description should mention report, progress, or status")
 	}
 }
+
+// =============================================================================
+// DeregisterInvestigation Tests
+// =============================================================================
+
+func TestDeregisterInvestigation_AfterRegister_ToolCallFails(t *testing.T) {
+	h := newInvestigationTestHelper(t)
+	invID := "deregister-test-001"
+	h.adapter.RegisterInvestigation(invID)
+
+	// Verify it works before deregistration
+	input, _ := json.Marshal(map[string]interface{}{
+		"investigation_id": invID,
+		"confidence":       0.9,
+		"findings":         []interface{}{"test finding"},
+	})
+	// Use report_investigation to check existence without consuming the entry
+	reportInput, _ := json.Marshal(map[string]interface{}{
+		"investigation_id": invID,
+		"message":          "progress check",
+	})
+	_, err := h.adapter.ExecuteTool(context.Background(), "report_investigation", string(reportInput))
+	if err != nil {
+		t.Fatalf("report_investigation before deregister should succeed, got: %v", err)
+	}
+
+	h.adapter.DeregisterInvestigation(invID)
+
+	// After deregistration, any tool call referencing the ID should return "not found"
+	_, err = h.adapter.ExecuteTool(context.Background(), "complete_investigation", string(input))
+	if err == nil {
+		t.Error("complete_investigation after deregister should fail")
+	}
+	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "not found") {
+		t.Errorf("expected 'not found' error after deregister, got: %v", err)
+	}
+}
+
+func TestDeregisterInvestigation_NonExistentID_IsNoop(t *testing.T) {
+	h := newInvestigationTestHelper(t)
+
+	// Should not panic or error — just a no-op
+	h.adapter.DeregisterInvestigation("does-not-exist-xyz")
+	h.adapter.DeregisterInvestigation("")
+	h.adapter.DeregisterInvestigation("   ")
+}

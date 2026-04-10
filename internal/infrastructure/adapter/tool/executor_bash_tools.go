@@ -34,8 +34,8 @@ const defaultBashTimeout = 30 * time.Second
 // registerBashTool registers the bash tool.
 func (a *ExecutorAdapter) registerBashTool() {
 	bashTool := entity.Tool{
-		ID:          "bash",
-		Name:        "bash",
+		ID:          toolNameBash,
+		Name:        toolNameBash,
 		Description: "Executes shell commands and returns stdout, stderr, and exit code. You MUST assess whether each command is dangerous and set the dangerous field accordingly. Dangerous commands require user confirmation.",
 		InputSchema: map[string]interface{}{
 			"type": "object",

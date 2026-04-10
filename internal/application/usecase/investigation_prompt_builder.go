@@ -191,9 +191,10 @@ You are an intelligent systems investigator. Analyze the alert below and use the
 
 	// Investigation context section - provides the investigation ID the AI must use
 	if alert.InvestigationID() != "" {
+		sanitizedID := strings.NewReplacer("\n", "", "\r", "").Replace(alert.InvestigationID())
 		sb.WriteString("## Investigation Context\n\n")
-		fmt.Fprintf(&sb, "- **Investigation ID**: %s\n", alert.InvestigationID())
-		sb.WriteString("- **IMPORTANT**: When calling investigation tools (complete_investigation, escalate_investigation, report_investigation), use this Investigation ID — NOT the Alert ID.\n\n")
+		fmt.Fprintf(&sb, "- **investigation_id**: `%s`\n", sanitizedID)
+		sb.WriteString("- **IMPORTANT**: When calling investigation tools (complete_investigation, escalate_investigation, report_investigation), pass this value as `investigation_id` — NOT the Alert ID.\n\n")
 	}
 
 	// Tools section

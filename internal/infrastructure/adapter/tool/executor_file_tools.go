@@ -70,8 +70,8 @@ func appendTruncationNotice(result *strings.Builder, scanner *bufio.Scanner, lin
 func (a *ExecutorAdapter) registerFileTools() {
 	// Register read_file tool
 	readFileTool := entity.Tool{
-		ID:          "read_file",
-		Name:        "read_file",
+		ID:          toolNameReadFile,
+		Name:        toolNameReadFile,
 		Description: "Reads the contents of a given relative file path, use this when you want to see what's inside a file. Do not use this with directory names.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -322,7 +322,7 @@ func (a *ExecutorAdapter) executeEditFile(input json.RawMessage) (string, error)
 	}
 
 	// Write the modified content directly to avoid []byte→string→[]byte round-trip
-	if err := os.WriteFile(path, newContent, info.Mode().Perm()); err != nil {
+	if err := os.WriteFile(path, newContent, info.Mode().Perm()); err != nil { //nolint:gosec // G703: path is validated by LocalFileManager before reaching this point
 		return "", a.wrapFileOperationError("Failed to write file", err)
 	}
 
