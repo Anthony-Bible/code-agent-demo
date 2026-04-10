@@ -171,7 +171,7 @@ func NewContainer(cfg *Config) (*Container, error) {
 	wireSkillDeactivationCallback(baseExecutor, convService)
 
 	// Step 3: Create investigation and alert handling components
-	investigationUseCase, alertSourceManager, webhookAdapter, err := createInvestigationComponents(
+	investigationUseCase, alertSourceManager, webhookAdapter, invBase, err := createInvestigationComponents(
 		cfg, convService, fileManager, skillManager, subagentManager, uiAdapter, aiAdapter,
 		validationMode, validationWhitelist, log,
 	)
@@ -183,6 +183,13 @@ func NewContainer(cfg *Config) (*Container, error) {
 	subagentUseCase := createSubagentComponents(
 		cfg, convService, toolExecutor, aiAdapter, baseExecutor, uiAdapter, subagentManager, log,
 	)
+
+	// Wire skill callbacks and subagent use case into the investigation executor.
+	// The subagentUseCase is created after createInvestigationComponents returns,
+	// so we wire it here once both are available.
+	wireSkillActivationCallback(invBase, convService)
+	wireSkillDeactivationCallback(invBase, convService)
+	invBase.SetSubagentUseCase(subagentUseCase)
 
 	return &Container{
 		config:               cfg,
@@ -216,17 +223,17 @@ func createInvestigationComponents(
 	validationMode safety.CommandValidationMode,
 	validationWhitelist *safety.CommandWhitelist,
 	log port.Logger,
-) (*usecase.AlertInvestigationUseCase, port.AlertSourceManager, *webhook.HTTPAdapter, error) {
+) (*usecase.AlertInvestigationUseCase, port.AlertSourceManager, *webhook.HTTPAdapter, *tool.ExecutorAdapter, error) {
 	// Create a dedicated executor for investigations with a headless confirmation callback.
 	// Investigations run in the background without a terminal, so the shared interactive
 	// executor's ConfirmBashCommand would block every command. This executor auto-approves
 	// safe commands and hard-blocks dangerous ones.
-	_, invToolExecutor, err := newConfiguredExecutor(
+	invBase, invToolExecutor, err := newConfiguredExecutor(
 		fileManager, skillManager, subagentManager, validationMode, validationWhitelist,
 		cfg.Safety.AskLLMOnUnknown, cfg.WorkingDir, log,
 	)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to configure investigation command validation: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("failed to configure investigation command validation: %w", err)
 	}
 	invToolExecutor.SetCommandConfirmationCallback(
 		buildHeadlessCallback(uiAdapter, "[INVESTIGATION BLOCKED]", "[INVESTIGATION AUTO-APPROVED]"),
@@ -245,13 +252,13 @@ func createInvestigationComponents(
 	// Create command validator using the pre-built validation config
 	commandValidator, err := safety.NewCommandValidator(validationMode, validationWhitelist, cfg.Safety.AskLLMOnUnknown)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create command validator: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("failed to create command validator: %w", err)
 	}
 
 	// Create safety enforcer with command validator
 	safetyEnforcer, err := appsvc.NewInvestigationSafetyEnforcerWithValidator(safetyConfig, commandValidator)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create safety enforcer: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("failed to create safety enforcer: %w", err)
 	}
 
 	// Create use case with operational config only
@@ -291,7 +298,7 @@ func createInvestigationComponents(
 	storePath := filepath.Join(cfg.WorkingDir, ".agent", "investigations")
 	fileStore, err := investigation.NewFileInvestigationStore(storePath)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	investigationUseCase.SetInvestigationStore(&investigationStoreAdapter{store: fileStore})
 
@@ -309,7 +316,7 @@ func createInvestigationComponents(
 	webhookAdapter := webhook.NewHTTPAdapter(alertSourceManager, webhook.DefaultConfig(), log)
 	webhookAdapter.SetAlertHandler(alertHandler.HandleEntityAlert)
 
-	return investigationUseCase, alertSourceManager, webhookAdapter, nil
+	return investigationUseCase, alertSourceManager, webhookAdapter, invBase, nil
 }
 
 // createSubagentComponents sets up the subagent runner and use case.

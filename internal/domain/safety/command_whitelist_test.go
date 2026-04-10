@@ -2104,6 +2104,11 @@ func TestCommandWhitelist_OutputRedirectionBlocked(t *testing.T) {
 			command:     "cat file > /dev/null",
 			wantAllowed: true,
 		},
+		{
+			name:        "redirect to /dev/nullfoo is not safe",
+			command:     "cat secrets > /dev/nullfoo",
+			wantAllowed: false,
+		},
 
 		// Allowed: no redirections
 		{
