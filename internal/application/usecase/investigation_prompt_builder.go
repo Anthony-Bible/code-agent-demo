@@ -4,6 +4,7 @@ package usecase
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
@@ -92,12 +93,13 @@ func GenerateSkillsHeader(skills []port.SkillInfo) string {
 // AlertView represents a lightweight alert structure for prompt building.
 // It contains only the fields needed to generate investigation prompts.
 type AlertView struct {
-	id          string            // Unique alert identifier
-	source      string            // Alert source system (e.g., "prometheus", "cloudwatch")
-	severity    string            // Alert severity level
-	title       string            // Human-readable alert title
-	description string            // Detailed alert description
-	labels      map[string]string // Key-value metadata labels
+	id              string            // Unique alert identifier
+	source          string            // Alert source system (e.g., "prometheus", "cloudwatch")
+	severity        string            // Alert severity level
+	title           string            // Human-readable alert title
+	description     string            // Detailed alert description
+	labels          map[string]string // Key-value metadata labels
+	investigationID string            // Investigation ID for this investigation session
 }
 
 // ID returns the unique alert identifier.
@@ -124,6 +126,9 @@ func (a *AlertView) IsCritical() bool { return a.severity == "critical" }
 
 // LabelValue returns the value of a specific label, or empty string if not found.
 func (a *AlertView) LabelValue(key string) string { return a.labels[key] }
+
+// InvestigationID returns the investigation ID associated with this alert view.
+func (a *AlertView) InvestigationID() string { return a.investigationID }
 
 // InvestigationPromptBuilder generates prompts for AI-driven alert investigation.
 // Each builder is specialized for a specific alert type and generates prompts
@@ -185,6 +190,14 @@ You are an intelligent systems investigator. Analyze the alert below and use the
 
 `)
 
+	// Investigation context section - provides the investigation ID the AI must use
+	if alert.InvestigationID() != "" {
+		sanitizedID := strings.NewReplacer("\n", "", "\r", "").Replace(alert.InvestigationID())
+		sb.WriteString("## Investigation Context\n\n")
+		fmt.Fprintf(&sb, "- **investigation_id**: `%s`\n", sanitizedID)
+		sb.WriteString("- **IMPORTANT**: When calling investigation tools (complete_investigation, escalate_investigation, report_investigation), pass this value as `investigation_id` — NOT the Alert ID.\n\n")
+	}
+
 	// Tools section
 	sb.WriteString("## Available Tools\n\n")
 	sb.WriteString(GenerateToolsHeader(tools))
@@ -223,14 +236,7 @@ You are an intelligent systems investigator. Analyze the alert below and use the
 		for k := range labels {
 			keys = append(keys, k)
 		}
-		// Sort keys alphabetically
-		for i := 0; i < len(keys); i++ {
-			for j := i + 1; j < len(keys); j++ {
-				if keys[i] > keys[j] {
-					keys[i], keys[j] = keys[j], keys[i]
-				}
-			}
-		}
+		sort.Strings(keys)
 		for _, k := range keys {
 			fmt.Fprintf(&sb, "- `%s`: %s\n", k, labels[k])
 		}

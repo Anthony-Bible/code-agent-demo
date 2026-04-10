@@ -277,6 +277,62 @@ func TestGenericPromptBuilder_BuildPrompt_NilAlert(t *testing.T) {
 	}
 }
 
+func TestGenericPromptBuilder_BuildPrompt_IncludesInvestigationID(t *testing.T) {
+	builder := NewGenericPromptBuilder()
+	if builder == nil {
+		t.Skip("NewGenericPromptBuilder() returned nil")
+	}
+
+	alert := &AlertView{
+		id:              "alert-inv-001",
+		source:          "prometheus",
+		severity:        "warning",
+		title:           "Test Alert",
+		labels:          map[string]string{},
+		investigationID: "inv-abc-123",
+	}
+
+	prompt, err := builder.BuildPrompt(alert, createTestTools(), nil)
+	if err != nil {
+		t.Fatalf("BuildPrompt() error = %v", err)
+	}
+
+	if !strings.Contains(prompt, "Investigation Context") {
+		t.Error("BuildPrompt() should contain 'Investigation Context' section when investigationID is set")
+	}
+	if !strings.Contains(prompt, "inv-abc-123") {
+		t.Error("BuildPrompt() should contain the investigation ID")
+	}
+	if !strings.Contains(prompt, "NOT the Alert ID") {
+		t.Error("BuildPrompt() should warn the AI not to use the alert ID")
+	}
+}
+
+func TestGenericPromptBuilder_BuildPrompt_OmitsInvestigationContextWhenEmpty(t *testing.T) {
+	builder := NewGenericPromptBuilder()
+	if builder == nil {
+		t.Skip("NewGenericPromptBuilder() returned nil")
+	}
+
+	alert := &AlertView{
+		id:       "alert-no-inv-001",
+		source:   "prometheus",
+		severity: "warning",
+		title:    "Test Alert",
+		labels:   map[string]string{},
+		// investigationID intentionally empty
+	}
+
+	prompt, err := builder.BuildPrompt(alert, createTestTools(), nil)
+	if err != nil {
+		t.Fatalf("BuildPrompt() error = %v", err)
+	}
+
+	if strings.Contains(prompt, "Investigation Context") {
+		t.Error("BuildPrompt() should NOT contain 'Investigation Context' when investigationID is empty")
+	}
+}
+
 // =============================================================================
 // Prompt Builder Registry Tests
 // =============================================================================

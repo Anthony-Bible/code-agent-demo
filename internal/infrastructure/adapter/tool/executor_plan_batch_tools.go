@@ -95,8 +95,8 @@ In plan mode, you will:
 
 	// Register batch_tool
 	batchToolTool := entity.Tool{
-		ID:   "batch_tool",
-		Name: "batch_tool",
+		ID:   toolNameBatchTool,
+		Name: toolNameBatchTool,
 		Description: `Execute multiple tool invocations in a single batch operation. Prefer this when running multiple tools.
 
 Use this tool when you need to:
@@ -290,7 +290,7 @@ func (a *ExecutorAdapter) executeSingleBatchInvocation(
 	}
 
 	// Check for nested batch_tool invocations
-	if inv.ToolName == "batch_tool" {
+	if inv.ToolName == toolNameBatchTool {
 		result.Success = false
 		result.Error = "nested batch_tool invocations are not allowed"
 		result.DurationMs = 0

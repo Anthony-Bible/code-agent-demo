@@ -197,7 +197,8 @@ func (m *investigationRunnerConvServiceMock) GetThinkingMode(sessionID string) (
 	return m.getThinkingModeInfo, m.getThinkingModeError
 }
 
-// investigationRunnerToolExecutorMock implements port.ToolExecutor for testing.
+// investigationRunnerToolExecutorMock implements port.ToolExecutor,
+// port.InvestigationRegistrar, and port.InvestigationDeregistrar for testing.
 type investigationRunnerToolExecutorMock struct {
 	mu sync.Mutex
 
@@ -210,6 +211,24 @@ type investigationRunnerToolExecutorMock struct {
 
 	// Tools configuration
 	registeredTools []entity.Tool
+
+	// RegisterInvestigation tracking (implements port.InvestigationRegistrar)
+	registerInvestigationCalls []string
+
+	// DeregisterInvestigation tracking (implements port.InvestigationDeregistrar)
+	deregisterInvestigationCalls []string
+}
+
+func (m *investigationRunnerToolExecutorMock) RegisterInvestigation(investigationID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.registerInvestigationCalls = append(m.registerInvestigationCalls, investigationID)
+}
+
+func (m *investigationRunnerToolExecutorMock) DeregisterInvestigation(investigationID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.deregisterInvestigationCalls = append(m.deregisterInvestigationCalls, investigationID)
 }
 
 func newInvestigationRunnerToolExecutorMock() *investigationRunnerToolExecutorMock {
@@ -382,6 +401,56 @@ func (h *investigationRunnerTestHarness) build() *InvestigationRunner {
 func (h *investigationRunnerTestHarness) run(alert *AlertForInvestigation, invID string) (*InvestigationResult, error) {
 	h.t.Helper()
 	return h.build().Run(context.Background(), alert, invID)
+}
+
+// =============================================================================
+// RegisterInvestigation Tests
+// =============================================================================
+
+func TestInvestigationRunner_RegistersInvestigationBeforeLoop(t *testing.T) {
+	h := newTestHarness(t)
+	_, err := h.run(createTestAlert("alert-reg-001", "warning", "Test Alert"), "inv-reg-001")
+	if err != nil {
+		t.Errorf("Run() error = %v, want nil", err)
+	}
+	h.toolExecutor.mu.Lock()
+	calls := h.toolExecutor.registerInvestigationCalls
+	h.toolExecutor.mu.Unlock()
+	if len(calls) != 1 {
+		t.Errorf("RegisterInvestigation() called %d times, want 1", len(calls))
+	}
+	if len(calls) > 0 && calls[0] != "inv-reg-001" {
+		t.Errorf("RegisterInvestigation() called with %q, want %q", calls[0], "inv-reg-001")
+	}
+}
+
+func TestInvestigationRunner_DoesNotRegisterOnValidationFailure(t *testing.T) {
+	h := newTestHarness(t)
+	// Pass an empty investigation ID — validateInputs returns an error before registration
+	_, _ = h.build().Run(context.Background(), createTestAlert("alert-reg-002", "warning", "Test Alert"), "")
+	h.toolExecutor.mu.Lock()
+	calls := h.toolExecutor.registerInvestigationCalls
+	h.toolExecutor.mu.Unlock()
+	if len(calls) != 0 {
+		t.Errorf("RegisterInvestigation() called %d times on validation failure, want 0", len(calls))
+	}
+}
+
+func TestInvestigationRunner_DeregistersInvestigationAfterRun(t *testing.T) {
+	h := newTestHarness(t)
+	_, err := h.run(createTestAlert("alert-dereg-001", "warning", "Test Alert"), "inv-dereg-001")
+	if err != nil {
+		t.Errorf("Run() error = %v, want nil", err)
+	}
+	h.toolExecutor.mu.Lock()
+	calls := h.toolExecutor.deregisterInvestigationCalls
+	h.toolExecutor.mu.Unlock()
+	if len(calls) != 1 {
+		t.Errorf("DeregisterInvestigation() called %d times, want 1", len(calls))
+	}
+	if len(calls) > 0 && calls[0] != "inv-dereg-001" {
+		t.Errorf("DeregisterInvestigation() called with %q, want %q", calls[0], "inv-dereg-001")
+	}
 }
 
 // =============================================================================

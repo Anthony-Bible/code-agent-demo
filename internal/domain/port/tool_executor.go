@@ -35,3 +35,17 @@ type ToolExecutor interface {
 type SessionCleaner interface {
 	CleanupSession(sessionID string)
 }
+
+// InvestigationRegistrar is an optional interface that ToolExecutor implementations
+// can implement to register an investigation ID before the investigation loop begins.
+// This allows investigation tools to validate that they are called with a known ID.
+type InvestigationRegistrar interface {
+	RegisterInvestigation(investigationID string)
+}
+
+// InvestigationDeregistrar is an optional interface that ToolExecutor implementations
+// can implement to remove an investigation ID after the investigation loop ends.
+// Implementing this prevents unbounded map growth when many investigations run over time.
+type InvestigationDeregistrar interface {
+	DeregisterInvestigation(investigationID string)
+}

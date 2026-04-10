@@ -60,7 +60,7 @@ func (a *ExecutorAdapter) registerCompleteInvestigationTool() {
 			"properties": map[string]any{
 				"investigation_id": map[string]any{
 					"type":        "string",
-					"description": "The ID of the investigation to complete",
+					"description": "The ID of the investigation. Use the investigation_id from the Investigation Context in the system prompt.",
 				},
 				"confidence": map[string]any{
 					"type":        "number",
@@ -113,7 +113,7 @@ func (a *ExecutorAdapter) registerEscalateInvestigationTool() {
 			"properties": map[string]any{
 				"investigation_id": map[string]any{
 					"type":        "string",
-					"description": "The ID of the investigation to escalate",
+					"description": "The ID of the investigation. Use the investigation_id from the Investigation Context in the system prompt.",
 				},
 				"reason": map[string]any{
 					"type":        "string",
@@ -157,7 +157,7 @@ func (a *ExecutorAdapter) registerReportInvestigationTool() {
 			"properties": map[string]any{
 				"investigation_id": map[string]any{
 					"type":        "string",
-					"description": "The ID of the investigation to report on",
+					"description": "The ID of the investigation. Use the investigation_id from the Investigation Context in the system prompt.",
 				},
 				"message": map[string]any{
 					"type":        "string",
@@ -200,9 +200,9 @@ func (a *ExecutorAdapter) RegisterInvestigation(investigationID string) {
 	}
 }
 
-// checkAndSetInvestigationStatus checks if an investigation can transition to newStatus.
-// Returns nil if the transition is allowed, or an error if already in a terminal state.
-// If investigationID is empty, the check is skipped.
+// checkAndSetInvestigationStatus atomically checks if an investigation can transition to
+// newStatus and performs the transition. Returns an error if the ID is unknown or already
+// in a terminal state. Deletes terminal-state entries to prevent unbounded map growth.
 func (a *ExecutorAdapter) checkAndSetInvestigationStatus(investigationID, newStatus string) error {
 	if investigationID == "" || strings.TrimSpace(investigationID) == "" {
 		return nil
@@ -211,15 +211,14 @@ func (a *ExecutorAdapter) checkAndSetInvestigationStatus(investigationID, newSta
 	a.investigationMu.Lock()
 	defer a.investigationMu.Unlock()
 
-	if status, exists := a.investigationStates[investigationID]; exists {
-		if status == investigationStatusCompleted {
-			return errors.New("investigation already completed")
-		}
-		if status == investigationStatusEscalated {
-			return errors.New("investigation already escalated")
-		}
+	if _, exists := a.investigationStates[investigationID]; !exists {
+		return fmt.Errorf("investigation_id %q not found. Use the investigation_id provided in the system prompt under 'Investigation Context', not the alert ID", investigationID)
 	}
-	a.investigationStates[investigationID] = newStatus
+	if newStatus == investigationStatusCompleted || newStatus == investigationStatusEscalated {
+		delete(a.investigationStates, investigationID)
+	} else {
+		a.investigationStates[investigationID] = newStatus
+	}
 	return nil
 }
 
@@ -233,13 +232,25 @@ func validateInvestigationID(id string) error {
 
 // requireInvestigationExists checks if an investigation exists and returns an error if not.
 func (a *ExecutorAdapter) requireInvestigationExists(investigationID string) error {
-	a.investigationMu.Lock()
-	_, exists := a.investigationStates[investigationID]
-	a.investigationMu.Unlock()
-	if !exists {
-		return fmt.Errorf("investigation_id %q not found", investigationID)
+	a.investigationMu.RLock()
+	defer a.investigationMu.RUnlock()
+	if _, exists := a.investigationStates[investigationID]; !exists {
+		return fmt.Errorf("investigation_id %q not found. Use the investigation_id provided in the system prompt under 'Investigation Context', not the alert ID", investigationID)
 	}
 	return nil
+}
+
+// DeregisterInvestigation removes an investigation ID from the state map.
+// It is idempotent: calling it on an unknown ID is safe and has no effect.
+// Intended to be called via defer after the investigation loop ends to prevent
+// unbounded map growth across many investigations.
+func (a *ExecutorAdapter) DeregisterInvestigation(investigationID string) {
+	if investigationID == "" || strings.TrimSpace(investigationID) == "" {
+		return
+	}
+	a.investigationMu.Lock()
+	defer a.investigationMu.Unlock()
+	delete(a.investigationStates, investigationID)
 }
 
 // marshalInvestigationOutput marshals the output map to JSON, optionally adding investigation_id.
@@ -266,10 +277,6 @@ func (a *ExecutorAdapter) executeCompleteInvestigation(ctx context.Context, inpu
 	}
 
 	if err := validateInvestigationID(in.InvestigationID); err != nil {
-		return "", err
-	}
-
-	if err := a.requireInvestigationExists(in.InvestigationID); err != nil {
 		return "", err
 	}
 
@@ -320,10 +327,6 @@ func (a *ExecutorAdapter) executeEscalateInvestigation(ctx context.Context, inpu
 		return "", err
 	}
 
-	if err := a.requireInvestigationExists(in.InvestigationID); err != nil {
-		return "", err
-	}
-
 	// Validate reason
 	if in.Reason == "" || strings.TrimSpace(in.Reason) == "" {
 		return "", errors.New("reason is required and cannot be empty")
@@ -340,13 +343,14 @@ func (a *ExecutorAdapter) executeEscalateInvestigation(ctx context.Context, inpu
 	}
 
 	// Build output
-	escalationID := fmt.Sprintf("esc-%s-%d", in.InvestigationID, time.Now().UnixNano())
+	now := time.Now()
+	escalationID := fmt.Sprintf("esc-%s-%d", in.InvestigationID, now.UnixNano())
 	output := map[string]any{
 		"status":        investigationStatusEscalated,
 		"escalation_id": escalationID,
 		"reason":        in.Reason,
 		"priority":      in.Priority,
-		"escalated_at":  time.Now().UTC().Format(time.RFC3339),
+		"escalated_at":  now.UTC().Format(time.RFC3339),
 	}
 
 	return marshalInvestigationOutput(output, in.InvestigationID)
@@ -385,14 +389,13 @@ func (a *ExecutorAdapter) executeReportInvestigation(ctx context.Context, input 
 
 	// Build output
 	output := map[string]any{
-		"status":           "reported",
-		"investigation_id": in.InvestigationID,
-		"message":          in.Message,
-		"reported_at":      time.Now().UTC().Format(time.RFC3339),
+		"status":      "reported",
+		"message":     in.Message,
+		"reported_at": time.Now().UTC().Format(time.RFC3339),
 	}
 	if in.Progress != nil {
 		output["progress"] = *in.Progress
 	}
 
-	return marshalInvestigationOutput(output, "")
+	return marshalInvestigationOutput(output, in.InvestigationID)
 }
