@@ -287,6 +287,12 @@ func (r *InvestigationRunner) Run(
 	rc.SessionID = sessionID
 	defer r.CleanupConversation(sessionID, investigationID, "investigation_id")
 
+	// Register investigation so tool executor can validate tool calls against it.
+	// Uses the same optional interface pattern as SessionCleaner.
+	if registrar, ok := r.ToolExecutor.(port.InvestigationRegistrar); ok {
+		registrar.RegisterInvestigation(investigationID)
+	}
+
 	// Configure extended thinking mode if enabled
 	if r.config.ExtendedThinking {
 		thinkingBudget := r.config.ThinkingBudget
@@ -383,8 +389,7 @@ func (r *InvestigationRunner) validationFailedResult(
 }
 
 func (r *InvestigationRunner) sendInitialPrompt(rc *runContext) error {
-	// Create alert view for prompt building
-	alertView := r.createAlertView(rc.alert)
+	alertView := r.createAlertView(rc.alert, rc.investigationID)
 
 	// Get available tools for this investigation
 	tools, err := r.getInvestigationTools()
@@ -418,7 +423,7 @@ func (r *InvestigationRunner) sendInitialPrompt(rc *runContext) error {
 	// Send a minimal user message to trigger the investigation.
 	// Since the system prompt already contains all context, we only need
 	// basic alert identifiers here to start the conversation.
-	userMessage := r.formatTriggerMessage(rc.alert)
+	userMessage := r.formatTriggerMessage(rc.alert, rc.investigationID)
 	if _, err := r.ConvService.AddUserMessage(rc.Ctx, rc.SessionID, userMessage); err != nil {
 		return err
 	}
@@ -427,22 +432,24 @@ func (r *InvestigationRunner) sendInitialPrompt(rc *runContext) error {
 }
 
 // createAlertView converts an AlertForInvestigation into an AlertView for prompt building.
-func (r *InvestigationRunner) createAlertView(alert *AlertForInvestigation) *AlertView {
+// The investigationID is embedded so the prompt builder can include it for the AI.
+func (r *InvestigationRunner) createAlertView(alert *AlertForInvestigation, investigationID string) *AlertView {
 	return &AlertView{
-		id:          alert.ID(),
-		source:      alert.Source(),
-		severity:    alert.Severity(),
-		title:       alert.Title(),
-		description: alert.Description(),
-		labels:      alert.Labels(),
+		id:              alert.ID(),
+		source:          alert.Source(),
+		severity:        alert.Severity(),
+		title:           alert.Title(),
+		description:     alert.Description(),
+		labels:          alert.Labels(),
+		investigationID: investigationID,
 	}
 }
 
 // formatTriggerMessage creates a minimal user message to trigger the investigation.
 // This message contains only the essential alert identifiers since the full context
 // is already provided in the system prompt.
-func (r *InvestigationRunner) formatTriggerMessage(alert *AlertForInvestigation) string {
-	return fmt.Sprintf("Alert ID: %s\nTitle: %s", alert.ID(), alert.Title())
+func (r *InvestigationRunner) formatTriggerMessage(alert *AlertForInvestigation, investigationID string) string {
+	return fmt.Sprintf("Investigation ID: %s\nAlert ID: %s\nTitle: %s", investigationID, alert.ID(), alert.Title())
 }
 
 // getInvestigationTools returns the filtered list of tools for investigation prompts.

@@ -92,12 +92,13 @@ func GenerateSkillsHeader(skills []port.SkillInfo) string {
 // AlertView represents a lightweight alert structure for prompt building.
 // It contains only the fields needed to generate investigation prompts.
 type AlertView struct {
-	id          string            // Unique alert identifier
-	source      string            // Alert source system (e.g., "prometheus", "cloudwatch")
-	severity    string            // Alert severity level
-	title       string            // Human-readable alert title
-	description string            // Detailed alert description
-	labels      map[string]string // Key-value metadata labels
+	id              string            // Unique alert identifier
+	source          string            // Alert source system (e.g., "prometheus", "cloudwatch")
+	severity        string            // Alert severity level
+	title           string            // Human-readable alert title
+	description     string            // Detailed alert description
+	labels          map[string]string // Key-value metadata labels
+	investigationID string            // Investigation ID for this investigation session
 }
 
 // ID returns the unique alert identifier.
@@ -124,6 +125,9 @@ func (a *AlertView) IsCritical() bool { return a.severity == "critical" }
 
 // LabelValue returns the value of a specific label, or empty string if not found.
 func (a *AlertView) LabelValue(key string) string { return a.labels[key] }
+
+// InvestigationID returns the investigation ID associated with this alert view.
+func (a *AlertView) InvestigationID() string { return a.investigationID }
 
 // InvestigationPromptBuilder generates prompts for AI-driven alert investigation.
 // Each builder is specialized for a specific alert type and generates prompts
@@ -184,6 +188,13 @@ func (b *GenericPromptBuilder) BuildPrompt(
 You are an intelligent systems investigator. Analyze the alert below and use the available tools to determine the root cause.
 
 `)
+
+	// Investigation context section - provides the investigation ID the AI must use
+	if alert.InvestigationID() != "" {
+		sb.WriteString("## Investigation Context\n\n")
+		fmt.Fprintf(&sb, "- **Investigation ID**: %s\n", alert.InvestigationID())
+		sb.WriteString("- **IMPORTANT**: When calling investigation tools (complete_investigation, escalate_investigation, report_investigation), use this Investigation ID — NOT the Alert ID.\n\n")
+	}
 
 	// Tools section
 	sb.WriteString("## Available Tools\n\n")
