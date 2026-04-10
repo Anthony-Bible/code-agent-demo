@@ -389,14 +389,13 @@ func (a *ExecutorAdapter) executeReportInvestigation(ctx context.Context, input 
 
 	// Build output
 	output := map[string]any{
-		"status":           "reported",
-		"investigation_id": in.InvestigationID,
-		"message":          in.Message,
-		"reported_at":      time.Now().UTC().Format(time.RFC3339),
+		"status":      "reported",
+		"message":     in.Message,
+		"reported_at": time.Now().UTC().Format(time.RFC3339),
 	}
 	if in.Progress != nil {
 		output["progress"] = *in.Progress
 	}
 
-	return marshalInvestigationOutput(output, "")
+	return marshalInvestigationOutput(output, in.InvestigationID)
 }

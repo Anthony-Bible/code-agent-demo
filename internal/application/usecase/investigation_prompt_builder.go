@@ -4,6 +4,7 @@ package usecase
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
@@ -235,14 +236,7 @@ You are an intelligent systems investigator. Analyze the alert below and use the
 		for k := range labels {
 			keys = append(keys, k)
 		}
-		// Sort keys alphabetically
-		for i := 0; i < len(keys); i++ {
-			for j := i + 1; j < len(keys); j++ {
-				if keys[i] > keys[j] {
-					keys[i], keys[j] = keys[j], keys[i]
-				}
-			}
-		}
+		sort.Strings(keys)
 		for _, k := range keys {
 			fmt.Fprintf(&sb, "- `%s`: %s\n", k, labels[k])
 		}

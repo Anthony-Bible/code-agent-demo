@@ -285,9 +285,11 @@ func (r *InvestigationRunner) Run(
 		return rc.failedResult(err), err
 	}
 	rc.SessionID = sessionID
+	// Defers run in LIFO order: deregister investigation runs before session cleanup.
+	// This is safe because CleanupConversation doesn't invoke investigation tools.
 	defer r.CleanupConversation(sessionID, investigationID, "investigation_id")
-
-	defer r.registerInvestigation(investigationID)()
+	cleanup := r.registerInvestigation(investigationID)
+	defer cleanup()
 
 	// Configure extended thinking mode if enabled
 	if r.config.ExtendedThinking {
@@ -431,8 +433,8 @@ func (r *InvestigationRunner) sendInitialPrompt(rc *runContext) error {
 	}
 
 	// Send a minimal user message to trigger the investigation.
-	// Since the system prompt already contains all context, we only need
-	// the investigation ID and basic alert identifiers here to start the conversation.
+	// The system prompt contains full context including the investigation ID.
+	// This trigger message reinforces the ID and alert identifiers to start the conversation.
 	userMessage := r.formatTriggerMessage(rc.alert, rc.investigationID)
 	if _, err := r.ConvService.AddUserMessage(rc.Ctx, rc.SessionID, userMessage); err != nil {
 		return err
