@@ -1915,6 +1915,8 @@ func TestCLIAdapter_DisplayRCAFindings(t *testing.T) {
 		assert.Contains(t, out, "Test Remedy")
 		assert.Contains(t, out, "Impact: High")
 		assert.Contains(t, out, "Step 1")
+		// Verify section dividers are present
+		assert.Contains(t, out, "──────────────────────────────────────────────────────────────────────")
 	})
 
 	t.Run("does nothing for empty findings", func(t *testing.T) {
@@ -1943,8 +1945,9 @@ func TestCLIAdapter_DisplayRCAFindings(t *testing.T) {
 		out := output.String()
 		assert.Contains(t, out, "Minimal finding")
 		assert.Contains(t, out, "IDENTIFIED CAUSES:")
-		assert.Contains(t, out, "(none)")
 		assert.Contains(t, out, "SUGGESTED REMEDIES:")
+		// Both causes and remedies should show (none)
+		assert.Equal(t, 2, strings.Count(out, "(none)"), "expected (none) for both causes and remedies")
 	})
 
 	t.Run("separates multiple findings", func(t *testing.T) {
