@@ -121,6 +121,19 @@ func NewCommandWhitelist(patterns []WhitelistPattern) *CommandWhitelist {
 	}
 }
 
+// isDevNullRedirect reports whether the '>' at position i in cmd redirects to /dev/null.
+// It handles >>/dev/null, >> /dev/null, >/dev/null, and > /dev/null.
+func isDevNullRedirect(cmd string, i int) bool {
+	j := i + 1
+	if j < len(cmd) && cmd[j] == '>' {
+		j++
+	}
+	for j < len(cmd) && cmd[j] == ' ' {
+		j++
+	}
+	return strings.HasPrefix(cmd[j:], "/dev/null")
+}
+
 // containsOutputRedirection checks if a command contains unquoted output redirection operators.
 // Detects: >, >>, 2>, 2>>, &>, &>>, n>, n>> (where n is any digit).
 // Does NOT block input redirections: <, <<, <<<.
@@ -164,6 +177,9 @@ func containsOutputRedirection(cmd string) bool {
 			// If preceded by '<', this is part of <<, <<<, or <> — not an output redirect
 			if i > 0 && cmd[i-1] == '<' {
 				continue
+			}
+			if isDevNullRedirect(cmd, i) {
+				continue // /dev/null discards output safely
 			}
 			// This is an output redirection (>, >>, n>, &>, etc.)
 			return true

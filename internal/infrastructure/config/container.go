@@ -122,42 +122,25 @@ func NewContainer(cfg *Config) (*Container, error) {
 
 	aiAdapter := ai.NewAnthropicAdapter(cfg.AIModel, cfg.MaxTokens, subagentManager)
 
-	// Create base executor and wrap with planning decorator
-	baseExecutor := tool.NewExecutorAdapter(fileManager, log)
-	baseExecutor.SetSkillManager(skillManager)
-	baseExecutor.SetSubagentManager(subagentManager)
-
 	// Build validation config once; both the executor and investigation validator consume it
 	validationMode, validationWhitelist, err := buildValidationConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build validation config: %w", err)
 	}
-	if err := baseExecutor.SetValidationMode(validationMode, validationWhitelist, cfg.Safety.AskLLMOnUnknown); err != nil {
+
+	// Create base executor and wrap with planning decorator
+	baseExecutor, toolExecutor, err := newConfiguredExecutor(
+		fileManager, skillManager, subagentManager, validationMode, validationWhitelist,
+		cfg.Safety.AskLLMOnUnknown, cfg.WorkingDir, log,
+	)
+	if err != nil {
 		return nil, fmt.Errorf("failed to configure command validation: %w", err)
 	}
 
-	toolExecutor := tool.NewPlanningExecutorAdapter(baseExecutor, fileManager, cfg.WorkingDir)
-
 	// Set up bash command confirmation callback
-	// Behavior depends on cfg.Safety.AutoApproveSafeCommands flag
 	if cfg.Safety.AutoApproveSafeCommands {
-		// Auto-approve safe commands, block dangerous ones (headless mode)
-		toolExecutor.SetCommandConfirmationCallback(
-			func(command string, isDangerous bool, reason string, description string) bool {
-				if isDangerous {
-					// Block dangerous commands in headless mode
-					_ = uiAdapter.DisplaySystemMessage(
-						"[BLOCKED] " + description + ": " + command + " (reason: " + reason + ")",
-					)
-					return false
-				}
-				// Log auto-approved command
-				_ = uiAdapter.DisplaySystemMessage("[AUTO-APPROVED] " + description + ": " + command)
-				return true // Auto-approve safe commands
-			},
-		)
+		toolExecutor.SetCommandConfirmationCallback(buildHeadlessCallback(uiAdapter, "[BLOCKED]", "[AUTO-APPROVED]"))
 	} else {
-		// Default behavior: prompt user before executing any bash command
 		toolExecutor.SetCommandConfirmationCallback(
 			func(command string, isDangerous bool, reason, description string) bool {
 				return uiAdapter.ConfirmBashCommand(command, isDangerous, reason, description)
@@ -189,7 +172,7 @@ func NewContainer(cfg *Config) (*Container, error) {
 
 	// Step 3: Create investigation and alert handling components
 	investigationUseCase, alertSourceManager, webhookAdapter, err := createInvestigationComponents(
-		cfg, convService, toolExecutor, skillManager, uiAdapter, aiAdapter,
+		cfg, convService, fileManager, skillManager, subagentManager, uiAdapter, aiAdapter,
 		validationMode, validationWhitelist, log,
 	)
 	if err != nil {
@@ -220,17 +203,35 @@ func NewContainer(cfg *Config) (*Container, error) {
 
 // createInvestigationComponents sets up the investigation framework including
 // the use case, alert handler, source manager, and webhook adapter.
+// It creates a dedicated tool executor for investigations with a headless callback
+// (auto-approve safe, hard-block dangerous) instead of sharing the interactive executor.
 func createInvestigationComponents(
 	cfg *Config,
 	convService *service.ConversationService,
-	toolExecutor port.ToolExecutor,
+	fileManager port.FileManager,
 	skillManager port.SkillManager,
+	subagentManager port.SubagentManager,
 	uiAdapter port.UserInterface,
 	aiAdapter port.AIProvider,
 	validationMode safety.CommandValidationMode,
 	validationWhitelist *safety.CommandWhitelist,
 	log port.Logger,
 ) (*usecase.AlertInvestigationUseCase, port.AlertSourceManager, *webhook.HTTPAdapter, error) {
+	// Create a dedicated executor for investigations with a headless confirmation callback.
+	// Investigations run in the background without a terminal, so the shared interactive
+	// executor's ConfirmBashCommand would block every command. This executor auto-approves
+	// safe commands and hard-blocks dangerous ones.
+	_, invToolExecutor, err := newConfiguredExecutor(
+		fileManager, skillManager, subagentManager, validationMode, validationWhitelist,
+		cfg.Safety.AskLLMOnUnknown, cfg.WorkingDir, log,
+	)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to configure investigation command validation: %w", err)
+	}
+	invToolExecutor.SetCommandConfirmationCallback(
+		buildHeadlessCallback(uiAdapter, "[INVESTIGATION BLOCKED]", "[INVESTIGATION AUTO-APPROVED]"),
+	)
+
 	// Create safety config (single source of truth for safety settings)
 	safetyConfig := appconfig.DefaultInvestigationConfig()
 
@@ -267,7 +268,7 @@ func createInvestigationComponents(
 
 	// Wire core dependencies
 	investigationUseCase.SetConversationService(convService)
-	investigationUseCase.SetToolExecutor(toolExecutor)
+	investigationUseCase.SetToolExecutor(invToolExecutor)
 	investigationUseCase.SetSkillManager(skillManager)
 	investigationUseCase.SetUIAdapter(uiAdapter)
 	if reporter, ok := uiAdapter.(port.RCAReporter); ok {
@@ -506,6 +507,50 @@ func parseCustomPatterns(json string) ([]safety.WhitelistPattern, error) {
 		return nil, nil
 	}
 	return safety.ParseWhitelistPatternsJSON(json)
+}
+
+// newConfiguredExecutor creates a base ExecutorAdapter and a PlanningExecutorAdapter
+// wrapper with validation mode, skill manager, and subagent manager wired up.
+// Returns both so callers that need post-wiring (skill callbacks, subagent use case)
+// can retain a reference to the base executor.
+func newConfiguredExecutor(
+	fileManager port.FileManager,
+	skillManager port.SkillManager,
+	subagentManager port.SubagentManager,
+	validationMode safety.CommandValidationMode,
+	validationWhitelist *safety.CommandWhitelist,
+	askLLMOnUnknown bool,
+	workingDir string,
+	log port.Logger,
+) (*tool.ExecutorAdapter, *tool.PlanningExecutorAdapter, error) {
+	base := tool.NewExecutorAdapter(fileManager, log)
+	base.SetSkillManager(skillManager)
+	base.SetSubagentManager(subagentManager)
+	if err := base.SetValidationMode(validationMode, validationWhitelist, askLLMOnUnknown); err != nil {
+		return nil, nil, err
+	}
+	planning := tool.NewPlanningExecutorAdapter(base, fileManager, workingDir)
+	return base, planning, nil
+}
+
+// buildHeadlessCallback returns a CommandConfirmationCallback that auto-approves safe
+// commands and hard-blocks dangerous ones, logging each decision via uiAdapter.
+// blockedLabel and approvedLabel appear at the start of the log message
+// (e.g. "[BLOCKED]" / "[INVESTIGATION BLOCKED]").
+func buildHeadlessCallback(
+	uiAdapter port.UserInterface,
+	blockedLabel, approvedLabel string,
+) tool.CommandConfirmationCallback {
+	return func(command string, isDangerous bool, reason, description string) bool {
+		if isDangerous {
+			_ = uiAdapter.DisplaySystemMessage(
+				blockedLabel + " " + description + ": " + command + " (reason: " + reason + ")",
+			)
+			return false
+		}
+		_ = uiAdapter.DisplaySystemMessage(approvedLabel + " " + description + ": " + command)
+		return true
+	}
 }
 
 // wireSkillActivationCallback sets up the callback for skill activation.

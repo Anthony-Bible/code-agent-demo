@@ -12,16 +12,25 @@ import (
 
 // mockValidator is a test double for safety.CommandValidator.
 type mockValidator struct {
-	allowAll bool
-	blocked  map[string]bool
+	allowAll     bool
+	blocked      map[string]bool
+	needsConfirm map[string]bool
 }
 
 func newMockValidator(allowAll bool) *mockValidator {
-	return &mockValidator{allowAll: allowAll, blocked: make(map[string]bool)}
+	return &mockValidator{
+		allowAll:     allowAll,
+		blocked:      make(map[string]bool),
+		needsConfirm: make(map[string]bool),
+	}
 }
 
 func (m *mockValidator) blockCommand(cmd string) {
 	m.blocked[cmd] = true
+}
+
+func (m *mockValidator) requireConfirm(cmd string) {
+	m.needsConfirm[cmd] = true
 }
 
 func (m *mockValidator) Validate(command string, _ bool) safety.ValidationResult {
@@ -30,6 +39,14 @@ func (m *mockValidator) Validate(command string, _ bool) safety.ValidationResult
 			Allowed:     false,
 			IsDangerous: true,
 			Reason:      "blocked by mock",
+		}
+	}
+	if m.needsConfirm[command] {
+		return safety.ValidationResult{
+			Allowed:      true,
+			IsDangerous:  true,
+			Reason:       "requires confirmation",
+			NeedsConfirm: true,
 		}
 	}
 	if m.allowAll {
@@ -312,6 +329,48 @@ func TestInvestigationSafetyEnforcer_CheckCommandAllowed_EmptyCommand(t *testing
 	err := enforcer.CheckCommandAllowed("")
 	if err != nil {
 		t.Errorf("CheckCommandAllowed('') error = %v, want nil", err)
+	}
+}
+
+func TestInvestigationSafetyEnforcer_CheckCommandAllowed_NeedsConfirm(t *testing.T) {
+	cfg := config.DefaultInvestigationConfig()
+	validator := newMockValidator(true)
+	validator.requireConfirm("sudo systemctl restart app")
+	enforcer, err := NewInvestigationSafetyEnforcerWithValidator(cfg, validator)
+	if err != nil {
+		t.Fatalf("NewInvestigationSafetyEnforcerWithValidator() error = %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		command string
+		wantErr bool
+	}{
+		{
+			name:    "NeedsConfirm=true blocks command in headless mode",
+			command: "sudo systemctl restart app",
+			wantErr: true,
+		},
+		{
+			name:    "NeedsConfirm=false allows safe command",
+			command: "ls -la",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := enforcer.CheckCommandAllowed(tt.command)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("CheckCommandAllowed(%q) should return ErrCommandBlocked", tt.command)
+				} else if !errors.Is(err, ErrCommandBlocked) {
+					t.Errorf("CheckCommandAllowed(%q) error = %v, want ErrCommandBlocked", tt.command, err)
+				}
+			} else if err != nil {
+				t.Errorf("CheckCommandAllowed(%q) error = %v, want nil", tt.command, err)
+			}
+		})
 	}
 }
 

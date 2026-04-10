@@ -2048,22 +2048,22 @@ func TestCommandWhitelist_OutputRedirectionBlocked(t *testing.T) {
 			wantAllowed: false,
 		},
 		{
-			name:        "stderr redirect",
-			command:     "echo hello 2> /dev/null",
+			name:        "stderr redirect to file",
+			command:     "echo hello 2> error.log",
 			wantAllowed: false,
 		},
 		{
-			name:        "stderr append",
+			name:        "stderr append to file",
 			command:     "echo hello 2>> errors.log",
 			wantAllowed: false,
 		},
 		{
-			name:        "stdout and stderr redirect",
+			name:        "stdout and stderr redirect to file",
 			command:     "cat file &> output.txt",
 			wantAllowed: false,
 		},
 		{
-			name:        "stdout and stderr append",
+			name:        "stdout and stderr append to file",
 			command:     "cat file &>> output.txt",
 			wantAllowed: false,
 		},
@@ -2071,6 +2071,38 @@ func TestCommandWhitelist_OutputRedirectionBlocked(t *testing.T) {
 			name:        "fd 3 redirect",
 			command:     "echo hello 3> fd3.txt",
 			wantAllowed: false,
+		},
+
+		// Allowed: redirections to /dev/null (safe stderr/stdout suppression)
+		{
+			name:        "stderr redirect to /dev/null with space",
+			command:     "echo hello 2> /dev/null",
+			wantAllowed: true,
+		},
+		{
+			name:        "stderr redirect no space to /dev/null",
+			command:     "echo hello 2>/dev/null",
+			wantAllowed: true,
+		},
+		{
+			name:        "stdout redirect to /dev/null",
+			command:     "cat file >/dev/null",
+			wantAllowed: true,
+		},
+		{
+			name:        "stdout append to /dev/null",
+			command:     "cat file >>/dev/null",
+			wantAllowed: true,
+		},
+		{
+			name:        "stdout and stderr to /dev/null",
+			command:     "echo hello &>/dev/null",
+			wantAllowed: true,
+		},
+		{
+			name:        "stdout redirect space to /dev/null",
+			command:     "cat file > /dev/null",
+			wantAllowed: true,
 		},
 
 		// Allowed: no redirections
