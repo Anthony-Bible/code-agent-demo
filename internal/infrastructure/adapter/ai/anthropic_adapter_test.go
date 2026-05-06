@@ -486,7 +486,7 @@ func TestGetSystemPrompt_CustomPromptTakesPrecedenceOverBasePrompt(t *testing.T)
 	}
 
 	// Assert: should NOT be the base prompt
-	basePrompt, err := adapter.buildBasePromptWithAgents(context.Background())
+	basePrompt, err := buildBasePromptWithAgents(context.Background(), adapter.subagentManager)
 	if err != nil {
 		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
 	}
@@ -572,7 +572,7 @@ func TestGetSystemPrompt_EmptyCustomPromptFallsBackToBasePrompt(t *testing.T) {
 	}
 
 	// Expected: base prompt
-	expectedPrompt, err := adapter.buildBasePromptWithAgents(context.Background())
+	expectedPrompt, err := buildBasePromptWithAgents(context.Background(), adapter.subagentManager)
 	if err != nil {
 		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
 	}
@@ -624,7 +624,7 @@ func TestGetSystemPrompt_NoCustomPromptWithPlanModeReturnsPlanPrompt(t *testing.
 	}
 
 	// Assert: should NOT be the base prompt
-	basePrompt, err := adapter.buildBasePromptWithAgents(context.Background())
+	basePrompt, err := buildBasePromptWithAgents(context.Background(), adapter.subagentManager)
 	if err != nil {
 		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
 	}
@@ -654,7 +654,7 @@ func TestGetSystemPrompt_NoCustomPromptNoPlanModeReturnsBasePrompt(t *testing.T)
 	}
 
 	// Expected: base prompt
-	expectedPrompt, err := adapter.buildBasePromptWithAgents(context.Background())
+	expectedPrompt, err := buildBasePromptWithAgents(context.Background(), adapter.subagentManager)
 	if err != nil {
 		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
 	}
@@ -808,7 +808,7 @@ func TestGetSystemPrompt_MultipleCustomPromptsInSequence(t *testing.T) {
 		t.Errorf("Second call: expected %q, got %q", prompt2, actualPrompt2)
 	}
 
-	basePrompt, err := adapter.buildBasePromptWithAgents(context.Background())
+	basePrompt, err := buildBasePromptWithAgents(context.Background(), adapter.subagentManager)
 	if err != nil {
 		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
 	}
@@ -841,7 +841,7 @@ func TestBuildBasePromptWithAgents_IncludesSubagents(t *testing.T) {
 	}
 
 	// Execute: build prompt
-	prompt, err := adapter.buildBasePromptWithAgents(context.Background())
+	prompt, err := buildBasePromptWithAgents(context.Background(), adapter.subagentManager)
 	if err != nil {
 		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"sync"
 
 	"github.com/anthony-bible/code-agent-demo/internal/application/usecase"
@@ -319,6 +320,9 @@ func (a *ExecutorAdapter) ListTools() ([]entity.Tool, error) {
 	for _, tool := range a.tools {
 		tools = append(tools, tool)
 	}
+	// Stable order keeps the tool-array fingerprint deterministic across
+	// requests so Anthropic's compiled-strict-schema cache can hit.
+	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
 	return tools, nil
 }
 

@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
@@ -78,6 +79,16 @@ type HTTPAdapter struct {
 	// Protected by credsMu because SetBasicAuth may be called concurrently.
 	basicAuth map[string]basicAuthEntry
 	credsMu   sync.RWMutex
+	// warmupRequired marks readiness as gated on a successful warmup signal.
+	// When true, /ready returns 503 until warmupReady flips to true. When
+	// false (default), readiness is governed only by source registration —
+	// matching legacy behavior for callers that don't do warmup.
+	warmupRequired atomic.Bool
+	// warmupReady is set by MarkWarm once the warmup goroutine completes
+	// (success OR failure — a cold cache is a latency penalty, not a
+	// correctness issue, so we don't wedge the server forever on warmup
+	// errors).
+	warmupReady atomic.Bool
 }
 
 // NewHTTPAdapter creates a new webhook HTTP adapter.
@@ -124,7 +135,10 @@ func (a *HTTPAdapter) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
-// handleReady returns 200 OK if at least one alert source is registered.
+// handleReady returns 200 OK if at least one alert source is registered AND
+// any required warmup has completed. When warmup is gated (see
+// SetWarmupRequired), the endpoint returns 503 with status "warming up"
+// until MarkWarm is called.
 func (a *HTTPAdapter) handleReady(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -135,8 +149,30 @@ func (a *HTTPAdapter) handleReady(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
+	if a.warmupRequired.Load() && !a.warmupReady.Load() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"status":"warming up"}`))
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintf(w, `{"status":"ok","sources":%d}`, len(sources))
+}
+
+// SetWarmupRequired gates readiness on a successful MarkWarm signal. Call
+// this BEFORE Start if startup includes an async cache-warmup step. When
+// not called, readiness is governed solely by source registration (legacy
+// behavior).
+func (a *HTTPAdapter) SetWarmupRequired(required bool) {
+	a.warmupRequired.Store(required)
+}
+
+// MarkWarm flips the readiness gate to allow /ready to report 200 OK.
+// Safe to call multiple times. Should be called once the warmup goroutine
+// finishes — succeed OR fail; a cold cache is only a latency cost, not a
+// correctness one, so we don't wedge readiness on warmup errors.
+func (a *HTTPAdapter) MarkWarm() {
+	a.warmupReady.Store(true)
 }
 
 // SetBasicAuth registers HTTP Basic Auth credentials for a specific webhook path.

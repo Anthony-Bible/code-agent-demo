@@ -234,100 +234,11 @@ func (a *AnthropicAdapter) buildMessageParams(
 	}, nil
 }
 
-// getSystemPrompt returns the system prompt for the AI based on options priority.
-//
-// Priority order (highest to lowest):
-//  1. Custom system prompt (from opts.SystemPrompt) - Takes precedence over all other prompts
-//  2. Plan mode prompt (from opts.PlanMode) - Used when plan mode is active and no custom prompt exists
-//  3. Base prompt with optional skill metadata - Default prompt when no special modes are active
+// getSystemPrompt delegates to the shared resolveSystemPrompt helper. Priority
+// order (highest to lowest): explicit opts.SystemPrompt, plan-mode prompt,
+// then base prompt augmented with the subagent catalog.
 func (a *AnthropicAdapter) getSystemPrompt(ctx context.Context, opts port.AIRequestOptions) (string, error) {
-	// Priority 1: Check for custom system prompt (highest priority)
-	if opts.SystemPrompt != "" {
-		return opts.SystemPrompt, nil
-	}
-
-	// Priority 2: Check for plan mode prompt (second priority)
-	if opts.PlanMode != nil && opts.PlanMode.Enabled {
-		return a.buildPlanModePrompt(*opts.PlanMode), nil
-	}
-
-	// Priority 3: Return base prompt with optional agent metadata (default/fallback)
-	return a.buildBasePromptWithAgents(ctx)
-}
-
-// buildPlanModePrompt constructs the specialized plan mode system prompt.
-func (a *AnthropicAdapter) buildPlanModePrompt(planInfo port.PlanModeInfo) string {
-	return fmt.Sprintf(
-		`You are an AI assistant in PLAN MODE. Your job is to explore the codebase and write an implementation plan before making changes.
-
-## Your Role in Plan Mode
-
-You should:
-1. Use read_file and list_files to understand the existing code
-2. Use read-only bash commands (e.g., git status, ls, find) to explore
-3. Write your implementation plan to: %s
-
-## How to Write Your Plan
-
-Use the edit_file tool to write your plan to %s. Structure your plan as:
-
-### Summary
-Brief overview of what you're implementing
-
-### Files to Modify
-- path/to/file1.go - what changes are needed
-- path/to/file2.go - what changes are needed
-
-### Implementation Steps
-1. First step
-2. Second step
-...
-
-### Considerations
-- Any trade-offs or decisions to highlight
-
-## Important Rules
-
-- You CAN use edit_file to write to %s - this is your plan file
-- Other mutating tools (edit_file for other paths, destructive bash commands) will be blocked
-- If you try to use a blocked tool, you'll receive a reminder to write to your plan file instead
-- Focus on thorough exploration and detailed planning before implementation
-
-## When You're Done
-
-When your plan is complete, tell the user to exit plan mode with :mode normal to begin implementation.
-`,
-		planInfo.PlanPath,
-		planInfo.PlanPath,
-		planInfo.PlanPath,
-	)
-}
-
-// buildBasePromptWithAgents constructs the base system prompt.
-func (a *AnthropicAdapter) buildBasePromptWithAgents(ctx context.Context) (string, error) {
-	basePrompt := "You are an AI assistant that helps users with code editing and explanations. Use the available tools when necessary to provide accurate and helpful responses."
-
-	if a.subagentManager == nil {
-		return basePrompt, nil
-	}
-
-	agents, err := a.subagentManager.ListAgents(ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to list agents: %w", err)
-	}
-
-	if len(agents) == 0 {
-		return basePrompt, nil
-	}
-
-	var sb strings.Builder
-	sb.WriteString(basePrompt)
-	sb.WriteString("\n\nYou have access to the following specialized agents:\n")
-	for _, agent := range agents {
-		fmt.Fprintf(&sb, "- %s: %s\n", agent.Name, agent.Description)
-	}
-
-	return sb.String(), nil
+	return resolveSystemPrompt(ctx, opts, a.subagentManager)
 }
 
 // GenerateToolSchema returns an empty tool input schema.

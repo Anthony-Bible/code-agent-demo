@@ -37,6 +37,7 @@ func (a *ExecutorAdapter) registerBashTool() {
 		ID:          toolNameBash,
 		Name:        toolNameBash,
 		Description: "Executes shell commands and returns stdout, stderr, and exit code. You MUST assess whether each command is dangerous and set the dangerous field accordingly. Dangerous commands require user confirmation.",
+		Strict:      true,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
