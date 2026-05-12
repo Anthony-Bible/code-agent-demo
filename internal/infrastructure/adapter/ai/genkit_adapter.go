@@ -446,7 +446,7 @@ func defineToolSafe(
 		}()
 		def = genkit.DefineTool(g, name, description, fn,
 			genkitai.WithInputSchema(schema),
-			genkitai.WithStrict(strict),
+			genkitai.WithStrictSchema(strict),
 		)
 	}()
 	if panicErr != nil {

@@ -58,4 +58,4 @@ require (
 	golang.org/x/text v0.35.0 // indirect
 )
 
-replace github.com/firebase/genkit/go => github.com/Anthony-Bible/genkit/go v1.7.1-0.20260506115940-43381ac9eb96
+replace github.com/firebase/genkit/go => github.com/Anthony-Bible/genkit/go v1.7.1-0.20260511152837-c64d115736af
