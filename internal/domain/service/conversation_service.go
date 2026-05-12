@@ -309,11 +309,7 @@ func (cs *ConversationService) prepareAIRequest(
 
 	toolParams := make([]port.ToolParam, len(filteredTools))
 	for i, tool := range filteredTools {
-		toolParams[i] = port.ToolParam{
-			Name:        tool.Name,
-			Description: tool.Description,
-			InputSchema: tool.InputSchema,
-		}
+		toolParams[i] = port.ToolParamFromEntity(tool)
 	}
 
 	// Build AI request options from session state

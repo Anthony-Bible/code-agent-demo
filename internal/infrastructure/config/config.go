@@ -17,11 +17,29 @@ import (
 	"github.com/spf13/viper"
 )
 
+// Supported AIProvider values. Used by the DI wiring in container.go to
+// select the AIProvider implementation.
+const (
+	ProviderAnthropic = "anthropic"
+	ProviderGenkit    = "genkit"
+)
+
 // Config holds all configuration values for the application.
 type Config struct {
 	// AIModel is the model identifier to use for AI requests.
 	// Defaults to "hf:zai-org/GLM-4.7"
 	AIModel string `mapstructure:"model"`
+
+	// AIProvider selects the AI provider implementation.
+	// Accepted values: "anthropic" (default), "genkit".
+	// Bound to AGENT_AI_PROVIDER.
+	AIProvider string `mapstructure:"ai_provider"`
+
+	// GenkitPlugin selects which Genkit plugin to load when AIProvider is
+	// "genkit". Accepted values are the names registered via
+	// ai.RegisterGenkitPlugin (built-ins: "anthropic"; defaults to "anthropic").
+	// Bound to AGENT_GENKIT_PLUGIN. Ignored when AIProvider != "genkit".
+	GenkitPlugin string `mapstructure:"genkit_plugin"`
 
 	// MaxTokens is the maximum number of tokens to generate in AI responses.
 	// Defaults to 20000
@@ -130,9 +148,11 @@ type SafetyConfig struct {
 // Defaults returns a Config struct with all default values set.
 func Defaults() *Config {
 	return &Config{
-		AIModel:    "hf:zai-org/GLM-4.7",
-		MaxTokens:  20000,
-		WorkingDir: ".",
+		AIModel:      "hf:zai-org/GLM-4.7",
+		AIProvider:   ProviderAnthropic,
+		GenkitPlugin: "anthropic",
+		MaxTokens:    20000,
+		WorkingDir:   ".",
 		UI: UIConfig{
 			WelcomeMessage: "Chat with Claude (use 'ctrl+c' to quit)",
 			GoodbyeMessage: "Bye!",
