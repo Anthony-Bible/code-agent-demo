@@ -26,6 +26,11 @@ type Tool struct {
 	Description    string                 `json:"description"`               // Detailed description of what the tool does
 	InputSchema    map[string]interface{} `json:"input_schema,omitempty"`    // JSON schema for validating tool inputs
 	RequiredFields []string               `json:"required_fields,omitempty"` // List of required input field names
+	// Strict opts this tool into provider-side strict schema validation when
+	// the underlying provider supports it. Only set true for critical tools
+	// whose schemas don't use keywords that strict mode rejects (e.g.
+	// maxItems, minimum, maximum). See port.ToolParam.Strict for full details.
+	Strict bool `json:"strict,omitempty"`
 }
 
 // NewTool creates a new tool with the specified ID, name, and description.

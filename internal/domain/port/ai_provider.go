@@ -45,6 +45,25 @@ type ToolParam struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`
 	InputSchema map[string]interface{} `json:"input_schema,omitempty"`
+	// Strict opts the tool into provider-side strict schema validation (when
+	// supported). Reserve for tools where a malformed call has real cost — for
+	// example, a missing safety flag or a destructive arg shape. Tools whose
+	// schemas use keywords the provider rejects in strict mode (maxItems,
+	// minimum/maximum, etc.) must leave this false.
+	Strict bool `json:"strict,omitempty"`
+}
+
+// ToolParamFromEntity converts an entity.Tool to the wire-shape ToolParam
+// sent to AI providers. Centralizing the conversion keeps the warm-up path
+// and the live request path schema-identical: any new ToolParam field must
+// be propagated here exactly once.
+func ToolParamFromEntity(t entity.Tool) ToolParam {
+	return ToolParam{
+		Name:        t.Name,
+		Description: t.Description,
+		InputSchema: t.InputSchema,
+		Strict:      t.Strict,
+	}
 }
 
 // ToolInputSchemaParam represents a tool input schema parameter.

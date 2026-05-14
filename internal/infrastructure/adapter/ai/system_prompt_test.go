@@ -16,7 +16,7 @@ func TestSystemPromptDoesNotContainSkills(t *testing.T) {
 	}
 
 	// Get system prompt
-	systemPrompt, err := adapter.buildBasePromptWithAgents(context.Background())
+	systemPrompt, err := buildBasePromptWithAgents(context.Background(), adapter.subagentManager)
 	if err != nil {
 		t.Fatalf("buildBasePromptWithAgents failed: %v", err)
 	}
