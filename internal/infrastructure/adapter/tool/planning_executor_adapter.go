@@ -89,6 +89,28 @@ func (p *PlanningExecutorAdapter) RegisterTool(tool entity.Tool) error {
 	return p.baseExecutor.RegisterTool(tool)
 }
 
+// Compile-time assertions that the decorator preserves the optional
+// investigation registrar interfaces implemented by the base executor.
+// Without these, runtime type assertions in InvestigationRunner silently
+// fail and report_investigation cannot find live investigations.
+var (
+	_ port.InvestigationRegistrar   = (*PlanningExecutorAdapter)(nil)
+	_ port.InvestigationDeregistrar = (*PlanningExecutorAdapter)(nil)
+)
+
+// RegisterInvestigation delegates to the base executor so that
+// report_investigation lookups succeed when this decorator is in front
+// of ExecutorAdapter.
+func (p *PlanningExecutorAdapter) RegisterInvestigation(investigationID string) {
+	p.baseExecutor.RegisterInvestigation(investigationID)
+}
+
+// DeregisterInvestigation delegates to the base executor to keep
+// investigation state cleanup symmetric with RegisterInvestigation.
+func (p *PlanningExecutorAdapter) DeregisterInvestigation(investigationID string) {
+	p.baseExecutor.DeregisterInvestigation(investigationID)
+}
+
 // UnregisterTool delegates to the base executor.
 func (p *PlanningExecutorAdapter) UnregisterTool(name string) error {
 	return p.baseExecutor.UnregisterTool(name)
