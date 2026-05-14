@@ -12,6 +12,44 @@ import (
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/logger"
 )
 
+// TestPlanningExecutorAdapter_ForwardsInvestigationRegistration verifies that
+// the decorator forwards investigation registration to the base executor.
+// Regression test: previously the decorator did not implement
+// port.InvestigationRegistrar, so the runtime type assertion in
+// InvestigationRunner silently skipped registration and report_investigation
+// failed with "investigation_id not found".
+func TestPlanningExecutorAdapter_ForwardsInvestigationRegistration(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fileManager := file.NewLocalFileManager(tempDir)
+	baseExecutor := NewExecutorAdapter(fileManager, logger.NewNop())
+	planningExecutor := NewPlanningExecutorAdapter(baseExecutor, fileManager, tempDir)
+
+	registrar, ok := any(planningExecutor).(port.InvestigationRegistrar)
+	if !ok {
+		t.Fatal("PlanningExecutorAdapter must implement port.InvestigationRegistrar")
+	}
+	deregistrar, ok := any(planningExecutor).(port.InvestigationDeregistrar)
+	if !ok {
+		t.Fatal("PlanningExecutorAdapter must implement port.InvestigationDeregistrar")
+	}
+
+	const invID = "inv-test-decorator-forward-1"
+	registrar.RegisterInvestigation(invID)
+
+	report := []byte(`{"investigation_id":"` + invID + `","message":"halfway there","progress":50}`)
+	if _, err := planningExecutor.ExecuteTool(context.Background(), "report_investigation", report); err != nil {
+		t.Fatalf("report_investigation after Register should succeed via decorator, got: %v", err)
+	}
+
+	deregistrar.DeregisterInvestigation(invID)
+
+	if _, err := planningExecutor.ExecuteTool(context.Background(), "report_investigation", report); err == nil {
+		t.Fatal("report_investigation after Deregister should fail, got nil error")
+	}
+}
+
 func TestPlanningExecutorAdapter_EditFileBlockedInPlanMode(t *testing.T) {
 	tempDir := t.TempDir()
 
