@@ -120,7 +120,10 @@ func NewContainer(cfg *Config) (*Container, error) {
 		{Path: filepath.Join(getUserHome(), ".claude", "agents"), SourceType: entity.SubagentSourceUser},
 	})
 
-	aiAdapter := ai.NewAnthropicAdapter(cfg.AIModel, cfg.MaxTokens, subagentManager)
+	aiAdapter, err := newAIAdapter(cfg, subagentManager, log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AI adapter: %w", err)
+	}
 
 	// Build validation config once; both the executor and investigation validator consume it
 	validationMode, validationWhitelist, err := buildValidationConfig(cfg)
@@ -461,6 +464,29 @@ func (c *Container) SubagentUseCase() *usecase.SubagentUseCase {
 // Use this to obtain the same logger that was injected into all components.
 func (c *Container) Logger() port.Logger {
 	return c.logger
+}
+
+// newAIAdapter selects and constructs the AIProvider implementation based on
+// cfg.AIProvider. Supported values: "anthropic" (default) and "genkit".
+// Any other value (including the empty string when not defaulted upstream)
+// is rejected with an error naming the bad value.
+func newAIAdapter(cfg *Config, subagentManager port.SubagentManager, log port.Logger) (port.AIProvider, error) {
+	// Default the provider when callers construct &Config{} directly without
+	// going through Defaults()/LoadConfig() — primarily test code in this
+	// package. Production callers always have AIProvider pre-populated.
+	provider := cfg.AIProvider
+	if provider == "" {
+		provider = ProviderAnthropic
+	}
+	switch provider {
+	case ProviderAnthropic:
+		return ai.NewAnthropicAdapter(cfg.AIModel, cfg.MaxTokens, subagentManager), nil
+	case ProviderGenkit:
+		return ai.NewGenkitAdapterWithPlugin(cfg.GenkitPlugin, cfg.AIModel, cfg.MaxTokens, subagentManager, log)
+	default:
+		return nil, fmt.Errorf("invalid AGENT_AI_PROVIDER %q: must be %q or %q",
+			provider, ProviderAnthropic, ProviderGenkit)
+	}
 }
 
 // getUserHome returns the user's home directory.

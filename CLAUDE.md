@@ -117,6 +117,8 @@ Environment variables with `AGENT_` prefix:
 - `AGENT_SAFETY_ASK_LLM_ON_UNKNOWN` - Ask LLM before blocking non-whitelisted commands (default: `true`)
 - `AGENT_SAFETY_AUTO_APPROVE_SAFE` - Auto-approve non-dangerous bash commands without confirmation (default: `false`)
 - `AGENT_COMPACTION_THRESHOLD` - Token threshold for auto-compaction of conversation history (default: `160000`, minimum: `10000`)
+- `AGENT_AI_PROVIDER` - AI provider implementation: `anthropic` (default) or `genkit`
+- `AGENT_GENKIT_PLUGIN` - Genkit plugin name (default: `anthropic`; ignored when `AGENT_AI_PROVIDER != genkit`)
 
 ## Logging
 

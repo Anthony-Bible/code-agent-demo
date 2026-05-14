@@ -37,6 +37,13 @@ func (a *ExecutorAdapter) registerBashTool() {
 		ID:          toolNameBash,
 		Name:        toolNameBash,
 		Description: "Executes shell commands and returns stdout, stderr, and exit code. You MUST assess whether each command is dangerous and set the dangerous field accordingly. Dangerous commands require user confirmation.",
+		// Strict schema validation is opted in for write-capable / high-impact
+		// tools (bash, edit_file, delegate, task) so malformed inputs fail fast
+		// at the provider before doing damage. Read-only tools (read_file,
+		// list_files, fetch, plan/batch, skill, investigation) are left
+		// non-strict to avoid the strict-grammar compile cost where the blast
+		// radius of a malformed call is just a bad read.
+		Strict: true,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

@@ -118,6 +118,7 @@ func (a *ExecutorAdapter) registerFileTools() {
 		ID:          "edit_file",
 		Name:        "edit_file",
 		Description: "Makes edits to a text file. Replaces 'old_str' with 'new_str' in the given file. 'old_str' and 'new_str' MUST be different from each other. If the file specified with path doesn't exist, it will be created. The old_str must match exactly including whitespace and new lines. Include a few lines before to avoid editing a string with multiple matches.",
+		Strict:      true,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
