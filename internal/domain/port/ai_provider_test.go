@@ -3,10 +3,88 @@ package port
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/anthony-bible/code-agent-demo/internal/domain/entity"
 )
+
+// TestToolParamFromEntity locks the conversion contract that ToolParamFromEntity
+// propagates every relevant field from entity.Tool to port.ToolParam. The doc
+// comment on the helper claims it's the single propagation point for new
+// ToolParam fields; without this test a future field addition could silently
+// drop and reintroduce warm-up-vs-live schema drift.
+func TestToolParamFromEntity(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   entity.Tool
+		want ToolParam
+	}{
+		{
+			name: "all fields populated including strict",
+			in: entity.Tool{
+				ID:          "tool-1",
+				Name:        "edit_file",
+				Description: "Edits a file on disk.",
+				InputSchema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path": map[string]any{"type": "string"},
+					},
+				},
+				RequiredFields: []string{"path"},
+				Strict:         true,
+			},
+			want: ToolParam{
+				Name:        "edit_file",
+				Description: "Edits a file on disk.",
+				InputSchema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path": map[string]any{"type": "string"},
+					},
+				},
+				Strict: true,
+			},
+		},
+		{
+			name: "strict false is preserved",
+			in: entity.Tool{
+				Name:        "read_file",
+				Description: "Reads a file.",
+				Strict:      false,
+			},
+			want: ToolParam{
+				Name:        "read_file",
+				Description: "Reads a file.",
+				Strict:      false,
+			},
+		},
+		{
+			name: "nil input schema is preserved",
+			in: entity.Tool{
+				Name:        "noop",
+				Description: "No inputs.",
+			},
+			want: ToolParam{
+				Name:        "noop",
+				Description: "No inputs.",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := ToolParamFromEntity(tc.in)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("ToolParamFromEntity mismatch\n got: %#v\nwant: %#v", got, tc.want)
+			}
+		})
+	}
+}
 
 // TestAIProviderInterface_Contract validates that AIProvider interface exists with expected methods.
 func TestAIProviderInterface_Contract(_ *testing.T) {
