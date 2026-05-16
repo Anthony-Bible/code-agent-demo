@@ -1,0 +1,89 @@
+services:
+  target:
+    build:
+      context: ./target
+      dockerfile: Dockerfile
+    container_name: e2e-target
+    ports:
+      - "9100:9100"   # node_exporter
+      - "8080:8080"   # naive demo HTTP service
+    networks:
+      - e2e-net
+    labels:
+      env: e2e-test
+
+  prometheus:
+    image: prom/prometheus:v3.3.1
+    container_name: e2e-prometheus
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - e2e-net
+    depends_on:
+      - target
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    container_name: e2e-alertmanager
+    volumes:
+      - ./alertmanager:/etc/alertmanager:ro
+    ports:
+      - "9093:9093"
+    networks:
+      - e2e-net
+    depends_on:
+      - prometheus
+
+  code-agent:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: e2e-code-agent
+    env_file:
+      - .env
+    environment:
+      # Anthropic SDK reads ANTHROPIC_API_KEY from env_file.
+      # AGENT_* prefix maps to internal config (see CLAUDE.md).
+      - AGENT_LOG_LEVEL=debug
+      - AGENT_LOG_FORMAT=json
+      - AGENT_SAFETY_COMMAND_VALIDATION_MODE=blacklist
+      - AGENT_MODEL=claude-haiku-4-5-20251001
+    # Pass --config explicitly because the image ships
+    # config/alert-sources.example.yaml, not alert-sources.yaml.
+    command:
+      - serve
+      - --config
+      - /app/config/alert-sources.yaml
+      - --auto-approve-safe
+    volumes:
+      # Alert sources YAML mounted at the path serve --config points to.
+      - ./agent-config/alert-sources.yaml:/app/config/alert-sources.yaml:ro
+      # Skills are loaded from ./skills, ./.claude/skills, or ~/.claude/skills
+      # (LocalSkillManager hardcoded list). Mount under .claude/skills so we
+      # don't shadow the built-in /app/skills baked into the image.
+      - ./agent-config/skills:/app/.claude/skills:ro
+      # Investigation JSON lands at /app/.agent/investigations/.
+      - ./agent-investigations:/app/.agent
+    ports:
+      - "8090:8080"   # public webhook (avoid clash with target :8080)
+      - "8091:8081"   # internal /health, /ready
+    networks:
+      - e2e-net
+    depends_on:
+      - alertmanager
+
+  load-generator:
+    build:
+      context: ./load-gen
+      dockerfile: Dockerfile
+    container_name: e2e-load-gen
+    networks:
+      - e2e-net
+    depends_on:
+      - target
+
+networks:
+  e2e-net:
+    driver: bridge

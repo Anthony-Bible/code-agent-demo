@@ -1,0 +1,32 @@
+groups:
+  - name: e2e-load-alerts
+    rules:
+      - alert: HighCPUUtilization
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[30s])) * 100) > 80
+        for: 15s
+        labels:
+          severity: critical
+          team: sre
+        annotations:
+          summary: "High CPU on {{ $labels.instance }}"
+          description: "CPU usage is {{ $value }}% on {{ $labels.instance }} — above 80% threshold"
+
+      - alert: HighMemoryUtilization
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 15s
+        labels:
+          severity: critical
+          team: sre
+        annotations:
+          summary: "High memory on {{ $labels.instance }}"
+          description: "Memory usage is {{ $value }}% on {{ $labels.instance }}"
+
+      - alert: HighLoadAverage
+        expr: node_load1 > 2
+        for: 15s
+        labels:
+          severity: critical
+          team: sre
+        annotations:
+          summary: "High load average on {{ $labels.instance }}"
+          description: "1-minute load average is {{ $value }} on {{ $labels.instance }}"
