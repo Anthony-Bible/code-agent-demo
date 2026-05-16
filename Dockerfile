@@ -20,7 +20,8 @@ RUN apk add --no-cache \
     tzdata \
     bash \
     coreutils \
-    curl
+    curl \
+    jq
 
 # Create non-root user (UID 10001 to avoid conflicts with system UIDs)
 RUN adduser -D -u 10001 agent

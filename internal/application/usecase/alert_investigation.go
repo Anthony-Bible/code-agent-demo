@@ -338,10 +338,25 @@ func (uc *AlertInvestigationUseCase) RunInvestigation(
 		return nil, err
 	}
 
-	// Update store with final status if configured
+	// Persist final result if configured. Build from the full result so we
+	// preserve findings, duration, confidence, etc. — passing a status-only
+	// stub here used to wipe everything the runner had filled in.
 	if store != nil {
-		stub := newSimpleInvestigationRecord(invID, alert.ID(), "", result.Status)
-		_ = store.Update(ctx, stub)
+		final := &simpleInvestigationRecord{
+			id:             invID,
+			alertID:        alert.ID(),
+			status:         result.Status,
+			completedAt:    time.Now(),
+			findings:       result.Findings,
+			actionsTaken:   result.ActionsTaken,
+			durationNanos:  int64(result.Duration),
+			confidence:     result.Confidence,
+			escalated:      result.Escalated,
+			escalateReason: result.EscalateReason,
+		}
+		if err := store.Update(ctx, final); err != nil {
+			uc.logger.With("investigation_id", invID).Error("failed to persist final investigation", "error", err)
+		}
 	}
 
 	return result, nil

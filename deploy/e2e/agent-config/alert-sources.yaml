@@ -1,0 +1,6 @@
+addr: ":8080"
+
+sources:
+  - type: prometheus
+    name: alertmanager
+    webhook_path: /alerts/prometheus
