@@ -2389,12 +2389,15 @@ func TestCompactionNotTriggeredDuringToolCycle(t *testing.T) {
 }
 
 // toolCallCompactionMockAIProvider returns a tool-call response with high tokens
-// on its first call (tools != nil), then a summary on the next call (tools == nil).
+// on a regular turn, and a summary response when called by compactConversation.
+// Summary calls are detected by matching the prompt produced by buildSummaryRequest
+// rather than coupling to the tools-nil implementation detail.
 // summaryErr is returned instead of a summary response when set.
 type toolCallCompactionMockAIProvider struct {
 	mockAIProvider
 
-	callCount       int
+	turnCalls       int
+	summaryCalls    int
 	inputTokens     int64
 	outputTokens    int64
 	toolCalls       []port.ToolCallInfo
@@ -2404,14 +2407,14 @@ type toolCallCompactionMockAIProvider struct {
 
 func (m *toolCallCompactionMockAIProvider) SendMessage(
 	_ context.Context,
-	_ []port.MessageParam,
-	tools []port.ToolParam,
+	messages []port.MessageParam,
+	_ []port.ToolParam,
 	_ port.AIRequestOptions,
 ) (*entity.Message, []port.ToolCallInfo, error) {
-	m.callCount++
-
-	// nil tools => this is the compaction summary request
-	if tools == nil {
+	// A compaction summary request is the single-user-message prompt built by
+	// buildSummaryRequest, which contains the literal "CONVERSATION TO SUMMARIZE".
+	if len(messages) > 0 && strings.Contains(messages[0].Content, "CONVERSATION TO SUMMARIZE") {
+		m.summaryCalls++
 		if m.summaryErr != nil {
 			return nil, nil, m.summaryErr
 		}
@@ -2424,7 +2427,7 @@ func (m *toolCallCompactionMockAIProvider) SendMessage(
 		return resp, nil, nil
 	}
 
-	// Normal turn: return tool calls with high token counts
+	m.turnCalls++
 	resp := &entity.Message{
 		Role:    entity.RoleAssistant,
 		Content: "Calling tool",
@@ -2495,6 +2498,25 @@ func TestCompactionTriggeredAfterToolResults(t *testing.T) {
 	if !strings.Contains(lastMsg.Content, "Summary after tool cycle.") {
 		t.Errorf("Expected summary content, got: %s", lastMsg.Content)
 	}
+
+	// Exactly one turn call + one summary call. A second summary call would mean
+	// compaction fired twice, or a second turn call would mean an unexpected AI hit.
+	if provider.turnCalls != 1 {
+		t.Errorf("Expected 1 turn call, got %d", provider.turnCalls)
+	}
+	if provider.summaryCalls != 1 {
+		t.Errorf("Expected 1 summary call, got %d", provider.summaryCalls)
+	}
+
+	// Token counter must be reset to the summary response's tokens (500+500=1000).
+	// If not reset, the next AI call would immediately re-trigger compaction.
+	tokens, threshold := svc.GetTokenUsage(sessionID)
+	if tokens != 1000 {
+		t.Errorf("Expected token usage reset to 1000 after compaction, got %d", tokens)
+	}
+	if threshold != 10000 {
+		t.Errorf("Expected threshold 10000, got %d", threshold)
+	}
 }
 
 func TestCompactionFailureInAddToolResultIsNonFatal(t *testing.T) {
@@ -2535,6 +2557,14 @@ func TestCompactionFailureInAddToolResultIsNonFatal(t *testing.T) {
 	lastMsg, _ := conv.GetLastMessage()
 	if strings.Contains(lastMsg.Content, "[CONVERSATION SUMMARY") {
 		t.Error("Failed compaction must not leave a summary marker behind")
+	}
+
+	// Exactly one turn call and one summary attempt (which errored).
+	if provider.turnCalls != 1 {
+		t.Errorf("Expected 1 turn call, got %d", provider.turnCalls)
+	}
+	if provider.summaryCalls != 1 {
+		t.Errorf("Expected 1 summary call attempt, got %d", provider.summaryCalls)
 	}
 }
 

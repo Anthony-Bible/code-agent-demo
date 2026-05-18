@@ -385,12 +385,12 @@ func (cs *ConversationService) finalizeAIResponse(
 	cs.processing[sessionID] = hasToolCalls
 	cs.processingMu.Unlock()
 
-	// Track token usage and check for compaction (atomic to avoid race between set and check).
-	// At this site we only compact when the turn has ended naturally (no tool calls), to
-	// avoid leaving an assistant message with tool_use blocks orphaned from their tool_result.
-	// Mid-turn compaction (when hasToolCalls is true) fires later in AddToolResultMessage.
-	shouldCompact := cs.setTokensAndCheckThreshold(sessionID, response.InputTokens, response.OutputTokens)
-	if !hasToolCalls && shouldCompact {
+	// Update token usage from this response. At this site we only compact when the
+	// turn has ended naturally (no tool calls), to avoid leaving an assistant
+	// message with tool_use blocks orphaned from their tool_result. Mid-turn
+	// compaction (when hasToolCalls is true) fires later in AddToolResultMessage.
+	cs.setTokensAndCheckThreshold(sessionID, response.InputTokens, response.OutputTokens)
+	if !hasToolCalls {
 		cs.maybeCompact(ctx, sessionID, conversation)
 	}
 
