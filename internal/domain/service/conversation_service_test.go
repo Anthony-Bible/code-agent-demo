@@ -2388,6 +2388,186 @@ func TestCompactionNotTriggeredDuringToolCycle(t *testing.T) {
 	}
 }
 
+// toolCallCompactionMockAIProvider returns a tool-call response with high tokens
+// on a regular turn, and a summary response when called by compactConversation.
+// Summary calls are detected by matching the prompt produced by buildSummaryRequest
+// rather than coupling to the tools-nil implementation detail.
+// summaryErr is returned instead of a summary response when set.
+type toolCallCompactionMockAIProvider struct {
+	mockAIProvider
+
+	turnCalls       int
+	summaryCalls    int
+	inputTokens     int64
+	outputTokens    int64
+	toolCalls       []port.ToolCallInfo
+	summaryResponse string
+	summaryErr      error
+}
+
+func (m *toolCallCompactionMockAIProvider) SendMessage(
+	_ context.Context,
+	messages []port.MessageParam,
+	_ []port.ToolParam,
+	_ port.AIRequestOptions,
+) (*entity.Message, []port.ToolCallInfo, error) {
+	// A compaction summary request is the single-user-message prompt built by
+	// buildSummaryRequest, which contains the literal "CONVERSATION TO SUMMARIZE".
+	if len(messages) > 0 && strings.Contains(messages[0].Content, "CONVERSATION TO SUMMARIZE") {
+		m.summaryCalls++
+		if m.summaryErr != nil {
+			return nil, nil, m.summaryErr
+		}
+		resp := &entity.Message{
+			Role:    entity.RoleAssistant,
+			Content: m.summaryResponse,
+		}
+		resp.InputTokens = 500
+		resp.OutputTokens = 500
+		return resp, nil, nil
+	}
+
+	m.turnCalls++
+	resp := &entity.Message{
+		Role:    entity.RoleAssistant,
+		Content: "Calling tool",
+	}
+	resp.InputTokens = m.inputTokens
+	resp.OutputTokens = m.outputTokens
+	return resp, m.toolCalls, nil
+}
+
+func TestCompactionTriggeredAfterToolResults(t *testing.T) {
+	provider := &toolCallCompactionMockAIProvider{
+		inputTokens:     6000,
+		outputTokens:    6000,
+		summaryResponse: "Summary after tool cycle.",
+		toolCalls: []port.ToolCallInfo{
+			{ToolID: "tool_1", ToolName: "list_files", Input: map[string]interface{}{"path": "."}},
+		},
+	}
+
+	// 6000+6000=12000 > 10000 threshold
+	svc, err := NewConversationService(provider, &mockToolExecutor{}, int64(10000))
+	if err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+
+	ctx := context.Background()
+	sessionID, _ := svc.StartConversation(ctx)
+
+	_, _ = svc.AddUserMessage(ctx, sessionID, "List files")
+	_, toolCalls, err := svc.ProcessAssistantResponse(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("Response failed: %v", err)
+	}
+	if len(toolCalls) == 0 {
+		t.Fatal("Expected tool calls from first response")
+	}
+
+	// After AI response with tool calls: compaction must NOT have fired yet
+	// (the assistant message has tool_use blocks awaiting matching tool_result).
+	conv, _ := svc.GetConversation(sessionID)
+	if conv.MessageCount() < 2 {
+		t.Fatalf("Expected at least 2 messages before tool results added, got %d", conv.MessageCount())
+	}
+	lastMsg, _ := conv.GetLastMessage()
+	if strings.Contains(lastMsg.Content, "[CONVERSATION SUMMARY") {
+		t.Fatal("Compaction must not trigger before tool results are added")
+	}
+
+	// Now add the matching tool_result. This is where mid-turn hard-compaction must fire.
+	toolResults := []entity.ToolResult{
+		{ToolID: "tool_1", Result: "file1.txt\nfile2.txt", IsError: false},
+	}
+	if err := svc.AddToolResultMessage(ctx, sessionID, toolResults); err != nil {
+		t.Fatalf("AddToolResultMessage failed: %v", err)
+	}
+
+	conv, _ = svc.GetConversation(sessionID)
+	if conv.MessageCount() != 1 {
+		t.Errorf("Expected 1 message after compaction, got %d", conv.MessageCount())
+	}
+	lastMsg, ok := conv.GetLastMessage()
+	if !ok {
+		t.Fatal("Expected a summary message")
+	}
+	if !strings.Contains(lastMsg.Content, "[CONVERSATION SUMMARY - Auto-compacted]") {
+		t.Errorf("Expected summary marker, got: %s", lastMsg.Content)
+	}
+	if !strings.Contains(lastMsg.Content, "Summary after tool cycle.") {
+		t.Errorf("Expected summary content, got: %s", lastMsg.Content)
+	}
+
+	// Exactly one turn call + one summary call. A second summary call would mean
+	// compaction fired twice, or a second turn call would mean an unexpected AI hit.
+	if provider.turnCalls != 1 {
+		t.Errorf("Expected 1 turn call, got %d", provider.turnCalls)
+	}
+	if provider.summaryCalls != 1 {
+		t.Errorf("Expected 1 summary call, got %d", provider.summaryCalls)
+	}
+
+	// Token counter must be reset to the summary response's tokens (500+500=1000).
+	// If not reset, the next AI call would immediately re-trigger compaction.
+	tokens, threshold := svc.GetTokenUsage(sessionID)
+	if tokens != 1000 {
+		t.Errorf("Expected token usage reset to 1000 after compaction, got %d", tokens)
+	}
+	if threshold != 10000 {
+		t.Errorf("Expected threshold 10000, got %d", threshold)
+	}
+}
+
+func TestCompactionFailureInAddToolResultIsNonFatal(t *testing.T) {
+	provider := &toolCallCompactionMockAIProvider{
+		inputTokens:  6000,
+		outputTokens: 6000,
+		toolCalls: []port.ToolCallInfo{
+			{ToolID: "tool_1", ToolName: "list_files", Input: map[string]interface{}{"path": "."}},
+		},
+		summaryErr: errors.New("summary provider unavailable"),
+	}
+
+	svc, err := NewConversationService(provider, &mockToolExecutor{}, int64(10000))
+	if err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+
+	ctx := context.Background()
+	sessionID, _ := svc.StartConversation(ctx)
+
+	_, _ = svc.AddUserMessage(ctx, sessionID, "List files")
+	if _, _, err := svc.ProcessAssistantResponse(ctx, sessionID); err != nil {
+		t.Fatalf("Response failed: %v", err)
+	}
+
+	toolResults := []entity.ToolResult{
+		{ToolID: "tool_1", Result: "ok", IsError: false},
+	}
+	// Compaction attempt fails, but AddToolResultMessage must still succeed (non-fatal).
+	if err := svc.AddToolResultMessage(ctx, sessionID, toolResults); err != nil {
+		t.Fatalf("AddToolResultMessage should be non-fatal on compaction failure, got: %v", err)
+	}
+
+	conv, _ := svc.GetConversation(sessionID)
+	if conv.MessageCount() < 3 {
+		t.Errorf("Expected conversation intact (>=3 messages) when compaction fails, got %d", conv.MessageCount())
+	}
+	lastMsg, _ := conv.GetLastMessage()
+	if strings.Contains(lastMsg.Content, "[CONVERSATION SUMMARY") {
+		t.Error("Failed compaction must not leave a summary marker behind")
+	}
+
+	// Exactly one turn call and one summary attempt (which errored).
+	if provider.turnCalls != 1 {
+		t.Errorf("Expected 1 turn call, got %d", provider.turnCalls)
+	}
+	if provider.summaryCalls != 1 {
+		t.Errorf("Expected 1 summary call attempt, got %d", provider.summaryCalls)
+	}
+}
+
 func TestCompactionCleanup(t *testing.T) {
 	svc, err := NewConversationService(&mockAIProvider{}, &mockToolExecutor{}, int64(160000))
 	if err != nil {

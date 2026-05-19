@@ -176,7 +176,16 @@ func (cs *ConversationService) AddToolResultMessage(
 		return err
 	}
 
-	return conversation.AddMessage(*message)
+	if err := conversation.AddMessage(*message); err != nil {
+		return err
+	}
+
+	// Hard-compact mid-turn: if the previous AI response pushed us over the
+	// threshold, summarize now (after the tool_result is in place, so the
+	// tool_use/tool_result pair is preserved in the summary) rather than
+	// waiting for the AI to end the turn without tool calls.
+	cs.maybeCompact(ctx, sessionID, conversation)
+	return nil
 }
 
 // ProcessAssistantResponse processes an AI assistant response, handling tools and text.
@@ -335,6 +344,26 @@ func (cs *ConversationService) prepareAIRequest(
 	return conversation, messageParams, toolParams, opts, nil
 }
 
+// maybeCompact runs compaction if the current token total meets the threshold.
+// Errors are logged to stderr and swallowed — non-fatal, conversation continues.
+func (cs *ConversationService) maybeCompact(
+	ctx context.Context,
+	sessionID string,
+	conversation *entity.Conversation,
+) {
+	if cs.getTokenUsage(sessionID) < cs.compactionThreshold {
+		return
+	}
+	if err := cs.compactConversation(ctx, sessionID, conversation); err != nil {
+		fmt.Fprintf(
+			os.Stderr,
+			"[ConversationService] Auto-compaction failed for session %s (non-fatal, conversation continues): %v\n",
+			sessionID,
+			err,
+		)
+	}
+}
+
 // finalizeAIResponse adds the AI response to the conversation and updates processing state.
 // This is shared logic between streaming and non-streaming requests.
 func (cs *ConversationService) finalizeAIResponse(
@@ -356,17 +385,13 @@ func (cs *ConversationService) finalizeAIResponse(
 	cs.processing[sessionID] = hasToolCalls
 	cs.processingMu.Unlock()
 
-	// Track token usage and check for compaction (atomic to avoid race between set and check)
-	shouldCompact := cs.setTokensAndCheckThreshold(sessionID, response.InputTokens, response.OutputTokens)
-	if !hasToolCalls && shouldCompact {
-		if err := cs.compactConversation(ctx, sessionID, conversation); err != nil {
-			fmt.Fprintf(
-				os.Stderr,
-				"[ConversationService] Auto-compaction failed for session %s (non-fatal, conversation continues): %v\n",
-				sessionID,
-				err,
-			)
-		}
+	// Update token usage from this response. At this site we only compact when the
+	// turn has ended naturally (no tool calls), to avoid leaving an assistant
+	// message with tool_use blocks orphaned from their tool_result. Mid-turn
+	// compaction (when hasToolCalls is true) fires later in AddToolResultMessage.
+	cs.setTokensAndCheckThreshold(sessionID, response.InputTokens, response.OutputTokens)
+	if !hasToolCalls {
+		cs.maybeCompact(ctx, sessionID, conversation)
 	}
 
 	return response, toolCalls, nil
