@@ -35,8 +35,9 @@ func (a *ExecutorAdapter) registerSubagentTools() {
 
 	// Register delegate tool
 	delegateTool := entity.Tool{
-		ID:   "delegate",
-		Name: "delegate",
+		ID:     "delegate",
+		Name:   "delegate",
+		Strict: true,
 		Description: `Launch a dynamic agent to handle complex, multi-step tasks autonomously.
 
 The delegate tool spawns a specialized agent (subprocess) that autonomously handles complex tasks in an isolated conversation context. You define the agent's role and behavior through a custom system prompt.
@@ -129,6 +130,7 @@ func (a *ExecutorAdapter) registerTaskTool() {
 		ID:          "task",
 		Name:        "task",
 		Description: fullDescription.String(),
+		Strict:      true,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

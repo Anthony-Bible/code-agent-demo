@@ -7,6 +7,7 @@ import (
 
 	"github.com/anthony-bible/code-agent-demo/internal/application/usecase"
 	"github.com/anthony-bible/code-agent-demo/internal/domain/port"
+	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/ai"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/alert"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/adapter/webhook"
 	"github.com/anthony-bible/code-agent-demo/internal/infrastructure/config"
@@ -15,6 +16,29 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+// runWarmup primes the AI provider's tool-schema cache by issuing a small
+// tool-bearing request. The first call after process boot can compile the
+// strict-mode grammar (~30-100s); subsequent calls hit Anthropic's 24h
+// regional cache. Runs async so /ready can flip from 503 → 200 once warmup
+// completes.
+//
+// On warmup failure we still call MarkWarm — a cold cache is a latency
+// penalty, not a correctness problem, and we'd rather serve traffic slowly
+// than wedge the pod in NotReady forever.
+func runWarmup(ctx context.Context, container *config.Container, adapter *webhook.HTTPAdapter, logger port.Logger) {
+	defer adapter.MarkWarm()
+
+	tools, err := ai.ToolParamsFromExecutor(container.ToolExecutor())
+	if err != nil {
+		logger.Warn("warmup: skipped — could not list tools", "error", err)
+		return
+	}
+
+	if err := ai.WarmCache(ctx, container.AIAdapter(), tools, logger); err != nil {
+		logger.Warn("warmup: failed (continuing anyway, first real request will pay the cache-miss cost)", "error", err)
+	}
+}
 
 // serveCmd represents the serve command.
 //
@@ -191,6 +215,31 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// Credentials are applied after adapter creation so they are not logged.
 	// They are stored in the adapter's internal map and in the parsed config.
 	applyBasicAuth(webhookCfg, webhookAdapter, container.Logger())
+
+	// Gate readiness on cache warmup — /ready returns 503 until the goroutine
+	// below either succeeds or fails. We use a fresh background context (not
+	// the cancellable cmd context) so a fast Ctrl+C during boot still lets the
+	// in-flight warmup HTTP request finish cleanly under its own 3-minute
+	// timeout rather than tearing it midway.
+	//
+	// Only warm up when running under the Genkit provider: warmup exists to
+	// pre-seed Genkit's per-tool-schema prompt cache. AnthropicAdapter doesn't
+	// benefit and would otherwise pay an unintentional startup API call plus
+	// readiness delay.
+	if cfg.AIProvider == config.ProviderGenkit {
+		webhookAdapter.SetWarmupRequired(true)
+		// Derive a bounded context that we cancel when the server returns, so the
+		// warmup goroutine doesn't outlive a graceful shutdown (e.g., SIGTERM in
+		// Kubernetes) by up to WarmCacheTimeout. The timeout still bounds the
+		// worst-case wait so a fast Ctrl+C during boot doesn't tear the in-flight
+		// HTTP call midway — it gets its own deadline.
+		warmupCtx, warmupCancel := context.WithTimeout(context.Background(), ai.WarmCacheTimeout)
+		defer warmupCancel()
+		go runWarmup(warmupCtx, container, webhookAdapter, container.Logger())
+	} else {
+		container.Logger().Debug("warmup: skipped — provider does not require warmup",
+			"provider", cfg.AIProvider)
+	}
 
 	// Set up SIGHUP handler for skill hot-reload
 	reloadHandler := setupSkillReloadHandler(container)
