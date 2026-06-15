@@ -124,25 +124,7 @@ func (h *AlertHandler) Handle(ctx context.Context, alert *AlertForInvestigation)
 		return err
 	}
 
-	log.Info("Investigation completed",
-		"status", result.Status,
-		"findings", len(result.Findings),
-		"confidence", result.Confidence)
-
-	if len(result.Findings) > 0 {
-		log.Info("Investigation findings", "count", len(result.Findings))
-		for i, finding := range result.Findings {
-			log.Info("Finding", "index", i+1, "description", finding)
-		}
-	}
-
-	// Display RCA findings if available
-	if len(result.RCAFindings) > 0 {
-		reporter := h.investigationUseCase.RCAReporter()
-		if reporter != nil {
-			_ = reporter.DisplayRCAFindings(result.RCAFindings)
-		}
-	}
+	h.logAndDisplayResult(log, result)
 
 	if result.Escalated {
 		log.Warn("ESCALATED", "reason", result.EscalateReason)
@@ -185,16 +167,7 @@ func (h *AlertHandler) HandleEntityAlert(ctx context.Context, alert *entity.Aler
 	if alert == nil {
 		return ErrNilAlert
 	}
-	// Convert domain entity to use case DTO for processing
-	invAlert := &AlertForInvestigation{
-		id:          alert.ID(),
-		source:      alert.Source(),
-		severity:    alert.Severity(),
-		title:       alert.Title(),
-		description: alert.Description(),
-		labels:      alert.Labels(),
-	}
-	return h.Handle(ctx, invAlert)
+	return h.Handle(ctx, entityAlertToInvestigation(alert))
 }
 
 // HandleEntityAlertAsync starts an investigation and returns the investigation ID immediately.
@@ -213,14 +186,7 @@ func (h *AlertHandler) HandleEntityAlertAsync(ctx context.Context, alert *entity
 	}
 
 	// Convert domain entity to use case DTO for processing
-	invAlert := &AlertForInvestigation{
-		id:          alert.ID(),
-		source:      alert.Source(),
-		severity:    alert.Severity(),
-		title:       alert.Title(),
-		description: alert.Description(),
-		labels:      alert.Labels(),
-	}
+	invAlert := entityAlertToInvestigation(alert)
 
 	// Check if source is ignored - silently skip these alerts
 	if h.isSourceIgnored(invAlert.Source()) {
@@ -255,14 +221,7 @@ func (h *AlertHandler) RunEntityAlertInvestigation(
 	}
 
 	// Convert domain entity to use case DTO for processing
-	invAlert := &AlertForInvestigation{
-		id:          alert.ID(),
-		source:      alert.Source(),
-		severity:    alert.Severity(),
-		title:       alert.Title(),
-		description: alert.Description(),
-		labels:      alert.Labels(),
-	}
+	invAlert := entityAlertToInvestigation(alert)
 
 	log := h.logger.With("alert_id", alert.ID(), "severity", alert.Severity())
 
@@ -272,6 +231,28 @@ func (h *AlertHandler) RunEntityAlertInvestigation(
 		return err
 	}
 
+	h.logAndDisplayResult(log, result)
+
+	if result.Escalated {
+		log.Warn("ESCALATED", "reason", result.EscalateReason)
+	}
+	return nil
+}
+
+// entityAlertToInvestigation converts a domain entity.Alert to the use case AlertForInvestigation DTO.
+func entityAlertToInvestigation(alert *entity.Alert) *AlertForInvestigation {
+	return &AlertForInvestigation{
+		id:          alert.ID(),
+		source:      alert.Source(),
+		severity:    alert.Severity(),
+		title:       alert.Title(),
+		description: alert.Description(),
+		labels:      alert.Labels(),
+	}
+}
+
+// logAndDisplayResult logs investigation result details and displays RCA findings if available.
+func (h *AlertHandler) logAndDisplayResult(log port.Logger, result *InvestigationResult) {
 	log.Info("Investigation completed",
 		"status", result.Status,
 		"findings", len(result.Findings),
@@ -286,14 +267,10 @@ func (h *AlertHandler) RunEntityAlertInvestigation(
 
 	// Display RCA findings if available
 	if len(result.RCAFindings) > 0 {
-		reporter := h.investigationUseCase.RCAReporter()
-		if reporter != nil {
-			_ = reporter.DisplayRCAFindings(result.RCAFindings)
+		if reporter := h.investigationUseCase.RCAReporter(); reporter != nil {
+			if displayErr := reporter.DisplayRCAFindings(result.RCAFindings); displayErr != nil {
+				log.Error("failed to display RCA findings", "error", displayErr)
+			}
 		}
 	}
-
-	if result.Escalated {
-		log.Warn("ESCALATED", "reason", result.EscalateReason)
-	}
-	return nil
 }

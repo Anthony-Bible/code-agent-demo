@@ -27,6 +27,14 @@ const (
 // defaultMaxHistoryEntries is the default number of history entries to store.
 const defaultMaxHistoryEntries = 100
 
+// RCA display divider strings used for consistent visual formatting.
+const (
+	// rcaBlockDivider is the heavy divider used for RCA section boundaries (header/footer).
+	rcaBlockDivider = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	// rcaSectionDivider is the light divider used to separate sub-sections within a finding.
+	rcaSectionDivider = "──────────────────────────────────────────────────────────────────────"
+)
+
 // CLIAdapter implements the UserInterface and RCAReporter ports using the command line.
 type CLIAdapter struct {
 	input              io.Reader
@@ -439,26 +447,40 @@ func (c *CLIAdapter) DisplayRCAFindings(findings []entity.RCAFinding) error {
 }
 
 func (c *CLIAdapter) writeRCAHeader(buf *strings.Builder) {
-	buf.WriteString("\n" + c.colors.System + "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" + c.colors.Reset + "\n")
+	buf.WriteString("\n" + c.colors.System + rcaBlockDivider + c.colors.Reset + "\n")
 	buf.WriteString(c.colors.System + "ROOT CAUSE ANALYSIS" + c.colors.Reset + "\n")
-	buf.WriteString(c.colors.System + "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" + c.colors.Reset + "\n")
+	buf.WriteString(c.colors.System + rcaBlockDivider + c.colors.Reset + "\n")
 }
 
 func (c *CLIAdapter) writeRCAFooter(buf *strings.Builder) {
-	buf.WriteString(c.colors.System + "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" + c.colors.Reset + "\n\n")
+	buf.WriteString(c.colors.System + rcaBlockDivider + c.colors.Reset + "\n\n")
 }
 
 func (c *CLIAdapter) writeRCAFinding(buf *strings.Builder, finding entity.RCAFinding) {
-	fmt.Fprintf(buf, "\n%sSUMMARY: %s%s\n", c.colors.Assistant, finding.Summary, c.colors.Reset)
+	// Summary section
+	fmt.Fprintf(buf, "\n%sSUMMARY%s\n", c.colors.Assistant, c.colors.Reset)
+	fmt.Fprintf(buf, "%s%s%s\n", c.colors.Assistant, finding.Summary, c.colors.Reset)
 
-	fmt.Fprintf(buf, "\n%sIDENTIFIED CAUSES:%s\n", c.colors.Error, c.colors.Reset)
-	for _, cause := range finding.Causes {
-		c.writeCause(buf, cause)
+	// Causes section
+	buf.WriteString(c.colors.System + rcaSectionDivider + c.colors.Reset + "\n")
+	fmt.Fprintf(buf, "%sIDENTIFIED CAUSES:%s\n", c.colors.Error, c.colors.Reset)
+	if len(finding.Causes) == 0 {
+		fmt.Fprintf(buf, "  %s(none)%s\n", c.colors.System, c.colors.Reset)
+	} else {
+		for _, cause := range finding.Causes {
+			c.writeCause(buf, cause)
+		}
 	}
 
-	fmt.Fprintf(buf, "\n%sSUGGESTED REMEDIES:%s\n", c.colors.Tool, c.colors.Reset)
-	for _, remedy := range finding.Remedies {
-		c.writeRemedy(buf, remedy)
+	// Remedies section
+	buf.WriteString(c.colors.System + rcaSectionDivider + c.colors.Reset + "\n")
+	fmt.Fprintf(buf, "%sSUGGESTED REMEDIES:%s\n", c.colors.Tool, c.colors.Reset)
+	if len(finding.Remedies) == 0 {
+		fmt.Fprintf(buf, "  %s(none)%s\n", c.colors.System, c.colors.Reset)
+	} else {
+		for _, remedy := range finding.Remedies {
+			c.writeRemedy(buf, remedy)
+		}
 	}
 }
 
