@@ -1,0 +1,59 @@
+---
+// Abridged transcript of the recorded GKE node load run (the old demo.gif).
+// Text is copied from the recording; long commands are cut down to the flags that matter.
+// `t` is the second at which the line appears.
+type Line = { t: number; k: "prompt" | "sys" | "appr" | "cmd" | "think" | "log" | "done" | "find"; s: string };
+
+const lines: Line[] = [
+  { t: 0, k: "prompt", s: './agent serve --show-thinking --thinking --auto-approve-safe --config config/alert-sources.example.yaml' },
+  { t: 1.2, k: "sys", s: "System: Registered alert source: alertmanager (type=prometheus, path=/alerts/prometheus)" },
+  { t: 1.4, k: "sys", s: "System: Registered alert source: gcp-alerts (type=gcp_monitoring, path=/alerts/gcp)" },
+  { t: 1.6, k: "sys", s: "System: Starting webhook server on :8080" },
+  { t: 1.8, k: "sys", s: "System: Webhook:      POST http://localhost:8080/alerts/gcp" },
+  { t: 3.2, k: "think", s: "Claude is thinking..." },
+  { t: 4.2, k: "think", s: "  Let me investigate this GCP alert about high CPU load average on a GKE node." },
+  { t: 5.4, k: "appr", s: "System: [AUTO-APPROVED] Query the CPU load 1m metric for the specific GKE node over the past 2 hours" },
+  { t: 5.6, k: "cmd", s: '  cloud_metrics.py query -m compute.googleapis.com/guest/cpu/load_1m \\\n    -f \'metric.labels.instance_name="gke-prod-pool-4bde38d8-tn3e"\' -d 2h --stats' },
+  { t: 6.8, k: "appr", s: "System: [AUTO-APPROVED] Query Kubernetes container CPU usage on the specific node to identify top consumers" },
+  { t: 7.0, k: "cmd", s: "  cloud_metrics.py query -m kubernetes.io/container/cpu/core_usage_time \\\n    --aligner ALIGN_RATE --top 20 --stats" },
+  { t: 8.2, k: "appr", s: "System: [AUTO-APPROVED] Query VM-level CPU utilization for the specific instance" },
+  { t: 8.4, k: "cmd", s: "  cloud_metrics.py query -m compute.googleapis.com/instance/cpu/utilization --aligner ALIGN_MEAN" },
+  { t: 9.8, k: "think", s: "Claude is thinking..." },
+  { t: 10.6, k: "think", s: "  Key findings so far:\n  1. CPU load_1m spiked massively in two waves:\n     - Spike 1: ~00:17-00:26 UTC, peak 76.38\n     - Spike 2: ~00:34-00:37+ UTC, peak 79.95+\n  2. The `password-exchange` container is the TOP CPU consumer during the spike window\n  3. VM CPU utilization is at 43.73%" },
+  { t: 12.6, k: "appr", s: "System: [AUTO-APPROVED] Query container restarts, disk I/O, and password-exchange pod CPU timeline to finalize root cause" },
+  { t: 12.8, k: "cmd", s: "  cloud_metrics.py query -m compute.googleapis.com/instance/disk/read_bytes_count --aligner ALIGN_RATE" },
+  { t: 14.0, k: "think", s: "Claude is thinking..." },
+  { t: 14.8, k: "think", s: "  Load average of 76-80 with only 43% CPU utilization strongly indicates disk I/O pressure." },
+  { t: 16.4, k: "log", s: "INFO complete_investigation called" },
+  { t: 16.8, k: "done", s: "[AlertHandler] Investigation completed: status=completed, findings=8, confidence=0.82" },
+  { t: 17.2, k: "log", s: "[AlertHandler] Findings:" },
+  { t: 17.5, k: "find", s: "  1. TWO distinct spike events confirmed on node gke-prod-pool-4bde38d8-tn3e: Spike 1 at 00:17–00:26 UTC (peak load 76.38), Spike 2 at 00:34–00:37+ UTC (peak 79.95)." },
+  { t: 17.8, k: "find", s: "  2. Critical discrepancy: node load_1m peaked at 76–80, but VM CPU utilization was only 43.7% (max)." },
+  { t: 18.1, k: "find", s: "  3. Disk read activity confirmed during spike window on the permanent disk: peak 1.6 MB/s reads, avg 442 KB/s." },
+  { t: 18.4, k: "find", s: "  4. Primary culprit identified: container 'password-exchange' in pod passwordexchange-dev-deployment-9bdcb7d96-q6gsr shows PERFECT timing correlation with both spikes." },
+  { t: 18.7, k: "find", s: "  … 4 more" },
+];
+---
+
+<div class="term" data-replay>
+  <div class="term-bar mono" aria-hidden="true">
+    <span>agent serve</span>
+    <button type="button" class="term-replay" hidden>↻ Replay</button>
+  </div>
+  <pre class="term-body" aria-label="Abridged transcript of the agent investigating a GKE node load alert">{lines.map((l) => (
+    <span class={`ln ln--${l.k}`} style={`--t:${l.t}s`}>{l.k === "prompt" && <span class="ps">$ </span>}{l.s}{"\n"}</span>
+  ))}</pre>
+</div>
+
+<script>
+  // Restart the CSS replay by re-inserting the transcript.
+  for (const root of document.querySelectorAll<HTMLElement>("[data-replay]")) {
+    const btn = root.querySelector<HTMLButtonElement>(".term-replay");
+    if (!btn || matchMedia("(prefers-reduced-motion: reduce)").matches) continue;
+    btn.hidden = false;
+    btn.addEventListener("click", () => {
+      const body = root.querySelector(".term-body");
+      body?.replaceWith(body.cloneNode(true));
+    });
+  }
+</script>
