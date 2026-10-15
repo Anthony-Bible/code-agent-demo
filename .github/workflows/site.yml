@@ -85,10 +85,13 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          # --json prints only the result object on stdout; logs and warnings go to stderr.
-          out=$(pnpm exec wrangler preview --name "pr-${{ github.event.pull_request.number }}" --json)
+          # On failure the error is also JSON on stdout, so print it before failing the step.
+          rc=0
+          out=$(pnpm exec wrangler preview --name "pr-${{ github.event.pull_request.number }}" --json) || rc=$?
           printf '%s\n' "$out"
-          url=$(printf '%s' "$out" | jq -r '.preview.urls[0] // empty')
+          [ "$rc" -eq 0 ] || exit "$rc"
+          # Asset upload progress is printed to stdout before the JSON object.
+          url=$(printf '%s\n' "$out" | sed -n '/^{/,$p' | jq -r '.preview.urls[0] // empty')
           if [ -z "$url" ]; then
             echo "::warning::Preview deployed, but it has no active URL."
           fi

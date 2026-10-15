@@ -10,7 +10,9 @@
   },
   // Requires the noalarms.dev zone to be active on this Cloudflare account.
   "routes": [{ "pattern": "noalarms.dev", "custom_domain": true }],
-  // workers.dev stays on so `wrangler versions upload` can hand out PR preview URLs.
+  // workers.dev stays on so `wrangler preview` can hand out PR preview URLs.
   "workers_dev": true,
-  "preview_urls": true
+  "preview_urls": true,
+  // Required by `wrangler preview`. Previews inherit the settings above.
+  "previews": {}
 }
