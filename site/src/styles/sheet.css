@@ -194,7 +194,10 @@ code { font-family: var(--mono); font-size: 0.86em; letter-spacing: 0; }
 @media (prefers-reduced-motion: reduce) {
   .term-body { justify-content: flex-start; overflow-y: auto; mask-image: none; }
 }
-@keyframes ln-in { from { max-height: 0; opacity: 0; } to { max-height: 12em; opacity: 1; } }
+/* The end height only has to exceed the tallest entry when wrapped at phone width. */
+@keyframes ln-in { from { max-height: 0; opacity: 0; } to { max-height: 60em; opacity: 1; } }
+.term.is-static .ln { animation: none; max-height: none; opacity: 1; }
+.term.is-static .term-body { justify-content: flex-start; overflow-y: auto; mask-image: none; }
 /* Registration crosses at the corners. */
 .frame::before, .frame::after, .figure .reg::before, .figure .reg::after {
   content: ""; position: absolute; width: 22px; height: 22px;

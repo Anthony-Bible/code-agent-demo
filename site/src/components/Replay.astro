@@ -36,9 +36,9 @@ const lines: Line[] = [
 ---
 
 <div class="term" data-replay>
-  <div class="term-bar mono" aria-hidden="true">
-    <span>agent serve</span>
-    <button type="button" class="term-replay" hidden>↻ Replay</button>
+  <div class="term-bar mono">
+    <span aria-hidden="true">agent serve</span>
+    <button type="button" class="term-replay" hidden>■ Stop</button>
   </div>
   <pre class="term-body">{lines.map((l) => (
     <span class={`ln ln--${l.k}`} style={`--t:${l.t}s`}>{l.k === "prompt" && <span class="ps">$ </span>}{l.s}{"\n"}</span>
@@ -46,14 +46,31 @@ const lines: Line[] = [
 </div>
 
 <script>
-  // Restart the CSS replay by re-inserting the transcript.
+  // While the replay plays, the button stops it and shows the whole transcript.
+  // After that, the button restarts it by re-inserting the transcript.
   for (const root of document.querySelectorAll<HTMLElement>("[data-replay]")) {
     const btn = root.querySelector<HTMLButtonElement>(".term-replay");
     if (!btn || matchMedia("(prefers-reduced-motion: reduce)").matches) continue;
-    btn.hidden = false;
-    btn.addEventListener("click", () => {
-      const body = root.querySelector(".term-body");
-      body?.replaceWith(body.cloneNode(true));
+
+    const stopped = (label: string) => {
+      root.classList.add("is-static");
+      btn.textContent = label;
+    };
+    root.addEventListener("animationend", (e) => {
+      if (e.target === root.querySelector(".ln:last-child")) stopped("↻ Replay");
     });
+    btn.addEventListener("click", () => {
+      const body = root.querySelector<HTMLElement>(".term-body");
+      if (!body) return;
+      if (root.classList.contains("is-static")) {
+        root.classList.remove("is-static");
+        body.replaceWith(body.cloneNode(true));
+        btn.textContent = "■ Stop";
+      } else {
+        stopped("↻ Replay");
+        body.scrollTop = body.scrollHeight;
+      }
+    });
+    btn.hidden = false;
   }
 </script>
