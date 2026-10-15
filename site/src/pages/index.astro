@@ -1,0 +1,226 @@
+---
+import "@fontsource-variable/archivo/wdth.css";
+import "@fontsource/b612-mono/400.css";
+import "../styles/sheet.css";
+import Replay from "../components/Replay.astro";
+import { execSync } from "node:child_process";
+
+const repo = "https://github.com/Anthony-Bible/code-agent-demo";
+const src = (path: string) => `${repo}/${path.endsWith("/") ? "tree" : "blob"}/main/${path}`;
+
+// Real revision and build date go in the title block; nothing on this sheet is made up.
+function revision(): string {
+  if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA.slice(0, 7);
+  try {
+    return execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+  } catch {
+    return "local";
+  }
+}
+const rev = revision();
+const built = new Date().toISOString().slice(0, 10);
+
+const description =
+  "An open-source agent in Go. It receives Prometheus and GCP Monitoring alerts, finds the root cause and writes a report.";
+
+const steps = [
+  {
+    pin: "01",
+    type: "PrometheusSource · GCPMonitoringSource",
+    title: "Receive",
+    body: "Alertmanager or Cloud Monitoring sends a POST request to /alerts/{source}. You set the path for each source. Basic auth is optional.",
+  },
+  {
+    pin: "02",
+    type: "InvestigationRunner",
+    title: "Investigate",
+    body: "The model uses bash, file and fetch tools. It can also send tasks to subagents. A validator checks each shell command before the command runs.",
+  },
+  {
+    pin: "03",
+    type: "RCAService",
+    title: "Correlate",
+    body: "RCAService changes the findings into a list of causes and a list of remedies. Each cause has a confidence score.",
+  },
+];
+
+const parts = [
+  { group: "Core" },
+  { n: 1, part: "Structured RCA", where: "internal/domain/entity/rca.go", note: "The RCAFinding, Cause and Remedy types." },
+  { n: 2, part: "Command safety", where: "internal/domain/safety/", note: "Blacklist mode is the default. Whitelist mode allows only the commands on the list. The default list is read-only." },
+  { n: 3, part: "Subagents", where: "internal/infrastructure/adapter/subagent/", note: "Each subagent has its own context. A subagent cannot start other subagents." },
+  { n: 4, part: "Skills", where: "skills/", note: "SKILL.md files in agentskills.io format. The agent loads a skill only when it needs the skill." },
+  { n: 5, part: "Plan mode", where: "internal/infrastructure/adapter/tool/planning_executor_adapter.go", note: "The agent writes each tool call to .agent/plans/. The agent does not run the tool calls." },
+  { n: 6, part: "Auto-compaction", where: "internal/domain/service/conversation_service.go", note: "When the conversation is more than 160k tokens, the agent makes a summary. You can change this limit." },
+  { group: "Inputs" },
+  { n: 7, part: "Prometheus Alertmanager", where: "internal/infrastructure/adapter/alert/prometheus_source.go", note: "Receives standard Alertmanager webhook payloads." },
+  { n: 8, part: "GCP Monitoring", where: "internal/infrastructure/adapter/alert/gcp_monitoring_source.go", note: "Receives Cloud Monitoring notification payloads." },
+] as const;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>noalarms: AI alert investigation agent</title>
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#0C3A63" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="canonical" href="https://noalarms.dev/" />
+    <meta property="og:title" content="No alarms." />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content="https://noalarms.dev/" />
+    <meta property="og:image" content="https://noalarms.dev/media/demo-poster.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body>
+    <div class="sheet">
+      <div class="zones zones--top" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span></div>
+
+      <header class="inner masthead">
+        <a class="wordmark" href="/">noalarms.dev</a>
+        <nav class="mono" aria-label="Sections">
+          <a href="#path">Signal path</a>
+          <a href="#output">Output</a>
+          <a href="#parts">Parts list</a>
+          <a href={repo}>Source ↗</a>
+        </nav>
+      </header>
+
+      <main>
+        <section class="inner zone hero" data-zone="A">
+          <p class="mono">Open-source alert investigation agent. Written in Go.</p>
+          <h1 class="headline">
+            <span class="line">No</span>
+            <span class="line">alarms<span class="stop">.</span></span>
+          </h1>
+          <p class="callout">
+            <span class="leader" aria-hidden="true"></span>
+            <span>If the agent stops before it finds the cause, it escalates the investigation. Escalation writes a log entry. It does not page a person.</span>
+          </p>
+
+          <div class="hero-text">
+            <p class="lede">
+              The agent receives alerts from Alertmanager and GCP Monitoring. For each alert, a model runs{" "}
+              <em>shell commands and metric queries</em>. Then the model writes the root cause and the evidence.
+            </p>
+            <div class="hero-aside">
+              <p>You run the agent on your infrastructure. You supply the API key for the model.</p>
+              <a class="source-link" href={repo}>Read the source code on GitHub ↗</a>
+            </div>
+          </div>
+
+          <figure class="figure">
+            <div class="frame">
+              <Replay />
+              <span class="reg" aria-hidden="true"></span>
+            </div>
+            <figcaption>
+              <span class="mono">Fig. 1</span>
+              <span>A replay of a real run for a GKE node load alert. The transcript is shorter than the original. The agent found that one pod caused the load spikes. This is the last log line:</span>
+              <code class="readout">[AlertHandler] Investigation completed: status=completed, findings=8, <b>confidence=0.82</b></code>
+            </figcaption>
+          </figure>
+        </section>
+
+        <section class="inner zone" id="path" data-zone="B">
+          <div class="sec-head">
+            <h2>Signal path</h2>
+            <span class="mono">Each label is a Go type in the repository</span>
+          </div>
+          <ol class="path">
+            {steps.map((s) => (
+              <li class="node">
+                <span class="pin" aria-hidden="true"><span>{s.pin}</span></span>
+                <code class="type mono">{s.type}</code>
+                <h3>{s.title}</h3>
+                <p>{s.body}</p>
+              </li>
+            ))}
+            <li class="node node--decide">
+              <span class="pin" aria-hidden="true"><span>?</span></span>
+              <code class="type mono">EscalationHandler</code>
+              <h3>Escalate?</h3>
+              <dl class="branches">
+                <div class="yes"><dt>Yes</dt><dd>The agent called <code>escalate_investigation</code>, the time limit expired, or the agent used all 20 actions. The handler writes a log entry.</dd></div>
+                <div><dt>No</dt><dd>The investigation completes. The investigation keeps the RCA.</dd></div>
+              </dl>
+            </li>
+          </ol>
+        </section>
+
+        <section class="inner zone" id="output" data-zone="C">
+          <div class="sec-head">
+            <h2>Output</h2>
+            <span class="mono">entity.RCAFinding</span>
+          </div>
+          <div class="detail">
+            <pre class="struct" aria-label="Shape of an RCAFinding"><span class="k">RCAFinding</span> {"{"}
+  <span class="k">summary</span>   <span class="t">string</span>
+  <span class="k">causes</span>    <span class="t">[]Cause</span><span class="balloon">1</span>
+    <span class="c">description, confidence_score 0.0–1.0, evidence[]</span>
+  <span class="k">remedies</span>  <span class="t">[]Remedy</span><span class="balloon">2</span>
+    <span class="c">description, actionable_steps[], impact</span> <span class="b">High|Medium|Low</span>
+{"}"}</pre>
+            <ol class="notes">
+              <li>
+                <span class="balloon">1</span>
+                <p>Each cause has a confidence score from 0 to 1. Each cause also has the evidence that the model used.</p>
+              </li>
+              <li>
+                <span class="balloon">2</span>
+                <p>Each remedy has a list of steps. Each remedy also has an impact level: High, Medium or Low.</p>
+              </li>
+            </ol>
+          </div>
+        </section>
+
+        <section class="inner zone" id="parts" data-zone="D">
+          <div class="sec-head">
+            <h2>Parts list</h2>
+            <span class="mono">Go · Apache 2.0</span>
+          </div>
+          <table class="parts">
+            <thead class="mono">
+              <tr><th scope="col">Item</th><th scope="col">Part</th><th scope="col">Location</th><th scope="col">Note</th></tr>
+            </thead>
+            <tbody>
+              {parts.map((p) =>
+                "group" in p ? (
+                  <tr class="group"><td colspan="4" class="mono">{p.group}</td></tr>
+                ) : (
+                  <tr>
+                    <td><span class="balloon">{p.n}</span></td>
+                    <td class="part">{p.part}</td>
+                    <td class="where"><a href={src(p.where)}>{p.where}</a></td>
+                    <td class="note">{p.note}</td>
+                  </tr>
+                ),
+              )}
+            </tbody>
+          </table>
+        </section>
+      </main>
+
+      <footer class="inner end">
+        <a class="stamp" href={repo}>
+          <span class="big">Approved for<br />production sleep</span>
+          <span class="small">★ Star this repository on GitHub ↗</span>
+        </a>
+        <dl class="titleblock">
+          <div class="wide"><dt>Title</dt><dd>AI Alert Investigation Agent</dd></div>
+          <div class="half"><dt>Source</dt><dd class="mono-val"><a href={repo}>Anthony-Bible/code-agent-demo</a></dd></div>
+          <div><dt>License</dt><dd>Apache 2.0</dd></div>
+          <div><dt>Lang</dt><dd>Go</dd></div>
+          <div><dt>Rev</dt><dd class="mono-val">{rev}</dd></div>
+          <div><dt>Date</dt><dd class="mono-val">{built}</dd></div>
+          <div><dt>Scale</dt><dd>NTS</dd></div>
+          <div><dt>Sheet</dt><dd>1 of 1</dd></div>
+        </dl>
+      </footer>
+
+      <div class="zones zones--bottom" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span></div>
+    </div>
+  </body>
+</html>

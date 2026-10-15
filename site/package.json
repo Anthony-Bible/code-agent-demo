@@ -1,0 +1,23 @@
+{
+  "name": "noalarms-site",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.11.2",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "wrangler dev",
+    "deploy": "astro build && wrangler deploy"
+  },
+  "dependencies": {
+    "@fontsource-variable/archivo": "5.3.0",
+    "@fontsource/b612-mono": "5.3.0",
+    "astro": "7.3.8"
+  },
+  "devDependencies": {
+    "wrangler": "4.151.0"
+  }
+}

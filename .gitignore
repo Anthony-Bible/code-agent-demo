@@ -25,3 +25,6 @@ logs/*.log
 
 # Code review files
 REVIEW-*.md
+
+# Local secrets
+.env

@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "noalarms",
+  "compatibility_date": "2026-10-14",
+  // Assets-only Worker: no `main`, Astro's static build is served as-is.
+  "assets": {
+    "directory": "./dist/",
+    "not_found_handling": "404-page",
+    "html_handling": "auto-trailing-slash"
+  },
+  // Requires the noalarms.dev zone to be active on this Cloudflare account.
+  "routes": [{ "pattern": "noalarms.dev", "custom_domain": true }],
+  // workers.dev stays on so `wrangler preview` can hand out PR preview URLs.
+  "workers_dev": true,
+  "preview_urls": true,
+  // Required by `wrangler preview`. Previews inherit the settings above.
+  "previews": {}
+}

@@ -1,0 +1,218 @@
+name: Site
+
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", ".github/workflows/site.yml"]
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches: [main]
+    paths: ["site/**", ".github/workflows/site.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  # Never cancel a production deploy halfway through.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    # Explicit shell turns on pipefail, so a wrangler failure behind `| tee` fails the step.
+    shell: bash
+    working-directory: site
+
+jobs:
+  build:
+    name: Build
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          package_json_file: site/package.json
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: site/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: site-dist
+          path: site/dist
+          retention-days: 3
+
+  # Forked PRs get no secrets, so they stop at the build check above.
+  preview:
+    name: Preview
+    if: github.event_name == 'pull_request' && github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          package_json_file: site/package.json
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: site/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: site-dist
+          path: site/dist
+
+      - name: Deploy Preview
+        id: upload
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          # On failure the error is also JSON on stdout, so print it before failing the step.
+          rc=0
+          out=$(pnpm exec wrangler preview --name "pr-${{ github.event.pull_request.number }}" --json) || rc=$?
+          printf '%s\n' "$out"
+          [ "$rc" -eq 0 ] || exit "$rc"
+          # Asset upload progress is printed to stdout before the JSON object.
+          url=$(printf '%s\n' "$out" | sed -n '/^{/,$p' | jq -r '.preview.urls[0] // empty')
+          if [ -z "$url" ]; then
+            echo "::warning::Preview deployed, but it has no active URL."
+          fi
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+
+      - name: Comment preview URL
+        if: steps.upload.outputs.url != ''
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          PREVIEW_URL: ${{ steps.upload.outputs.url }}
+        with:
+          script: |
+            const marker = "<!-- noalarms-preview -->";
+            const body = `${marker}\n**Site preview:** ${process.env.PREVIEW_URL}\n\nBuilt from ${context.payload.pull_request.head.sha.slice(0, 7)}.`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const existing = comments.find((c) => c.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+  cleanup:
+    name: Delete preview
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          package_json_file: site/package.json
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: site/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Find preview comment
+        id: comment
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const marker = "<!-- noalarms-preview -->";
+            const { owner, repo } = context.repo;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: context.issue.number });
+            const existing = comments.find((c) => c.body?.includes(marker));
+            core.setOutput("id", existing?.id ?? "");
+            core.setOutput("url", existing?.body?.match(/https:\/\/\S+\.workers\.dev/)?.[0] ?? "");
+
+      - name: Delete Preview
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        # -y is required: without it, the prompt aborts in CI and wrangler still exits 0.
+        run: pnpm exec wrangler preview delete --name "pr-${{ github.event.pull_request.number }}" -y
+
+      # A deleted Preview URL has been seen to keep serving for hours (cloudflare/developer-platform#73).
+      - name: Check preview URL stopped
+        if: steps.comment.outputs.url != ''
+        env:
+          PREVIEW_URL: ${{ steps.comment.outputs.url }}
+        run: |
+          for _ in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$PREVIEW_URL" || true)
+            if [ "$code" != "200" ]; then
+              echo "Preview URL returns ${code}."
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "::warning::${PREVIEW_URL} still returns 200 two minutes after the Preview was deleted."
+
+      - name: Mark preview comment deleted
+        if: steps.comment.outputs.id != ''
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          COMMENT_ID: ${{ steps.comment.outputs.id }}
+        with:
+          script: |
+            const body = "<!-- noalarms-preview -->\n**Site preview:** deleted when this PR closed.";
+            await github.rest.issues.updateComment({ ...context.repo, comment_id: Number(process.env.COMMENT_ID), body });
+
+  deploy:
+    name: Deploy
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://noalarms.dev
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          package_json_file: site/package.json
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: site/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: site-dist
+          path: site/dist
+
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy

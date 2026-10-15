@@ -1,7 +1,7 @@
 # AI Alert Investigation Agent
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-blue.svg)](https://go.dev/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Build Status](https://github.com/Anthony-Bible/code-agent-demo/actions/workflows/ci.yml/badge.svg)](https://github.com/Anthony-Bible/code-agent-demo/actions)
 
 A Go-based AI-powered alert investigation agent built with hexagonal (clean) architecture. The agent receives alerts via webhooks from monitoring systems (Prometheus, GCP Monitoring), automatically investigates them using AI-driven root cause analysis, and provides structured findings with confidence levels and escalation support.
