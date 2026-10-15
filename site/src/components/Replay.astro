@@ -40,7 +40,7 @@ const lines: Line[] = [
     <span>agent serve</span>
     <button type="button" class="term-replay" hidden>↻ Replay</button>
   </div>
-  <pre class="term-body" aria-label="Abridged transcript of the agent investigating a GKE node load alert">{lines.map((l) => (
+  <pre class="term-body">{lines.map((l) => (
     <span class={`ln ln--${l.k}`} style={`--t:${l.t}s`}>{l.k === "prompt" && <span class="ps">$ </span>}{l.s}{"\n"}</span>
   ))}</pre>
 </div>
